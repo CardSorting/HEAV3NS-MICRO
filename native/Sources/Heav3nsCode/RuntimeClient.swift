@@ -82,11 +82,24 @@ final class RuntimeClient {
         let environment = ProcessInfo.processInfo.environment
         let node = EngineManager.shared.resolveNode(override: nodeOverride, environment: environment)
         let cli = EngineManager.shared.resolveCLI(override: cliOverride, environment: environment)
-        guard FileManager.default.isExecutableFile(atPath: node.path), FileManager.default.fileExists(atPath: cli.path) else {
-            fail("The bundled LUMI runtime is missing. Rebuild or reinstall this application."); return
-        }
         let child = Process()
-        child.executableURL = node; child.arguments = [cli.path, "--desktop-worker"]
+        if let nodeOverride, FileManager.default.isExecutableFile(atPath: nodeOverride.path) {
+            guard FileManager.default.fileExists(atPath: cli.path) else {
+                fail("The specified runtime script is missing."); return
+            }
+            child.executableURL = nodeOverride; child.arguments = [cli.path, "--desktop-worker"]
+        } else {
+            let (execURL, isBinary, execArgs) = EngineManager.shared.resolveExecutable(override: cliOverride, environment: environment)
+            if isBinary && FileManager.default.isExecutableFile(atPath: execURL.path) {
+                child.executableURL = execURL; child.arguments = execArgs
+            } else if FileManager.default.isExecutableFile(atPath: node.path) && FileManager.default.fileExists(atPath: cli.path) {
+                child.executableURL = node; child.arguments = [cli.path, "--desktop-worker"]
+            } else if FileManager.default.isExecutableFile(atPath: execURL.path) {
+                child.executableURL = execURL; child.arguments = execArgs
+            } else {
+                fail("The bundled HEAV3NS runtime is missing. Rebuild or reinstall this application."); return
+            }
+        }
         child.currentDirectoryURL = folder
         let onDeviceEnv = OnDevicePlaygroundService.shared.workerEnvironment()
         child.environment = onDeviceEnv.merging(environment) { _, existing in existing }.merging([
