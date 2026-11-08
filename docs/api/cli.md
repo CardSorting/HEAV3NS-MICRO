@@ -5,10 +5,11 @@
   <a href="README.md">API Hub</a> ·
   <a href="public-api.md">Public API</a> ·
   <a href="errors.md">Errors</a> ·
-  <a href="../OPERATIONS.md">Operations</a>
+  <a href="../OPERATIONS.md">Operations</a> ·
+  <a href="../architecture/current.md">Architecture</a>
 </p>
 
-Complete reference for command-line arguments, environment variables, slash commands, and the stdio JSONL worker protocol for **HEAV3NS-MICRO**.
+Complete normative reference for command-line arguments, environment variables, slash commands, and the bidirectional Stdio JSON-RPC protocol (`v: 1`) powering the CLI and AppKit native desktop client (`native/`).
 
 ---
 
@@ -23,21 +24,23 @@ USAGE:
 
 | Flag | Long Flag | Description |
 | :--- | :--- | :--- |
-| *(none)* | *(default)* | Starts an interactive pair-programming REPL session. |
-| `-p` | `--prompt <TEXT>` | Executes a single agent turn with the given prompt and exits. |
+| *(none)* | *(default)* | Starts an interactive pair-programming REPL session in the terminal. |
+| `-p` | `--prompt <TEXT>` | Executes a single agent turn with the given prompt and exits cleanly. |
 | *(none)* | `--flight` / `--benchmark-flight` | Runs the 5-scenario Agent Flight benchmark suite (`FT-01..FT-05`). |
 | *(none)* | `--bench` | Runs substrate micro-benchmarks along with the flight suite. |
 | *(none)* | `--smoke` | Executes deterministic runtime self-checks and smoke verification. |
-| *(none)* | `--stdio` | Runs the headless newline-delimited JSONL worker protocol. |
+| *(none)* | `--stdio` | Runs the headless newline-delimited JSON-RPC worker protocol over stdin/stdout. |
 
 ### Configuration Options
 
 | Flag | Parameter | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `-m` | `--model <NAME>` | `gpt-5.6-terra` | Target model name passed to provider requests. |
+| `-m` | `--model <NAME>` | `gpt-5.6-terra` | Target LLM model name passed to provider requests. |
 | *(none)* | `--provider <NAME>` | `openai` | Protocol format: `openai`, `anthropic`, or `gemini`. |
 | *(none)* | `--endpoint <URL>` | *(official default)* | Custom API endpoint URL for self-hosted or proxy models. |
 | *(none)* | `--cwd <DIR>` | `.` | Sets the active workspace root directory. |
+| *(none)* | `--desktop-worker` | `false` | Enables full desktop IDE RPC dispatch mode for `native/`. |
+| *(none)* | `--desktop-account <ACC>` | *(none)* | Configures specific authenticated account context for desktop worker. |
 | *(none)* | `--format <FMT>` | `text` | Flight output format: `text` or `json`. |
 | `-o` | `--output <PATH>` | *(none)* | Writes the JSON flight benchmark report to a file. |
 | `-h` | `--help` | *(none)* | Displays usage instructions and exits. |
@@ -56,45 +59,158 @@ USAGE:
 
 ---
 
-## 3. Stdio JSONL Worker Protocol (`--stdio`)
+## 3. Interactive Slash Commands (REPL Mode)
 
-When spawned with `--stdio`, HEAV3NS-MICRO communicates via newline-delimited JSON RPC on standard I/O:
+When running in interactive REPL mode, commands starting with `/` execute deterministic control routines without LLM inference:
 
-### Turn Request Schema
+| Command | Arguments | Description |
+| :--- | :--- | :--- |
+| `/help` | *(none)* | Displays available commands and runtime shortcuts. |
+| `/status` | *(none)* | Prints current session state, transcript length, context budget, and arena memory usage. |
+| `/compact` | `[RATIO]` | Triggers deterministic transcript compaction (default threshold: 75%). |
+| `/clear` | *(none)* | Clears active conversation memory while preserving VFS baseline. |
+| `/memory` | `[KEY] [VAL]` | Inspects, sets, or lists entries in the persistent `MemoryStore`. |
+| `/vfs` | `[diff\|staged]` | Inspects staged virtual file system modifications. |
+| `/commit` | *(none)* | Atomically flushes staged VFS edits to disk with conflict detection. |
+| `/skills` | *(none)* | Ingests and lists available `.agents/skills/` capabilities. |
+| `/rewind` | `[TICKS]` | Performs $O(1)$ multi-state rewind using `SlabBufferSnapshot`. |
+| `/doctor` | *(none)* | Executes architectural self-diagnostics and health checks. |
+
+---
+
+## 4. Stdio JSON-RPC Protocol Specification (`v: 1`)
+
+When spawned with `--stdio` (and optionally `--desktop-worker`), `heav3ns-micro` acts as a deterministic JSON-RPC 2.0 host communicating over standard I/O. 
+
+### Protocol Invariants
+1. **Single-Line Framing**: Every message is serialized as a single JSON object terminated by `\n`.
+2. **Version Tagging**: Every outbound frame emitted by `heav3ns-micro` includes `"v": 1` as verified by `ControlFrameReader.swift`.
+3. **Stderr Isolation**: Diagnostic logs, traces, and panics are routed exclusively to `stderr` to prevent frame desynchronization on `stdout`.
+
+### Startup & Connection Handshake
+
+Immediately upon launching, the worker outputs a ready event:
 ```json
-{
-  "jsonrpc": "2.0",
-  "method": "turn",
-  "params": {
-    "prompt": "String",
-    "authority": "WorkspaceWrite"
-  },
-  "id": 1
-}
+{"v": 1, "type": "connection", "state": "ready"}
 ```
 
-### Streaming Progress Event Schema
+The host client then performs an initialization call to negotiate capabilities:
+
+#### Request (`initialize`)
 ```json
 {
   "jsonrpc": "2.0",
-  "method": "progress",
+  "id": 1,
+  "method": "initialize",
   "params": {
-    "step": "executing_tool",
-    "tool": "fs_read",
-    "arguments": "{\"path\":\"Cargo.toml\"}"
+    "capabilities": [
+      "conversations",
+      "spider-check-v1",
+      "runtime-state-v1",
+      "task-continuation-v1",
+      "project-repair-v1",
+      "checkpoints-v1",
+      "run-details",
+      "queue-edit",
+      "queue-remove"
+    ]
   }
 }
 ```
 
-### Turn Response Schema
+#### Response (`initialize`)
 ```json
 {
   "jsonrpc": "2.0",
+  "id": 1,
   "result": {
-    "response": "Agent answer...",
-    "tokens_used": 256,
-    "staged_files": ["src/domain/arena.rs"]
-  },
-  "id": 1
+    "protocolVersion": "1.0",
+    "capabilities": [
+      "conversations",
+      "spider-check-v1",
+      "runtime-state-v1",
+      "task-continuation-v1",
+      "project-repair-v1",
+      "checkpoints-v1",
+      "run-details",
+      "queue-edit",
+      "queue-remove"
+    ],
+    "workspace": "ws-1731099600",
+    "session": "session-default"
+  }
 }
 ```
+
+---
+
+## 5. Desktop RPC Method Catalog
+
+### Snapshot & Synchronization (`snapshot`)
+Requests complete snapshot of workspace state, active runs, and transcript history.
+- **Request**: `{"jsonrpc": "2.0", "id": 2, "method": "snapshot", "params": {}}`
+- **Result**:
+  ```json
+  {
+    "workspace": "ws-1731099600",
+    "session": "session-default",
+    "runtime": "heav3ns-micro-0.1.0",
+    "seq": 4,
+    "runs": [
+      {
+        "id": "run-001",
+        "state": "completed",
+        "text": "Refactor memory store",
+        "createdAt": 1731099600000,
+        "activities": []
+      }
+    ]
+  }
+  ```
+
+### File Operations (`files.*`)
+- **`files.list`**: Returns recursive directory structure with file sizes and modification timestamps.
+- **`files.read`**: Reads UTF-8 source code with pagination parameters (`offset`, `limit`).
+- **`files.readBinary`**: Reads binary documents (PDF, PNG, CSV) returning Base64 chunks:
+  ```json
+  {
+    "path": "docs/architecture.pdf",
+    "encoding": "base64",
+    "chunkIndex": 0,
+    "totalChunks": 1,
+    "data": "JVBERi0xLjQKJeLjz9MKMSAwIG9ia..."
+  }
+  ```
+
+### Git & Working Tree Diffs (`changes.read`)
+Returns unified diff representations of file modifications:
+- **Params**: `{"path": "src/core/engine.rs", "staged": false}`
+- **Result**: `{"path": "src/core/engine.rs", "diff": "--- a/src/core/engine.rs\n+++ b/src/core/engine.rs\n@@ -10,3 +10,4 @@\n..."}`
+
+### Spider Static Checks (`spider.check`)
+Runs local static syntax checks, import resolution, and circular dependency checks:
+- **Params**: `{"scope": "all"}`
+- **Result**:
+  ```json
+  {
+    "status": "passed",
+    "entropyScore": 0.0031,
+    "findings": [],
+    "files": ["src/lib.rs", "src/core/engine.rs"]
+  }
+  ```
+
+### Long-Term Memory Store (`memory.*`)
+- **`memory.list`**: Returns all persistent key-value facts for the workspace.
+- **`memory.save`**: Upserts a key-value memory entry with timestamp.
+- **`memory.remove`**: Deletes a memory entry by key.
+
+### Task Execution & Lifecycle (`task.*`)
+- **`task.submit`**: Submits a prompt for autonomous agent execution.
+- **`task.stop`**: Initiates immediate, safe cooperative cancellation of active work.
+- **`task.lookup`**: Queries unconfirmed submission status by UUID to safely prevent replays.
+
+### Swarm Orchestration (`swarm.*`)
+- **`swarm.plan`**: Generates a dependency-ordered multi-specialist formation graph.
+- **`swarm.next`**: Claims the next actionable specialist assignment.
+- **`swarm.report`**: Submits specialist completion evidence and marks downstream tasks ready.

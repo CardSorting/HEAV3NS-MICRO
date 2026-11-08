@@ -29,8 +29,9 @@ _Companion to the [Technical Whitepaper](whitepaper.md). All figures below are m
 | Joyzoning Build Health | **100% (`Grade: A+ — SOVEREIGN`)** | [`VALIDATION_REPORT.md`](../../VALIDATION_REPORT.md) |
 | Maximum relative import traversal | **3** (`../../..`) | `SPI-209` rule |
 | Tier 1 Optimal module size cap | **800** lines | `SPI-203` rule |
-| Architecture Decision Records (ADRs) | **9** + template | [`docs/adr/README.md`](../adr/README.md) |
-| Operational Playbooks & Postmortems | **5** playbooks · **5** postmortems | [`docs/playbooks/README.md`](../playbooks/README.md) · [`docs/postmortems/README.md`](../postmortems/README.md) |
+| Architecture Decision Records (ADRs) | **10** + template | [`docs/adr/README.md`](../adr/README.md) |
+| Native macOS AppKit Tests | **308** passed (`0` failed) | [`native/Tests/Heav3nsCodeTests/`](../../native/Tests/Heav3nsCodeTests/) |
+| Operational Playbooks & Postmortems | **6** playbooks · **5** postmortems | [`docs/playbooks/README.md`](../playbooks/README.md) · [`docs/postmortems/README.md`](../postmortems/README.md) |
 | Concept Wiki & Knowledge Base Articles | **4** wiki guides · **3** KB articles | [`docs/wiki/README.md`](../wiki/README.md) · [`docs/kb/README.md`](../kb/README.md) |
 
 ---

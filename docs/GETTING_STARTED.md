@@ -6,16 +6,18 @@
   <a href="AGENT_STACK.md">Agent Stack</a> ·
   <a href="OPERATIONS.md">Operations</a> ·
   <a href="api/cli.md">CLI Reference</a> ·
-  <a href="../README.md">Repository README</a>
+  <a href="../README.md">Repository README</a> ·
+  <a href="../native/PRODUCT.md">Native Product Spec</a>
 </p>
 
-Get up and running with **HEAV3NS-MICRO** in under 10 minutes. This tutorial guides you from compiling the Rust binary to running the 5-scenario Agent Flight suite and executing interactive turns in the CLI REPL.
+Get up and running with **HEAV3NS-MICRO** in under 10 minutes. This tutorial guides you from compiling the Rust binary to running the 5-scenario Agent Flight suite, launching the AppKit native desktop client, and executing interactive turns.
 
 ---
 
 ## Prerequisites
 
 - **Rust toolchain**: `rustc` and `cargo` (Rust `1.75` or newer, 2021 edition)
+- **Apple Swift toolchain**: Swift `5.9` or newer with macOS 14+ SDK (for `native/`)
 - **Node.js**: `node` (v18 or newer, for running `joy-check` and `docs-check`)
 - **Git**: For version control and workspace tracking
 
@@ -29,7 +31,7 @@ Clone the repository and build the release binary:
 git clone https://github.com/heav3ns-team/heav3ns-micro.git
 cd heav3ns-micro
 
-# Build the binary
+# Build the Rust substrate binary
 cargo build --release
 ```
 
@@ -58,14 +60,14 @@ test core::substrate_tests::tests::test_secret_redactor_and_sensitive_path_guard
 test core::substrate_tests::tests::test_deterministic_patch_engine_v4a_fuzzy_heal_and_symbols ... ok
 test core::substrate_tests::tests::test_agent_flight_suite_passes_100_percent ... ok
 
-test result: ok. 8 passed; 0 failed
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 ---
 
-## 3. Execute the 5-Scenario Agent Flight Benchmark
+## 3. Run the Agent Flight Test Suite
 
-HEAV3NS-MICRO features an embedded multi-turn benchmark suite ([`FlightRunner`](../src/core/flight_runner.rs)) verifying end-to-end agent capabilities without external network dependencies:
+Verify end-to-end agent capabilities against the deterministic mock provider:
 
 ```bash
 cargo run -- --flight
@@ -82,7 +84,25 @@ All 19 assertion points across the 5 scenarios must report green `PASS (100%)`.
 
 ---
 
-## 4. Run an Interactive Agent Session
+## 4. Run the Native macOS AppKit Test Suite
+
+Verify the native desktop application and its bidirectional JSON-RPC integration:
+
+```bash
+cd native
+swift test
+cd ..
+```
+
+Expected output:
+```text
+Test Suite 'All tests' passed at ...
+	 Executed 308 tests, with 6 tests skipped and 0 failures (0 unexpected)
+```
+
+---
+
+## 5. Run an Interactive Agent Session
 
 Launch an interactive prompt session:
 
@@ -107,7 +127,7 @@ Inside the REPL, you can explore the 10 built-in slash commands:
 
 ---
 
-## 5. Verify Architectural Sovereignty
+## 6. Verify Architectural Sovereignty
 
 Run the Joyzoning compliance check to verify layer purity and zero circular dependencies:
 
@@ -115,14 +135,14 @@ Run the Joyzoning compliance check to verify layer purity and zero circular depe
 # Check Joyzoning boundaries
 node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --theme strict
 
-# Check documentation links and structural taxonomies
-npm run docs:check
+# StabilityDoctor health audit
+node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --doctor
 ```
 
 ---
 
 ## Next Steps
 
-- Explore the [Agent Stack](AGENT_STACK.md) to understand the three operational surfaces.
-- Read [Substrate Primitives](PORTABLE_TRINITY.md) for details on the memory arena and VFS.
-- Review [Architecture Decision Records](adr/README.md) to understand core engineering choices.
+- Explore the [Architecture Current Spec](architecture/current.md) to understand dual-layer topology.
+- Read [ADR-0010](adr/0010-native-desktop-integration-and-rpc-protocol.md) for desktop JSON-RPC details.
+- Review [Operational Playbooks](playbooks/README.md) for incident runbooks and triage procedures.

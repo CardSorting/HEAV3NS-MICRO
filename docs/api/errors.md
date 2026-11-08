@@ -5,16 +5,17 @@
   <a href="README.md">API Hub</a> ·
   <a href="public-api.md">Public API</a> ·
   <a href="cli.md">CLI Reference</a> ·
-  <a href="../kb/symptom-diagnosis-matrix.md">Symptom Matrix</a>
+  <a href="../kb/symptom-diagnosis-matrix.md">Symptom Matrix</a> ·
+  <a href="../playbooks/README.md">Playbooks</a>
 </p>
 
-Comprehensive catalog of runtime error variants, provider codes, VFS conflict causes, and remediation guidance in **HEAV3NS-MICRO**.
+Comprehensive catalog of runtime error variants, provider codes, VFS conflict causes, desktop JSON-RPC codes, and remediation guidance in **HEAV3NS-MICRO**.
 
 ---
 
 ## 1. Substrate Error Taxonomy
 
-Errors in HEAV3NS-MICRO are organized into domain-specific error enums providing actionable error messages:
+Errors in HEAV3NS-MICRO are organized into domain-specific error enums providing actionable diagnostics:
 
 ```mermaid
 flowchart TD
@@ -23,6 +24,7 @@ flowchart TD
   SUB -->|"LLM Provider"| PROV["ProviderError (Network, RateLimit, Authentication, MalformedResponse)"]
   SUB -->|"VFS & Transactions"| VFS["VfsError (BaselineMismatch, StagingConflict, JournalCorrupt)"]
   SUB -->|"Tool Execution"| TOOL["ToolExecutionError (AuthorityDenied, ParameterInvalid, ExecutionFailed)"]
+  SUB -->|"Desktop JSON-RPC"| RPC["RpcError (ParseError, MethodNotFound, UnconfirmedSubmission, Timeout)"]
 ```
 
 ---
@@ -65,3 +67,23 @@ flowchart TD
 | `AuthorityDenied` | Tool invocation requires an authority level higher than current session setting. | Elevate session authority via `--authority` or adjust prompt scope. |
 | `SensitivePathBlocked` | Attempted access to protected filesystem path (`~/.ssh`, etc.). | Path interdicted by deterministic security policy. See [PB-05](../playbooks/secret-leakage-and-security-interdiction.md). |
 | `SecretDetected` | Sensitive credential identified in tool input or output. | Redacted automatically by `DeterministicSecretRedactor`. |
+
+---
+
+## 6. Desktop JSON-RPC Error Codes (`src/ui/rpc_dispatch.rs`)
+
+When communicating with the AppKit Native Desktop client via `--stdio --desktop-worker`, errors conform to standard JSON-RPC 2.0 error specifications:
+
+| Code | Label | Meaning | Client Handling in AppKit |
+| :---: | :--- | :--- | :--- |
+| `-32700` | `PARSE_ERROR` | Received invalid JSON framing or unclosed quote. | Reconnects transport stream; logs raw bytes. |
+| `-32600` | `INVALID_REQUEST` | Message is not a valid JSON-RPC 2.0 object. | Discards malformed frame; preserves composer draft. |
+| `-32601` | `METHOD_NOT_FOUND` | Method not supported by active runtime capabilities. | Disables UI action; presents warning pill. |
+| `-32602` | `INVALID_PARAMS` | Method parameters failed schema validation. | Rejects client request without updating state. |
+| `-32603` | `INTERNAL_ERROR` | Unhandled runtime panic or internal substrate fault. | Presents non-blocking notice with copyable error. |
+| `-32001` | `FILE_NOT_FOUND` | Inspected file does not exist in workspace tree. | Resets inspection viewport to parent directory. |
+| `-32002` | `FILE_READ_FAILED` | File exceeds maximum byte limit or is inaccessible. | Shows truncation notice or binary fallback. |
+| `-32003` | `MEMORY_SAVE_UNCERTAIN` | Persistence of conversation memory timed out. | Flushes input stream; leaves memory draft dirty. |
+| `-32004` | `SUBMISSION_UNCONFIRMED` | Runtime was interrupted before task acceptance. | Enables "Check Status" button; prevents replay. |
+| `-32005` | `TASK_LOOKUP_TIMEOUT` | Querying unconfirmed task status exceeded 200ms. | Keeps draft preserved; allows manual status check. |
+| `-32006` | `APPROVAL_REQUIRED` | Tool requires user verification before execution. | Docked approval bar displays operation details. |

@@ -24,6 +24,7 @@ flowchart TD
   START -->|"Flight test failure (FT-01..05) or parser desync"| PB3["PB-03: Flight Test Failures & Parser Desync"]
   START -->|"VfsBaselineMismatch or commit conflict"| PB4["PB-04: VFS Commit Conflict & Journal Rollback"]
   START -->|"Credential detected or sensitive path blocked"| PB5["PB-05: Secret Leakage & Security Interdiction"]
+  START -->|"Desktop unconfirmed submission or worker exit"| PB6["PB-06: Desktop IPC Disconnection & Recovery"]
 ```
 
 ---
@@ -37,6 +38,7 @@ flowchart TD
 | **[PB-03](flight-test-failures-and-parser-desync.md)** | [Flight Test Failures & Parser Desync](flight-test-failures-and-parser-desync.md) | `SEV-2` | Flight test exit `1`, JSON bracket mismatch | `cargo run -- --flight` |
 | **[PB-04](vfs-commit-conflict-and-journal-rollback.md)** | [VFS Commit Conflict & Journal Rollback](vfs-commit-conflict-and-journal-rollback.md) | `SEV-2` | `VfsBaselineMismatch`, clobbered disk write | `cargo run -- -- -p "/vfs"` |
 | **[PB-05](secret-leakage-and-security-interdiction.md)** | [Secret Leakage & Security Interdiction](secret-leakage-and-security-interdiction.md) | `SEV-1` | `SensitivePathBlocked`, unmasked token in event | `cargo test test_secret_redactor_and_sensitive_path_guard` |
+| **[PB-06](desktop-ipc-and-unconfirmed-submission-recovery.md)** | [Desktop IPC Disconnection & Recovery](desktop-ipc-and-unconfirmed-submission-recovery.md) | `SEV-2` | `SUBMISSION_UNCONFIRMED`, worker exit, Check Status | `cd native && swift test` |
 
 ---
 

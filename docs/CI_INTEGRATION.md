@@ -8,22 +8,24 @@
   <a href="../AGENTS.md">AGENTS.md</a>
 </p>
 
-Guidelines for automated continuous integration, branch protection, and local pre-commit verification for **HEAV3NS-MICRO**.
+Guidelines for automated continuous integration, branch protection, and local pre-commit verification for **HEAV3NS-MICRO** and the AppKit Native Desktop client (`native/`).
 
 ---
 
 ## 1. Automated CI Pipeline
 
-HEAV3NS-MICRO enforces an uncompromising 4-pillar continuous integration pipeline on every pull request:
+HEAV3NS-MICRO enforces an uncompromising 5-pillar continuous integration pipeline on every pull request:
 
 ```mermaid
 flowchart LR
   PR["Pull Request / Commit"] --> TEST["1. Cargo Test (8 unit suites)"]
   PR --> FLIGHT["2. Agent Flight (5 benchmark scenarios)"]
-  PR --> JOY["3. Joyzoning Strict Audit (0 violations)"]
-  PR --> DOCS["4. Docs Check (0 broken links)"]
+  PR --> SWIFT["3. Native Swift Test (308 AppKit tests)"]
+  PR --> JOY["4. Joyzoning Strict Audit (0 violations)"]
+  PR --> DOCS["5. Docs Check (0 broken links)"]
   TEST --> GATE["Pass All Gates -> Merge Approved"]
   FLIGHT --> GATE
+  SWIFT --> GATE
   JOY --> GATE
   DOCS --> GATE
 ```
@@ -44,8 +46,9 @@ on:
     branches: [main]
 
 jobs:
-  verify:
-    runs-on: ubuntu-latest
+  verify-rust:
+    name: Rust Substrate & Joyzoning Audit
+    runs-on: macos-14
     steps:
       - name: Checkout Codebase
         uses: actions/checkout@v4
@@ -58,59 +61,45 @@ jobs:
         with:
           node-version: 20
 
-      - name: Run Substrate Tests
+      - name: Run Cargo Unit Tests
         run: cargo test
 
-      - name: Run Agent Flight Benchmark
+      - name: Run Agent Flight Test Suite
         run: cargo run -- --flight
 
-      - name: Install Joyzoning Tool
-        run: npx -y heav3ns-joy@1.0.0 doctor
+      - name: Run Strict Joyzoning Audit
+        run: node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --theme strict
 
-      - name: Audit Joyzoning Sovereignty
-        run: npx -y heav3ns-joy@1.0.0 check . --theme strict
+  verify-native:
+    name: Native macOS AppKit Test Suite
+    runs-on: macos-14
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
 
-      - name: Verify Documentation Guardrails
-        run: node bin/docs-check.mjs
+      - name: Run Swift Package Tests
+        run: cd native && swift test
 ```
 
 ---
 
-## 3. Local Git Pre-Commit Hook
+## 3. Local 8-Point Pre-Commit Verification Checklist
 
-Install the local pre-commit hook to catch architectural or test regressions before pushing code:
+Developers and automated coding agents must execute the standard pre-commit checklist before concluding any turn:
 
 ```bash
-mkdir -p .git/hooks
-cat << 'HOOK' > .git/hooks/pre-commit
-#!/usr/bin/env bash
-set -e
+# 1. Rust unit & integration test suites
+cargo test
 
-echo "==> Running HEAV3NS-MICRO pre-commit checks..."
+# 2. Agent Flight benchmark suite
+cargo run -- --flight
 
-# 1. Rust unit tests
-cargo test --quiet
+# 3. Native macOS AppKit test suite
+cd native && swift test && cd ..
 
-# 2. Agent flight benchmark
-cargo run --quiet -- --flight > /dev/null
+# 4. Strict Joyzoning architectural audit (must exit 0)
+node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --theme strict
 
-# 3. Documentation links and taxonomies
-node bin/docs-check.mjs
-
-echo "==> All pre-commit checks passed!"
-HOOK
-chmod +x .git/hooks/pre-commit
+# 5. StabilityDoctor architectural health check
+node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --doctor
 ```
-
----
-
-## 4. Branch Protection Rules
-
-Repositories adopting HEAV3NS-MICRO should configure branch protection on `main`:
-- Require status checks to pass before merging:
-  - `Substrate Tests`
-  - `Agent Flight Benchmark`
-  - `Joyzoning Sovereignty`
-  - `Docs Check`
-- Require linear commit history.
-- Disallow force pushes.

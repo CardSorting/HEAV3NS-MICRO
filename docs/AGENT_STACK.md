@@ -6,18 +6,20 @@
   <a href="PORTABLE_TRINITY.md">Substrate Primitives</a> ·
   <a href="architecture/current.md">Architecture</a> ·
   <a href="api/public-api.md">Public API</a> ·
-  <a href="../AGENTS.md">AGENTS.md</a>
+  <a href="../AGENTS.md">AGENTS.md</a> ·
+  <a href="../native/PRODUCT.md">Native Desktop Spec</a>
 </p>
 
-The **HEAV3NS-MICRO Agent Stack** provides a sovereign, high-throughput execution environment for autonomous AI coding agents. Unlike conventional agent harnesses that rely on fragmented dynamic interpreters, unbounded heap allocations, and brittle tool call regexes, HEAV3NS-MICRO delivers a unified Rust architecture organized across three concrete surfaces:
+The **HEAV3NS-MICRO Agent Stack** provides a sovereign, high-throughput execution environment for autonomous AI coding agents. Unlike conventional agent harnesses that rely on fragmented dynamic interpreters, unbounded heap allocations, and brittle tool call regexes, HEAV3NS-MICRO delivers a unified dual-layer architecture organized across four concrete surfaces:
 
 1. **Spatial Sovereignty (Joyzoning)**: 5 canonical zones (`PLUMBING`, `DOMAIN`, `INFRASTRUCTURE`, `CORE`, `UI`) enforcing strict dependency inversion.
 2. **Substrate Runtime**: A 16-MiB contiguous memory arena, $O(1)$ tick pointer rewinding, self-healing JSON parser, and two-phase VFS staging.
-3. **Native Agent Execution**: Headless stdio JSONL worker protocol, interactive CLI REPL, 10 slash commands, and a 5-scenario Agent Flight benchmark.
+3. **Native Agent Execution**: Headless stdio JSON-RPC worker protocol, interactive CLI REPL, 10 slash commands, and a 5-scenario Agent Flight benchmark.
+4. **AppKit Native Desktop Control Station**: Pure macOS desktop IDE with turn scrubbers, multi-agent swarm radar, live walkthroughs, and Pod management.
 
 ---
 
-## The Three Surfaces
+## The Four Surfaces
 
 ```mermaid
 flowchart TD
@@ -35,13 +37,20 @@ flowchart TD
   end
 
   subgraph Surface3 ["Surface 3: Native Agent Execution"]
-    STDIO["Headless Stdio JSONL Protocol (--stdio)"]
+    STDIO["Headless Stdio JSON-RPC Protocol (--stdio)"]
     CLI["Interactive CLI REPL & Slash Commands (/help, /vfs, /compact)"]
     TOOLS["23 Native Tools (fs_read, fs_write, patch, search, execute)"]
     FLIGHT["Agent Flight Test Benchmark (FT-01..FT-05)"]
   end
 
-  Surface1 --> Surface2 --> Surface3
+  subgraph Surface4 ["Surface 4: AppKit Native Desktop IDE"]
+    WINDOW["Modular WorkspaceWindow Architecture (native/Sources/Heav3nsCode/)"]
+    SWARM["Multi-Specialist Swarm Formations & Radar"]
+    WALK["Live Turn Scrubber & Activity Walkthrough"]
+    PODS["Multi-Project Pods Command Station"]
+  end
+
+  Surface1 --> Surface2 --> Surface3 --> Surface4
 ```
 
 ---
@@ -52,11 +61,11 @@ Every component in HEAV3NS-MICRO resides in its designated Joyzoning zone:
 
 | Zone | Path | Responsibility | Permitted Inward Edges |
 | :--- | :--- | :--- | :--- |
-| **`PLUMBING`** | `src/plumbing/` | Pure stateless algorithms: FNV-1a hash, Levenshtein, fuzzy patch engine, token counter, JSON repair, and secret redactor. | None. Zero upward dependencies. |
+| **`PLUMBING`** | `src/plumbing/`, `native/...` | Pure stateless algorithms: FNV-1a hash, Levenshtein, fuzzy patch engine, token counter, JSON repair, Base64 encoder, and secret redactor. | None. Zero upward dependencies. |
 | **`DOMAIN`** | `src/domain/` | State machines, memory models, arena allocator, session compaction, and formal `I<Name>` traits. | May only import `plumbing`. Zero I/O (`SPI-206`). |
 | **`INFRASTRUCTURE`** | `src/infrastructure/` | Concrete I/O adapters: HTTP provider, scripted mock provider, disk VFS, transaction journal, shell runner, and search tools. | Implements `domain/interfaces/I*`. |
 | **`CORE`** | `src/core/` | Use-case orchestration: agent execution loop, wave scheduler, tool governor, request queue, flight runner, and substrate tests. | Depends on `domain` and `domain/interfaces/I*`. Never on `ui`. |
-| **`UI`** | `src/ui/`, `src/lib.rs`, `src/main.rs` | CLI presenter, stdio JSONL worker, command dispatch, and Composition Roots. | Reaches infrastructure only through core. |
+| **`UI`** | `src/ui/`, `src/lib.rs`, `src/main.rs`, `native/` | CLI presenter, stdio JSON-RPC worker, AppKit Native Desktop client, and Composition Roots. | Reaches infrastructure only through core. |
 
 ---
 
@@ -81,12 +90,12 @@ Tool calls emitted in parallel are analyzed by the [`WaveScheduler`](../src/core
 
 ## Surface 3: Native Agent Execution
 
-### 1. Headless Stdio JSONL Protocol (`--stdio`)
-HEAV3NS-MICRO can run as a background coprocessor under IDE plugins, web harnesses, or terminal wrappers. Each interaction follows a standard JSONL schema:
+### 1. Headless Stdio JSON-RPC Protocol (`--stdio`)
+HEAV3NS-MICRO operates as a background coprocessor under IDE plugins or native desktop wrappers. Each frame incorporates the version invariant (`"v": 1`):
 ```json
 {"jsonrpc":"2.0","method":"turn","params":{"prompt":"audit codebase"},"id":1}
 ```
-Progress events, tool calls, and LLM tokens stream across stdout in deterministic order ([ADR-0006](adr/0006-stdio-jsonl-and-flight-test-harness.md)).
+Progress events, tool calls, and LLM tokens stream across stdout in deterministic order ([ADR-0006](adr/0006-stdio-jsonl-and-flight-test-harness.md), [ADR-0010](adr/0010-native-desktop-integration-and-rpc-protocol.md)).
 
 ### 2. 23 Native Agent Tools
 Built-in tools cover the complete coding spectrum:
@@ -99,16 +108,30 @@ Built-in tools cover the complete coding spectrum:
 
 ---
 
+## Surface 4: AppKit Native Desktop IDE (`native/`)
+
+The native macOS application provides calm, truthful oversight:
+- **Modular Window Extension Architecture**: Decomposed into 8 focused files conforming to Tier 1 Optimal (< 800 lines).
+- **Turn Scrubber Rail**: Vertical timeline with status dots reflecting active, error, and reviewed instructions.
+- **Docked Non-Blocking Approvals**: Action review card positioned above the composer without modal window sheets.
+- **Specialist Swarm Radar**: Real-time visualization of parallel agent roles and formation reconciliation.
+- **Multi-Project Pods Station**: Concurrent overview of multiple workspace repositories in a single native window.
+
+---
+
 ## Verification & Guardrails
 
 Run the verification suite:
 ```bash
-# Verify all substrate unit and integration tests
+# 1. Verify all substrate unit and integration tests (8 suites)
 cargo test
 
-# Run the 5-scenario Agent Flight suite
+# 2. Run the 5-scenario Agent Flight suite (19 assertion checks)
 cargo run -- --flight
 
-# Verify documentation structure and cross-links
-npm run docs:check
+# 3. Verify all native macOS AppKit tests (308 tests)
+cd native && swift test && cd ..
+
+# 4. Run strict Joyzoning architectural audit
+node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --theme strict
 ```

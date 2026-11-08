@@ -5,10 +5,11 @@
   <a href="README.md">Wiki Hub</a> ·
   <a href="mental-models.md">Mental Models</a> ·
   <a href="../architecture/current.md">Architecture</a> ·
-  <a href="../papers/whitepaper.md">Whitepaper</a>
+  <a href="../papers/whitepaper.md">Whitepaper</a> ·
+  <a href="../adr/0010-native-desktop-integration-and-rpc-protocol.md">ADR-0010</a>
 </p>
 
-A deep technical exploration of memory layout, pointer arithmetic, zero-allocation parsing, and concurrency in **HEAV3NS-MICRO**.
+A deep technical exploration of memory layout, pointer arithmetic, zero-allocation parsing, desktop IPC bridges, and concurrency in **HEAV3NS-MICRO**.
 
 ---
 
@@ -67,6 +68,15 @@ pub fn fnv1a_32(bytes: &[u8]) -> u32 {
 }
 ```
 
+### Pure RFC 4648 Base64 Encoder
+In [`src/plumbing/text_tokens.rs`](../../src/plumbing/text_tokens.rs), a zero-dependency Base64 encoder converts binary assets (PDFs, images, data tables) into ASCII streams for JSON-RPC transport:
+```rust
+pub fn encode_base64(bytes: &[u8]) -> String {
+    const CHARSET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    // 3-byte -> 4-character bit shifting with '=' padding
+}
+```
+
 ### Token Estimation Formalism
 Rather than running full BPE tokenizers during rapid streaming checks, the runtime applies a tuned lexical ratio:
 - Average 3.8 characters per token for English prose.
@@ -83,9 +93,31 @@ Located in [`src/plumbing/json_repair.rs`](../../src/plumbing/json_repair.rs):
 
 ---
 
-## 4. Architectural Boundaries (Joyzoning Isolation)
+## 4. Standard I/O Inter-Process Communication Engine
+
+Located in [`src/ui/stdio_worker.rs`](../../src/ui/stdio_worker.rs) and [`src/ui/rpc_dispatch.rs`](../../src/ui/rpc_dispatch.rs):
+- **Stream Isolation**: JSON-RPC control and data frames flow across standard output (`stdout`), while diagnostic logging, metrics, and panic traces flow across standard error (`stderr`).
+- **Control Frame Invariant**: All outbound frames incorporate a `"v": 1` version token to guarantee backward-compatible protocol negotiation.
+- **Asynchronous Task Disconnect Tolerance**: In-flight prompts survive client disconnects; unconfirmed submissions are checked via `task.lookup` without duplicate tool execution.
+
+---
+
+## 5. Multi-State Snapshot Topology (`GameStateSnapshot`)
+
+The substrate maintains atomic multi-state snapshots across four independent subsystems:
+1. **Transcript History**: User prompts, assistant messages, and tool activity records.
+2. **Conversation Memory**: Key-value facts and project preferences (`MemoryStore`).
+3. **Transactional VFS**: Staged disk overlays and disk baseline hashes (`SessionVfs`).
+4. **Arena Slab**: Bump pointer watermarks in the 16-MiB contiguous buffer.
+
+Invoking `AgentEngine::rewind_to_snapshot` restores all four dimensions simultaneously, guaranteeing that memory, transcript, and file edits never diverge.
+
+---
+
+## 6. Architectural Boundaries (Joyzoning Isolation)
 
 The Rust module hierarchy strictly enforces Joyzoning:
 - `src/domain/interfaces/mod.rs` acts as the port interface boundary.
 - `src/infrastructure/` modules never import from `src/ui/`.
 - `src/core/` interacts with persistence, VFS, and HTTP solely through traits.
+- All source files remain under **Tier 1 Optimal (< 800 lines, `SPI-203`)**.

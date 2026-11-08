@@ -8,13 +8,13 @@
   <a href="../architecture/current.md">Architecture</a>
 </p>
 
-Comprehensive reference of the public types, contracts, and interfaces exposed by the `heav3ns-micro` crate.
+Comprehensive reference of the public types, contracts, and programmatic interfaces exposed by the `heav3ns-micro` crate.
 
 ---
 
 ## 1. Domain Interfaces (`src/domain/interfaces/mod.rs`)
 
-All core interactions with infrastructure adapters are decoupled through formal `I<Name>` traits:
+All core interactions with infrastructure adapters are decoupled through formal `I<Name>` traits under the Principle of Contractual Sovereignty (`ADR-0007`):
 
 ### `ILlmProvider`
 ```rust
@@ -24,7 +24,7 @@ pub trait ILlmProvider: Send + Sync {
 ```
 Implemented by [`HttpProvider`](../../src/infrastructure/http_provider.rs) and [`ScriptedProvider`](../../src/infrastructure/scripted_provider.rs).
 
-### `ISessionPersistence`
+### `ISessionPersistence` & `IFileSessionPersistence`
 ```rust
 pub trait ISessionPersistence: Send + Sync {
     fn save_jsonl(&self, path: &Path, payload: &str) -> Result<bool, String>;
@@ -57,44 +57,94 @@ pub trait ISkillsIngestor: Send + Sync {
     fn discover_manifests(workspace_root: &Path) -> Vec<SkillManifest>;
 }
 ```
-Implemented by [`SkillsIngestor`](../../src/infrastructure/fs_tools.rs).
+Implemented by [`SkillsIngestor`](../../src/infrastructure/vfs_store.rs).
 
 ---
 
 ## 2. Core Engine & Orchestrator (`src/core/engine.rs`)
 
-### `MicroAgentEngine`
-The central state machine orchestrating agent turns, memory compaction, tool dispatch, and streaming events.
+### `AgentEngine`
+The central ReAct state machine orchestrating agent turns, context compaction, tool dispatch, and streaming progress events.
 
 ```rust
-pub struct MicroAgentEngine {
-    // Orchestration state
+pub struct AgentEngine {
+    // Internal substrate components
 }
 
-impl MicroAgentEngine {
-    pub fn new(config: EngineConfig) -> Result<Self, EngineInitError>;
-    pub async fn step_turn(&mut self, prompt: &str) -> Result<String, EngineTurnError>;
-    pub fn session_status(&self) -> SessionStatusReport;
-    pub fn compact_memory(&mut self) -> Result<CompactionSummary, CompactionError>;
-}
-```
+impl AgentEngine {
+    /// Constructs a new engine with default providers, tools, and 16-MiB arena slab.
+    pub fn with_defaults(workspace_root: impl Into<PathBuf>) -> Self;
 
-### `EngineConfig`
-```rust
-pub struct EngineConfig {
-    pub workspace_root: PathBuf,
-    pub active_model: String,
-    pub authority: ExecutionAuthorityLevel,
-    pub arena_capacity_bytes: usize,
-    pub max_turns: usize,
+    /// Executes a single multi-step ReAct agent tick with tool execution waves.
+    pub async fn tick(&self, input: EngineTickInput) -> EngineTickResult;
+
+    /// Answers a stateless side question without tool invocation or transcript retention.
+    pub async fn ask_side_question(&self, question: &str) -> Result<String, ProviderError>;
+
+    /// Handles an interactive slash command (/help, /status, /compact, /commit, etc.).
+    pub fn handle_slash_command(&self, input: &str) -> Option<String>;
+
+    /// Orchestrates a topological multi-agent specialist swarm formation.
+    pub fn run_swarm(&self, goal: &str) -> SwarmFormationResult;
+
+    /// Returns a list of captured snapshots across transcript, memory, and VFS.
+    pub fn snapshots_list(&self) -> Vec<GameStateSnapshot>;
+
+    /// Captures an atomic multi-state snapshot.
+    pub fn create_snapshot(&self) -> GameStateSnapshot;
+
+    /// Rewinds transcript, memory, VFS, and Arena slab to a previous snapshot index.
+    pub fn rewind_to_snapshot(&self, index: usize) -> Result<GameStateSnapshot, String>;
+
+    /// Introspects or dynamically switches active model configuration.
+    pub fn inspect_or_switch_model(&self, arg: &str) -> String;
+
+    /// Accessors for substrate components.
+    pub fn workspace_root(&self) -> &Path;
+    pub fn tools(&self) -> &Arc<ToolRegistry>;
+    pub fn session(&self) -> &Mutex<SessionStore>;
+    pub fn vfs(&self) -> &Mutex<SessionVfs>;
+    pub fn memory(&self) -> &Arc<Mutex<MemoryStore>>;
+    pub fn queue(&self) -> &Arc<RuntimeRequestQueue>;
+    pub fn compactor(&self) -> &SessionCompactor;
+    pub fn config_snapshot(&self) -> AgentConfig;
 }
 ```
 
 ---
 
-## 3. Substrate Types (`src/domain/types/`)
+## 3. UI & IPC Dispatch (`src/ui/`)
 
-- **`ExecutionAuthorityLevel`**: `ReadOnly`, `WorkspaceWrite`, `ShellExecute`, `FullSovereign`
-- **`VfsFileOverlay`**: Encapsulates staged in-memory file additions, edits, and deletions with baseline hashes.
-- **`ToolExecutionRecord`**: Captures duration, stdout, stderr, and exit status for auditing.
-- **`RollbackResult`**: Returns status and affected paths after a journal reversal.
+### Stdio Worker Entrypoint (`src/ui/stdio_worker.rs`)
+```rust
+pub async fn run_stdio_worker(
+    workspace_root: PathBuf,
+    account: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>>;
+```
+Runs the standard I/O JSON-RPC 2.0 loop, emitting `"v": 1` version-tagged frames to `stdout` and diagnostic logs to `stderr`.
+
+### Desktop RPC Router (`src/ui/rpc_dispatch.rs`)
+```rust
+pub struct RpcDispatcher;
+
+impl RpcDispatcher {
+    pub async fn dispatch(
+        engine: &AgentEngine,
+        request: RpcRequest,
+    ) -> RpcResponse;
+}
+```
+Routes incoming desktop requests to handlers (`files.list`, `files.readBinary`, `changes.read`, `spider.check`, `memory.*`, `task.*`, `swarm.*`, `checkpoint.*`).
+
+---
+
+## 4. Key Substrate Primitives (`src/plumbing/`)
+
+- **`encode_base64(data: &[u8]) -> String`**: RFC 4648 Base64 encoder for binary file inspection.
+- **`estimate_text_tokens(text: &str) -> usize`**: Deterministic BPE token estimation ($O(N)$).
+- **`truncate_text_to_token_budget(text: &str, budget: usize) -> String`**: Head/tail preservation with explicit truncation markers.
+- **`extract_json_roots(text: &str) -> Vec<&str>`**: Balanced brace extraction ignoring braces inside string literals.
+- **`repair_json_string(raw: &str) -> String`**: 3-stage heuristic repair (markdown fence stripping, quote healing, unclosed bracket recovery).
+- **`DeterministicSecretRedactor::redact_text(input: &str) -> String`**: Replaces API keys, tokens, and passwords with cryptographic redaction badges.
+- **`heal_fuzzy_patch(source: &str, patch: &str) -> Result<String, PatchError>`**: Whitespace-tolerant V4A patch applier ($95\%$ tolerance).

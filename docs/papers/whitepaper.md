@@ -1,32 +1,34 @@
 <!-- [LAYER: UI] -->
 # HEAV3NS-MICRO Technical Whitepaper
 
-**A Zero-Bloat, High-Throughput Rust Micro Agent Runtime**  
+**A Zero-Bloat, High-Throughput Rust Micro Agent Runtime & Native Desktop Architecture**  
 *HEAV3NS Architecture Working Group*
 
 <p align="center">
   <a href="README.md">Papers Hub</a> ·
   <a href="companion-brief.md">Companion Brief</a> ·
   <a href="philosophy.md">Philosophy</a> ·
-  <a href="../architecture/current.md">Architecture</a>
+  <a href="../architecture/current.md">Architecture</a> ·
+  <a href="../adr/0010-native-desktop-integration-and-rpc-protocol.md">ADR-0010</a>
 </p>
 
 ---
 
 ## Abstract
 
-We present **HEAV3NS-MICRO**, a hyper-compressed, deterministic agent execution runtime written in Rust. By organizing system modules across five sovereign architectural zones and enforcing mathematical dependency constraints, HEAV3NS-MICRO eliminates runtime heap fragmentation, parser desynchronization, and speculative disk corruption. Central to the runtime is a contiguous 16-MiB arena allocator enabling constant-time $O(1)$ scratch memory reclamation, an incremental self-healing JSON parser resilient to streaming markdown block fences, a two-phase virtual file system with baseline hash verification, and a topological wave scheduler for concurrent tool execution. We demonstrate 100% architectural sovereignty, zero blocking violations, and complete passing verification across the 5-scenario Agent Flight benchmark.
+We present **HEAV3NS-MICRO**, a hyper-compressed, deterministic agent execution runtime written in Rust paired with a native AppKit macOS developer control station. By organizing system modules across five sovereign architectural zones and enforcing mathematical dependency constraints, HEAV3NS-MICRO eliminates runtime heap fragmentation, parser desynchronization, speculative disk corruption, and UI thread stalls. Central to the runtime is a contiguous 16-MiB arena allocator enabling constant-time $O(1)$ scratch memory reclamation, an incremental self-healing JSON parser resilient to streaming markdown block fences, a two-phase virtual file system with baseline hash verification, a topological wave scheduler for concurrent tool execution, and a bidirectional stdio JSON-RPC IPC bridge connecting the substrate to the desktop IDE. We demonstrate 100% architectural sovereignty, zero blocking violations, and complete passing verification across 8 Rust test suites (including the 5-scenario Agent Flight benchmark) and 308 native AppKit tests.
 
 ---
 
 ## 1. Introduction & Motivation
 
-Autonomous software development workflows require executing LLM-generated operations against real file systems, terminal processes, and code repositories. Conventional runtime environments exhibit three systemic vulnerabilities:
-1. **Dynamic Memory Sprawl**: Recursive parsing and unconstrained string concatenation incur thousands of small heap allocations, triggering frequent memory reallocations and unpredictable latency.
+Autonomous software development workflows require executing LLM-generated operations against real file systems, terminal processes, and code repositories while providing developers with calm, responsive, and truthful oversight. Conventional agent runtime environments exhibit systemic vulnerabilities:
+1. **Dynamic Memory Sprawl**: Recursive parsing and unconstrained string concatenation incur thousands of small heap allocations, triggering frequent GC pauses and unpredictable latency.
 2. **Streaming Parser Fragility**: LLMs emit fragmented or subtly malformed JSON outputs (e.g., unmatched quotes, trailing commas, mixed markdown fences) that fail standard strict JSON deserializers.
 3. **Speculative Filesystem Corruption**: Tool execution without transactional boundaries risks modifying files on disk based on outdated repository state, clobbering concurrent developer edits.
+4. **Desktop UI Web-Wrapper Lag**: Desktop frontends built on Electron or WebKit wrappers introduce multi-gigabyte memory footprints, high IPC latency, and non-native keyboard navigation.
 
-HEAV3NS-MICRO resolves these challenges through a unified, zero-bloat Rust architecture.
+HEAV3NS-MICRO resolves these challenges through a unified, dual-layer architecture: a hyper-compressed Rust micro-runtime and a pure AppKit native desktop client.
 
 ---
 
@@ -89,6 +91,29 @@ The wave scheduler executes $\text{Wave}_{\text{read}}$ concurrently across back
 
 ---
 
-## 6. Empirical Verification & Conclusion
+## 6. Desktop JSON-RPC Protocol & AppKit Client Architecture
 
-HEAV3NS-MICRO has been verified against the 5-scenario Agent Flight suite (`FT-01..FT-05`), achieving 100% test pass rate across 19 evaluation assertions. Static Joyzoning analysis reports an Entropy Score of 0.0015 and a 100% Stability Index with zero blocking violations. HEAV3NS-MICRO establishes that agent runtime substrates can be simultaneously hyper-compressed, deterministic, and safe.
+The desktop surface (`native/`) connects to `heav3ns-micro` via a bidirectional, newline-delimited JSON-RPC 2.0 pipe over standard streams.
+
+### Stream Invariants & Separation
+- **`stdout`**: Reserved strictly for valid JSON-RPC frames with mandatory `"v": 1` version tags.
+- **`stderr`**: Carries diagnostic logs and panic traces, ensuring zero framing desynchronization.
+- **Zero-Replay Task Reconciliation**: Interrupted or unconfirmed prompt submissions are preserved in local drafts; task status is verified via `task.lookup` without duplicate tool execution.
+
+### Modular Window Architecture (`SPI-203`)
+The AppKit client implements a modular 8-file extension topology where every source file remains under Tier 1 Optimal (< 800 lines):
+- **Core Controller (`WorkspaceWindow.swift`)**: Window lifecycle, view layout, table/window delegates, and resource disposal (`dispose()`).
+- **Composer & Navigation**: Independent attachment tokens, multi-line composer, Git diff explorer, and file tree.
+- **Live Walkthrough & Inspection**: Dynamic inspection viewports with Base64 binary page streaming, spider checks, and conversation memory.
+- **Topological Swarm & Radar**: Multi-specialist task graph visualization and live formation reconciliation.
+
+---
+
+## 7. Empirical Verification & Conclusion
+
+HEAV3NS-MICRO has been verified across two full test environments:
+1. **Rust Substrate Test Suite**: All 8 test suites pass cleanly, including the 5-scenario Agent Flight suite (`FT-01..FT-05`) verifying discovery, VFS staging, parser repair, wave scheduling, and secret redaction.
+2. **Native AppKit Test Suite**: All 308 unit and integration tests pass cleanly with zero failures.
+3. **Joyzoning Conformance**: Static architecture analysis reports a 100% Stability Index with zero blocking violations.
+
+HEAV3NS-MICRO establishes that an autonomous coding agent runtime can be simultaneously hyper-compressed, deterministic, safe, and seamlessly integrated with a responsive native macOS IDE.

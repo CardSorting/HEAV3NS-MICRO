@@ -5,10 +5,11 @@
   <a href="README.md">KB Hub</a> ·
   <a href="../playbooks/README.md">Playbooks Hub</a> ·
   <a href="../api/errors.md">Error Catalog</a> ·
-  <a href="../OPERATIONS.md">Operations</a>
+  <a href="../OPERATIONS.md">Operations</a> ·
+  <a href="../architecture/current.md">Architecture</a>
 </p>
 
-Master lookup table mapping runtime symptoms, CLI error codes, and audit failures directly to their root causes, one-line fix commands, and governing Playbooks/ADRs.
+Master lookup table mapping runtime symptoms, CLI error codes, desktop IPC faults, and architectural audit failures directly to their root causes, one-line fix commands, and governing Playbooks/ADRs.
 
 ---
 
@@ -18,8 +19,13 @@ Master lookup table mapping runtime symptoms, CLI error codes, and audit failure
 | :--- | :--- | :--- | :--- |
 | `SPI-208: Missing Layer Header` | File missing `// [LAYER: <ZONE>]` on line 1 | Add `// [LAYER: <ZONE>]` to line 1 | [PB-01](../playbooks/architectural-violation-remediation.md) |
 | `SPI-206: Domain I/O Impurity` | `src/domain/` module directly imports I/O | Move I/O adapter to `src/infrastructure/` | [ADR-0001](../adr/0001-five-canonical-zones-and-geographic-alignment.md) |
+| `SPI-203: File Exceeds 800 Lines` | Monolithic module violating Tier 1 Optimal limit | Modularize into focused extensions | [ADR-0010](../adr/0010-native-desktop-integration-and-rpc-protocol.md) |
 | `SPI-201: Circular Dependency` | Mutual import loop across source modules | Extract shared types to `domain/types/` | [PB-01](../playbooks/architectural-violation-remediation.md) |
 | `SPI-205: Mutable State in Plumbing` | Global or module-level mutable variable | Remove mutable state; make functions pure | [CONSTITUTION](../CONSTITUTION.md) |
+| `SPI-110: Missing Dispose Hook` | Class defines `init` without lifecycle cleanup | Implement `func dispose()` and call in `deinit` | [ADR-0010](../adr/0010-native-desktop-integration-and-rpc-protocol.md) |
+| `Desktop: Check Status Pill Appears` | Worker restarted before confirming instruction acceptance | Click "Check Status" to reconcile state without replay | [api/cli.md](../api/cli.md) |
+| `Desktop: Frame Parser Desync` | Non-JSON text or diagnostic log leaked to stdout | Divert all tracing and logs to `stderr` | [ADR-0006](../adr/0006-stdio-jsonl-and-flight-test-harness.md) |
+| `Desktop: Missing "v": 1 Marker` | Worker emitted legacy frame without protocol version | Ensure all stdout frames include `"v": 1` | [ADR-0010](../adr/0010-native-desktop-integration-and-rpc-protocol.md) |
 | `ArenaOom: Out of Memory` | 16-MiB arena capacity exhausted by turns | Run `/compact` to summarize history | [PB-02](../playbooks/arena-exhaustion-and-oom-triage.md) |
 | `FT-01 Failure: File Discovery` | File scanner cannot locate test files | Verify workspace root directory path | [ADR-0006](../adr/0006-stdio-jsonl-and-flight-test-harness.md) |
 | `FT-03 Failure: Parser Desync` | JSON bracket mismatch or unescaped quote | Check `src/plumbing/json_repair.rs` | [PB-03](../playbooks/flight-test-failures-and-parser-desync.md) |

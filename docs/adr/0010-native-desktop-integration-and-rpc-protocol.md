@@ -83,3 +83,4 @@ cd native && swift test && cd ..
 # 3. Verify Joyzoning architectural sovereignty
 node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --theme strict
 ```
+
