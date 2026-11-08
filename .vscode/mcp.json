@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "joy": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "heav3ns-joy@1.0.0",
+        "mcp"
+      ]
+    }
+  }
+}

@@ -1,0 +1,9 @@
+#!/usr/bin/env sh
+# [LAYER: INFRASTRUCTURE]
+set -e
+if [ -f "/Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs" ]; then
+  node "/Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs" . --theme strict --format compact
+else
+  npx -y heav3ns-joy@1.0.0 check . --theme strict --format compact
+fi
+cargo test --quiet

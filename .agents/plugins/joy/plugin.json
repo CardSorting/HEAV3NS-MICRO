@@ -1,0 +1,9 @@
+{
+  "name": "joy",
+  "version": "1.0.0",
+  "homepage": "https://github.com/CardSorting/HEAV3NS-JOY",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CardSorting/HEAV3NS-JOY.git"
+  }
+}

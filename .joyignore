@@ -1,0 +1,15 @@
+target/
+node_modules/
+dist/
+build/
+coverage/
+.git/
+.joy/
+.cursor/
+.windsurf/
+.clinerules/
+.roo/
+.codex/
+.gemini/
+Cargo.lock
+

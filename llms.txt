@@ -1,0 +1,34 @@
+# HEAV3NS-MICRO
+
+> Hyper-compressed, architecturally sovereign Rust micro agent runtime (`heav3ns-micro` v0.1.0), structured under the 5-Zone Joyzoning architecture (`PLUMBING`, `DOMAIN`, `INFRASTRUCTURE`, `CORE`, `UI`) with a 16-MiB Arena slab allocator, transactional VFS, self-healing tool parser, 23 native tools, dependency wave scheduler, and 5-scenario Agent Flight Test suite.
+
+## Start here
+- [AGENTS.md](AGENTS.md): 60-second operational protocol, 5-zone Rust layout, and 8-point verification checklist
+- [SOUL.md](SOUL.md): seven operating principles for coding agents in this repository
+- [README.md](README.md): architecture overview, capabilities, and CLI quick start
+- [VALIDATION_REPORT.md](VALIDATION_REPORT.md): Joyzoning conformance, Flight Test, and micro-benchmark evidence
+
+## Core rules (summary)
+- Zones: `PLUMBING` (`src/plumbing/`), `DOMAIN` (`src/domain/`), `INFRASTRUCTURE` (`src/infrastructure/`), `CORE` (`src/core/`), `UI` (`src/ui/`, `src/lib.rs`, `src/main.rs`)
+- Every `.rs` file starts with `// [LAYER: <ZONE>]` at line 1; every `.md` file starts with `<!-- [LAYER: <ZONE>] -->`
+- `DOMAIN`: 0% I/O, `<= 3` structs per file, formal `I<Name>` traits in `src/domain/interfaces/mod.rs`
+- `PLUMBING`: stateless, zero upward zone imports
+- Every module stays under 800 lines (`SPI-203` Tier 1 Optimal)
+
+## Commands
+- Rust test suite: `cargo test`
+- Flight Test suite (`FT-01..FT-05`): `cargo run --release -- --flight`
+- Micro-benchmarks: `cargo run --release -- --bench`
+- Smoke self-check: `cargo run --release -- --smoke`
+- Headless JSONL stdio worker: `cargo run --release -- --stdio`
+- Joyzoning strict audit: `node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --theme strict`
+- Joyzoning doctor: `node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --doctor`
+
+## Documentation Hub
+- [docs/README.md](docs/README.md): central documentation index
+- [docs/PROJECT_MAP.md](docs/PROJECT_MAP.md): complete 5-zone directory and module map
+- [docs/CODE_TO_DOC_MAP.md](docs/CODE_TO_DOC_MAP.md): source module to documentation lookup table
+- [docs/CONSTITUTION.md](docs/CONSTITUTION.md): five immutable architectural laws
+- [docs/CODEBASE_STANDARDS.md](docs/CODEBASE_STANDARDS.md): Rust + Joyzoning engineering standards
+- [docs/architecture/current.md](docs/architecture/current.md): detailed execution flow and module inventory
+

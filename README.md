@@ -1,63 +1,61 @@
-# HEAV3NS-MICRO — Tactical Rust Micro Agent Runtime
+<!-- [LAYER: UI] -->
+# HEAV3NS-MICRO (`v0.1.0`)
 
-**Source Distilled:** `/Users/bozoegg/Desktop/LUMI-NEW` (2,466 TypeScript files, 725,161 LOC, 834 npm packages)  
-**Target Runtime:** `/Users/bozoegg/Desktop/HEAV3NS-MICRO` (6 Rust modules, ~3,370 LOC, 7 direct crates, ~4.6 MiB stripped Mach-O binary)  
+**Hyper-Compressed, Architecturally Sovereign Rust Micro Agent Runtime** — distilled from `LUMI-NEW` and structured under the **HEAV3NS-JOY** 5-Zone Joyzoning architecture (`100%` Stability Index, `100%` Build Health `A+`, `0` violations).
 
-HEAV3NS-MICRO is a hyper-compressed, zero-bloat Rust extraction of the `LUMI-NEW` agent runtime. It preserves and consolidates `LUMI-NEW`'s genuine operational mechanisms while eliminating ~99.5% of source code volume and architectural indirection.
-
----
-
-## Phase 1 & 2 — Reconnaissance & Tactical Classification
-
-| Subsystem | `LUMI-NEW` Source | Classification | `HEAV3NS-MICRO` Consolidation |
-| :--- | :--- | :--- | :--- |
-| **Agent Turn Loop & Lifecycle** | `src/agents/extensions/execution/agent-engine.ts` (1,617 LOC) | **Preserve & Compress** | [`src/engine.rs`](file:///Users/bozoegg/Desktop/HEAV3NS-MICRO/src/engine.rs) (`AgentEngine`, `PromptComposer`, `RuntimeRequestQueue`) |
-| **Topological Swarm Coordinator** | `src/agents/extensions/swarm/agent-swarm-dispatcher.ts` | **Compress** | [`src/engine.rs`](file:///Users/bozoegg/Desktop/HEAV3NS-MICRO/src/engine.rs) (`AgentEngine::run_swarm`, `SwarmAssignment`, dependency wave solver) |
-| **Arena Slab, VFS, Compactor, Memory & Skills** | `src/core/arena.ts`, `session-vfs.ts`, `session-compactor.ts`, `memory-manager.ts`, `skills-ingestor.ts` | **Preserve & Compress** | [`src/session.rs`](file:///Users/bozoegg/Desktop/HEAV3NS-MICRO/src/session.rs) (`ArenaAllocator`, `SessionVfs`, `SessionCompactor`, `MemoryStore`, `SkillsIngestor`) |
-| **Self-Healing Parser, Streaming Dedup & Redactor** | `tool-call-arg-parser.ts`, `tool-call-delta.ts`, `universal-tool-call-adapter.ts`, `deterministic-secret-redactor.ts` | **Preserve & Compress** | [`src/parser.rs`](file:///Users/bozoegg/Desktop/HEAV3NS-MICRO/src/parser.rs) (`ToolCallArgParser`, `DeterministicSecretRedactor`, `extract_text_tool_calls`) |
-| **Wave Scheduler, Patch Engine & 23 Native Tools** | `tool-registry.ts`, `deterministic-patch-engine.ts`, `v4a-patch-tool-suite.ts`, `tool-error-auto-healer.ts`, `codebase-symbol-indexer.ts` | **Preserve & Compress** | [`src/tools.rs`](file:///Users/bozoegg/Desktop/HEAV3NS-MICRO/src/tools.rs) (`ToolRegistry`, `DeterministicPatchEngine`, `TransactionJournal`, `ToolOutputGovernor`, `ToolLoopBreaker`) |
-| **Multi-Wire LLM Providers & SSE Streaming** | `provider-factory.ts`, `openai.ts`, `anthropic.ts`, `google.ts`, `scripted-provider.ts` | **Replace** | [`src/provider.rs`](file:///Users/bozoegg/Desktop/HEAV3NS-MICRO/src/provider.rs) (`HttpProvider`, `parse_sse_stream`, `ScriptedProvider`) |
-| **Agent Flight Test & Micro-Benchmarks** | `src/evals/flight-test/runner.ts` (`FT-01`..`FT-05`) | **Preserve** | [`src/flight.rs`](file:///Users/bozoegg/Desktop/HEAV3NS-MICRO/src/flight.rs) (`run_agent_flight_test`, `run_micro_benchmarks`) |
-| **566 Supervisor / BroccoliSubstrate / Toy Classes** | `src/core/substrate/broccoli-*`, `src/agents/supervisors/*`, 1,600+ no-op tool wrappers | **Discard** | Eliminated (zero operational value) |
+<p align="center">
+  <a href="AGENTS.md">AGENTS.md</a> ·
+  <a href="SOUL.md">SOUL.md</a> ·
+  <a href="docs/README.md">Documentation Hub</a> ·
+  <a href="docs/PROJECT_MAP.md">Project Map</a> ·
+  <a href="docs/CONSTITUTION.md">Constitution</a> ·
+  <a href="VALIDATION_REPORT.md">Validation Report</a>
+</p>
 
 ---
 
-## Phase 3 — Runtime Architecture & Capabilities
+## 5-Zone Joyzoning Architecture
 
-1. **Zero-GC Memory & Context Substrate ([`src/session.rs`](file:///Users/bozoegg/Desktop/HEAV3NS-MICRO/src/session.rs))**:
-   - `ArenaAllocator`: 16 MiB contiguous `Vec<u32>` slab with 4-byte word alignment and $O(1)$ pointer rewind on `/clear` or `/rewind`.
-   - `SessionCompactor`: Deterministic `LUMI-CONTEXT/1` rolling checkpoints with SHA-256 digests and token-budget windowing.
-   - `SessionVfs` & `VfsDiskBaseline`: Staged file overlay with SHA-256 disk baseline verification prior to commit.
-   - `MemoryStore` (`LUMI-MEMORY/1`) & `SkillsIngestor` (auto-discovers `.agents/skills`, `.claude/skills`, and `skills/` `SKILL.md` manifests).
+Every source file in `src/` belongs to one of five strictly enforced architectural zones, verified by `joy-check --theme strict` (`0` violations, all modules `< 800` lines Tier 1 Optimal):
 
-2. **Self-Healing Parser & Secret Redaction ([`src/parser.rs`](file:///Users/bozoegg/Desktop/HEAV3NS-MICRO/src/parser.rs))**:
-   - 4-pass malformed JSON repair (concatenated roots, Markdown fences, Python `True`/`False`/`None`, single quotes, unquoted keys, trailing commas, unclosed delimiters, and Levenshtein fuzzy key healing).
-   - `ADR-0014` streaming tool argument and tool name delta deduplication + `<tool_call>{...}</tool_call>` plain-text fallback extraction.
-   - `DeterministicSecretRedactor`: Automatically masks PEM private keys, Anthropic/OpenAI/Google/AWS/HuggingFace/GitHub/Slack credentials, and JWTs in tool outputs, and blocks sensitive credential paths (`.ssh/id_rsa`, `.aws/credentials`, `.git-credentials`, `.netrc`).
-
-3. **Dependency-Aware Wave Scheduler & 23 Native Tools ([`src/tools.rs`](file:///Users/bozoegg/Desktop/HEAV3NS-MICRO/src/tools.rs))**:
-   - Partitions tool batches into parallel read waves and serialized mutation barriers.
-   - **File Inspection & Search**: `view_file` (`read_file`), `list_dir`, `find_files`, `file_info`, `directory_tree`, `grep_search`, `search_symbols` (multi-language AST/regex symbol & outline indexer).
-   - **File Mutation & Patching**: `write_file`, `replace_file_content` (with whitespace-tolerant `heal_fuzzy_patch` & Levenshtein `ENOENT` suggestions), `multi_replace_file_content`, `edit_file_anchored` (`line#hash` verification), `apply_unified_diff` (`apply_patch` / `v4a_apply_patch` supporting both standard Unified Diffs and V4A multi-file patches), `batch_replace_regex`, `delete_file`, `move_file`, `rollback_last_mutation`, `get_workspace_diff`.
-   - **Execution, Memory, Spill & Skills**: `run_command` (bounded head/tail capture + safety policy), `save_memory`, `search_memory`, `retrieve_spill_content`, `list_skills`, `use_skill` (exempted from lossy governor truncation).
+| Zone | Path | Files | Core Responsibility & Invariants |
+| :--- | :--- | :---: | :--- |
+| **`PLUMBING`** | [`src/plumbing/`](src/plumbing/mod.rs) | 6 | Stateless leaf utilities (`fnv1a_32`, `levenshtein`, `estimate_text_tokens`, `extract_json_roots`, `repair_json_string`, `DeterministicSecretRedactor`, `SafetyPolicy`, `DeterministicPatchEngine`). **0 upward imports, 0 mutable state (`SPI-205`).** |
+| **`DOMAIN`** | [`src/domain/`](src/domain/mod.rs) | 16 | Pure domain entities, formal `I<Name>` traits ([`src/domain/interfaces/mod.rs`](src/domain/interfaces/mod.rs)), value types ([`src/domain/types/`](src/domain/types/mod.rs)), 16-MiB [`ArenaAllocator`](src/domain/arena.rs), [`MemoryStore`](src/domain/memory.rs), [`CompactionPolicy`](src/domain/compaction.rs), [`SwarmAssignment`](src/domain/swarm.rs), and [`ToolCallArgParser`](src/domain/tool_parser.rs). **0% I/O (`SPI-206`), `<= 3` structs/file (`SPI-203`).** |
+| **`INFRASTRUCTURE`** | [`src/infrastructure/`](src/infrastructure/mod.rs) | 8 | Concrete I/O adapters implementing `domain/interfaces`: [`HttpProvider`](src/infrastructure/http_provider.rs), [`ScriptedProvider`](src/infrastructure/scripted_provider.rs), [`SessionVfs`](src/infrastructure/vfs_store.rs), [`SkillsIngestor`](src/infrastructure/vfs_store.rs), [`FileSessionPersistence`](src/infrastructure/vfs_store.rs), [`TransactionJournal`](src/infrastructure/transaction_journal.rs), [`execute_shell_command`](src/infrastructure/shell_runner.rs), [`dispatch_fs_tool`](src/infrastructure/fs_tools.rs), and [`search_tools`](src/infrastructure/search_tools.rs). |
+| **`CORE`** | [`src/core/`](src/core/mod.rs) | 10 | Use-case orchestration: [`AgentEngine`](src/core/engine.rs), [`slash_and_swarm`](src/core/slash_and_swarm.rs), [`SessionStore`](src/core/session_store.rs), [`SessionCompactor`](src/core/session_store.rs), [`ToolRegistry`](src/core/tool_registry.rs), [`tool_specs`](src/core/tool_specs.rs), [`ToolOutputGovernor`](src/core/tool_governor.rs), [`RuntimeRequestQueue`](src/core/request_queue.rs), [`flight_runner`](src/core/flight_runner.rs), and [`substrate_tests`](src/core/substrate_tests.rs). |
+| **`UI`** | [`src/ui/`](src/ui/mod.rs), [`src/lib.rs`](src/lib.rs), [`src/main.rs`](src/main.rs) | 4 | CLI argument parser, interactive REPL, headless JSONL stdio worker ([`cli_presenter.rs`](src/ui/cli_presenter.rs)), and Composition Roots ([`lib.rs`](src/lib.rs), [`main.rs`](src/main.rs)). |
 
 ---
 
-## Phase 4 — Validation & Usage
+## Core Capabilities
+
+1. **Arena Slab Allocator (`src/domain/arena.rs`)**: 16-MiB 4-byte aligned bump-pointer slab with $O(1)$ snapshot rewind (`SlabBufferSnapshot`), zero GC pause, and deterministic JSONL session persistence (`src/core/session_store.rs`).
+2. **Transactional Virtual File System (`src/infrastructure/vfs_store.rs`)**: FNV-1a + byte-length disk baseline capture (`VfsDiskBaseline`), conflict detection against external edits before commit, and atomic multi-state snapshot rewind across transcript, VFS, memory, and Arena slab.
+3. **Self-Healing Tool Argument Parser (`src/domain/tool_parser.rs` & `src/plumbing/json_repair.rs`)**: 3-stage recovery (Fast-Path JSON -> Heuristic JSON repair of markdown fences, comments, Python literals, single quotes, trailing commas, unclosed brackets -> Key-Value regex fallback), 60+ parameter alias canonicalization, and Levenshtein fuzzy matching.
+4. **23 Native Built-In Tools & Dependency Wave Scheduler (`src/core/tool_registry.rs` & `src/core/tool_specs.rs`)**: Parallel read waves (`tokio::JoinSet`), isolated write barriers, V4A multi-file patches (`*** Begin Patch`), whitespace-tolerant fuzzy healing (`95%` confidence), atomic rollback journal (`TransactionJournal`), and `ToolLoopBreaker`.
+5. **Multi-Turn ReAct Engine, Topological Swarm, & 10 Slash Commands (`src/core/engine.rs` & `src/core/slash_and_swarm.rs`)**: Full ReAct loop, `/help`, `/status`, `/compact`, `/clear`, `/memory`, `/vfs`, `/commit`, `/skills`, `/rewind`, `/doctor`, and topological multi-agent swarm execution (`AgentEngine::run_swarm`).
+
+---
+
+## Quick Start & Verification
 
 ```bash
-# Run all 8 unit tests + FT-01..FT-05 Agent Flight Test suite
+# 1. Run all unit & integration tests
 cargo test
 
-# Run the 5-scenario Agent Flight Test suite (FT-01..FT-05)
+# 2. Build optimized release binary (~2.3 MiB stripped)
+cargo build --release
+
+# 3. Run the 5-scenario Agent Flight Test suite (FT-01..FT-05)
 ./target/release/heav3ns-micro --flight
 
-# Run substrate micro-benchmarks + Flight Test suite (JSON)
+# 4. Run substrate micro-benchmarks + Flight Test suite
 ./target/release/heav3ns-micro --bench
 
-# Run deterministic smoke check
+# 5. Run deterministic runtime smoke self-check
 ./target/release/heav3ns-micro --smoke
 
-# Run headless newline-delimited JSONL stdio worker
-./target/release/heav3ns-micro --stdio
+# 6. Run strict Joyzoning architectural audit
+node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --theme strict
 ```

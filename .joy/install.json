@@ -1,0 +1,196 @@
+{
+  "schema": 1,
+  "version": "1.0.0",
+  "targets": [
+    "antigravity",
+    "claude",
+    "cline",
+    "codex",
+    "copilot",
+    "cursor",
+    "gemini",
+    "windsurf"
+  ],
+  "features": {
+    "mcp": true,
+    "hooks": true
+  },
+  "launcher": {
+    "run": "npx -y heav3ns-joy@1.0.0",
+    "mcp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "heav3ns-joy@1.0.0",
+        "mcp"
+      ]
+    },
+    "hook": "npx -y heav3ns-joy@1.0.0 hook post-edit"
+  },
+  "entries": {
+    ".agents/plugins/joy/mcp_config.json#file": {
+      "kind": "file",
+      "target": "antigravity",
+      "sha": "bb303a876b732bdb2600c55b2f01573e62a65737f76eb62027e4b7dad5ce468f",
+      "createdFile": true
+    },
+    ".agents/plugins/joy/plugin.json#file": {
+      "kind": "file",
+      "target": "antigravity",
+      "sha": "5429dd66fcdb7258834ae76a92541753bd655262761e02b72b02cb0029f6fc18",
+      "createdFile": true
+    },
+    ".agents/skills/joy-swarm/SKILL.md#file": {
+      "kind": "file",
+      "target": "antigravity",
+      "sha": "7462b8b009afc7db19f64f3e52b3a313db68f6366d0c4f50eb5c8b3516d26eaa",
+      "createdFile": true
+    },
+    ".agents/skills/joy-trinity/SKILL.md#file": {
+      "kind": "file",
+      "target": "antigravity",
+      "sha": "b6eb5786eaec3adc82e15b9c56f1ebed666ee644fd76f754ab8437df5cefc84a",
+      "createdFile": true
+    },
+    ".agents/skills/joyzoning/SKILL.md#file": {
+      "kind": "file",
+      "target": "antigravity",
+      "sha": "9e028b63b8db833ae5e545cde3115ee204aee14be489c6ff07fc74371bf60208",
+      "createdFile": true
+    },
+    ".claude/agents/joy-auditor.md#file": {
+      "kind": "file",
+      "target": "claude",
+      "sha": "4167d32c9e1be70c6d63d7fef458b5086e28ef99c57175f74072aec12ac690d2",
+      "createdFile": true
+    },
+    ".claude/commands/joy-check.md#file": {
+      "kind": "file",
+      "target": "claude",
+      "sha": "cca324406f61e7a859d83a0a8c88aedb7f71152e836ea62090e52274c2c40427",
+      "createdFile": true
+    },
+    ".claude/commands/joy-swarm.md#file": {
+      "kind": "file",
+      "target": "claude",
+      "sha": "32dbfc14e41598fafcb798d7a1ca6c9f6e412f61e38129ce3f48a535d15e11c2",
+      "createdFile": true
+    },
+    ".claude/settings.json#jsonArray:hooks.PostToolUse": {
+      "kind": "jsonArray",
+      "target": "claude",
+      "jsonPath": [
+        "hooks",
+        "PostToolUse"
+      ],
+      "entrySha": "ce09c1012e73de7211ce6ae803b8d6763af5072821cf7b7f2becd7a1879bf2d9",
+      "createdFile": true
+    },
+    ".claude/skills/joy-swarm/SKILL.md#file": {
+      "kind": "file",
+      "target": "claude",
+      "sha": "7462b8b009afc7db19f64f3e52b3a313db68f6366d0c4f50eb5c8b3516d26eaa",
+      "createdFile": true
+    },
+    ".claude/skills/joy-trinity/SKILL.md#file": {
+      "kind": "file",
+      "target": "claude",
+      "sha": "b6eb5786eaec3adc82e15b9c56f1ebed666ee644fd76f754ab8437df5cefc84a",
+      "createdFile": true
+    },
+    ".claude/skills/joyzoning/SKILL.md#file": {
+      "kind": "file",
+      "target": "claude",
+      "sha": "9e028b63b8db833ae5e545cde3115ee204aee14be489c6ff07fc74371bf60208",
+      "createdFile": true
+    },
+    ".clinerules/joyzoning.md#file": {
+      "kind": "file",
+      "target": "cline",
+      "sha": "8976f5d0e8ecbae07d78e92818e9c399027fb17fdb55b000cea139dbab310a45",
+      "createdFile": true
+    },
+    ".cursor/mcp.json#json:mcpServers.joy": {
+      "kind": "json",
+      "target": "cursor",
+      "jsonPath": [
+        "mcpServers",
+        "joy"
+      ],
+      "entrySha": "da07e7819306a4ba03dfccb1edb4868b9eb847da4963f5527e1e142603702025",
+      "createdFile": true
+    },
+    ".cursor/rules/joyzoning.mdc#file": {
+      "kind": "file",
+      "target": "cursor",
+      "sha": "faa97953c0e8de16c95282326296742151782e00ad3731e154e9f2859a7d54d5",
+      "createdFile": true
+    },
+    ".gemini/settings.json#json:mcpServers.joy": {
+      "kind": "json",
+      "target": "gemini",
+      "jsonPath": [
+        "mcpServers",
+        "joy"
+      ],
+      "entrySha": "da07e7819306a4ba03dfccb1edb4868b9eb847da4963f5527e1e142603702025",
+      "createdFile": true
+    },
+    ".github/copilot-instructions.md#block:copilot": {
+      "kind": "block",
+      "target": "copilot",
+      "blockId": "copilot",
+      "createdFile": true
+    },
+    ".mcp.json#json:mcpServers.joy": {
+      "kind": "json",
+      "target": "claude",
+      "jsonPath": [
+        "mcpServers",
+        "joy"
+      ],
+      "entrySha": "1388712b9e5e1f6ed3e9e8254a20d287a48c8556b8f4012a15142fceb8e49c65",
+      "createdFile": true
+    },
+    ".vscode/mcp.json#json:servers.joy": {
+      "kind": "json",
+      "target": "copilot",
+      "jsonPath": [
+        "servers",
+        "joy"
+      ],
+      "entrySha": "1388712b9e5e1f6ed3e9e8254a20d287a48c8556b8f4012a15142fceb8e49c65",
+      "createdFile": true
+    },
+    ".windsurf/rules/joyzoning.md#file": {
+      "kind": "file",
+      "target": "windsurf",
+      "sha": "09bf64045c8a85b6bdc0af44dd2d6a3d37dfdcdee05b9d3b44620ae4e5d66c9b",
+      "createdFile": true
+    },
+    "AGENTS.md#block:agents": {
+      "kind": "block",
+      "target": "universal",
+      "blockId": "agents",
+      "createdFile": true
+    },
+    "CLAUDE.md#block:claude": {
+      "kind": "block",
+      "target": "claude",
+      "blockId": "claude",
+      "createdFile": true
+    },
+    "GEMINI.md#block:gemini": {
+      "kind": "block",
+      "target": "gemini",
+      "blockId": "gemini",
+      "createdFile": true
+    },
+    "SOUL.md#block:soul": {
+      "kind": "block",
+      "target": "universal",
+      "blockId": "soul",
+      "createdFile": true
+    }
+  }
+}

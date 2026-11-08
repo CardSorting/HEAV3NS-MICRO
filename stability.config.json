@@ -1,0 +1,71 @@
+{
+  "version": "1.0.0",
+  "theme": "strict",
+  "scanAgentConfig": true,
+  "layers": {
+    "domain": {
+      "optimalLogicDensity": 0.15,
+      "maxIOEntropy": 0.0,
+      "maxComplexity": 5000,
+      "paths": [
+        "src/domain"
+      ]
+    },
+    "core": {
+      "optimalLogicDensity": 0.05,
+      "maxIOEntropy": 0.0,
+      "maxComplexity": 3000,
+      "paths": [
+        "src/core"
+      ]
+    },
+    "infrastructure": {
+      "optimalLogicDensity": 0.05,
+      "maxIOEntropy": 1.0,
+      "maxComplexity": 10000,
+      "paths": [
+        "src/infrastructure"
+      ]
+    },
+    "plumbing": {
+      "optimalLogicDensity": 0.0,
+      "maxIOEntropy": 0.0,
+      "maxComplexity": 500,
+      "paths": [
+        "src/plumbing"
+      ]
+    },
+    "ui": {
+      "optimalLogicDensity": 0.0,
+      "maxIOEntropy": 1.0,
+      "maxComplexity": 15000,
+      "paths": [
+        "src/ui"
+      ]
+    }
+  },
+  "global": {
+    "maxPathDepth": 4,
+    "maxRelativeImportDepth": 3,
+    "integrityAlertThreshold": 0.7,
+    "fileSizeTiers": {
+      "fatModuleWarning": 800,
+      "tier1Max": 1000,
+      "tier2Max": 1500,
+      "hardSimplicityCap": 2500
+    }
+  },
+  "compositionRoots": [
+    "src/lib.rs",
+    "src/main.rs"
+  ],
+  "exclude": [
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    "out",
+    "coverage",
+    ".git"
+  ]
+}
