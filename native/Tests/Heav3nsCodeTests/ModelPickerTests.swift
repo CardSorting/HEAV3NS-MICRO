@@ -1,0 +1,490 @@
+// [LAYER: PLUMBING]
+import AppKit
+import XCTest
+@testable import Heav3nsCode
+
+final class ModelPickerTests: XCTestCase {
+    private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+    private let state: [String: Any] = ["provider": "openai-codex", "model": "gpt-5.6-terra", "revision": 0,
+        "providers": [["id": "openai-codex", "label": "OpenAI Codex", "models": ["gpt-5.6-terra"], "detail": "Existing connection"]]]
+    func testReopeningDuringKeySaveReconcilesAndUnlocksControls() throws {
+        _ = NSApplication.shared
+        var requests = [(String, [String: Any], (Result<[String: Any], Error>) -> Void)]()
+        var data = state
+        data["providers"] = (state["providers"] as! [[String: Any]]) + [["id": "openrouter", "label": "OpenRouter", "detail": "API key", "models": ["org/model"]]]
+        let parent = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 720), styleMask: [.titled], backing: .buffered, defer: false)
+        let picker = ModelPicker(request: { requests.append(($0, $1, $2)) }, connected: { true }, supportsCredentials: { true }, canApply: { true }, onSelection: { _ in })
+        defer { picker.dismiss(); parent.orderOut(nil) }
+        picker.present(for: parent); requests[0].2(.success(data)); picker.providerProbe("openrouter")
+        requests[1].2(.success(["saved": false, "configured": false]))
+        picker.keyProbe("private-key"); picker.dismiss()
+        requests[2].2(.success(["saved": true, "configured": true]))
+        picker.present(for: parent); requests[3].2(.success(data))
+        XCTAssertEqual(requests[4].0, "openrouter.status")
+        requests[4].2(.success(["saved": true, "configured": true]))
+        let views = descendants(try XCTUnwrap(picker.window?.contentView))
+        let field = try XCTUnwrap(views.compactMap { $0 as? NSSecureTextField }.first)
+        XCTAssertTrue(field.isEnabled); XCTAssertEqual(field.stringValue, "")
+        XCTAssertTrue(try XCTUnwrap(views.compactMap { $0 as? NSButton }.first { $0.title == "Remove Key" }).isEnabled)
+        XCTAssertTrue((picker.diagnostics["keyStatus"] as? String ?? "").contains("saved"))
+    }
+
+    func testOpenRouterKeySetupAndModelSelection() throws {
+        _ = NSApplication.shared
+        var requests = [(String, [String: Any], (Result<[String: Any], Error>) -> Void)]()
+        var data = state
+        data["providers"] = (state["providers"] as! [[String: Any]]) + [["id": "openrouter", "label": "OpenRouter", "detail": "API key", "models": ["anthropic/claude-sonnet-4.5"]]]
+        let picker = ModelPicker(request: { requests.append(($0, $1, $2)) }, connected: { true }, supportsCredentials: { true }, canApply: { true }, onSelection: { _ in })
+        defer { picker.dismiss() }
+        picker.load(); requests[0].2(.success(data)); picker.providerProbe("openrouter")
+        XCTAssertEqual(requests[1].0, "openrouter.status")
+        requests[1].2(.success(["saved": false, "configured": false]))
+        XCTAssertEqual(picker.diagnostics["credentialsVisible"] as? Bool, true)
+        picker.keyProbe("test-private-key")
+        XCTAssertEqual(requests[2].0, "openrouter.saveKey")
+        XCTAssertEqual(requests[2].1["apiKey"] as? String, "test-private-key")
+        requests[2].2(.success(["saved": true, "configured": true]))
+        XCTAssertFalse(String(describing: picker.diagnostics).contains("test-private-key"))
+        let views = descendants(try XCTUnwrap(picker.window?.contentView))
+        XCTAssertEqual(views.compactMap { $0 as? NSSecureTextField }.first?.stringValue, "")
+        picker.selectProbe("anthropic/claude-sonnet-4.5")
+        XCTAssertEqual(requests.last?.0, "models.select")
+        XCTAssertEqual(requests.last?.1["provider"] as? String, "openrouter")
+        XCTAssertEqual(WorkspaceModelSelection(["provider": "openrouter", "model": "org/model", "revision": 0])?.providerLabel, "OpenRouter")
+    }
+
+    func testClinePassKeySetupAndModelSelection() throws {
+        _ = NSApplication.shared
+        var requests = [(String, [String: Any], (Result<[String: Any], Error>) -> Void)]()
+        var data = state
+        data["providers"] = (state["providers"] as! [[String: Any]]) + [["id": "cline-pass", "label": "Cline Pass", "detail": "API key", "models": ["cline-pass/qwen3.7-max"]]]
+        let picker = ModelPicker(request: { requests.append(($0, $1, $2)) }, connected: { true }, supportsCredentials: { true }, canApply: { true }, onSelection: { _ in })
+        defer { picker.dismiss() }
+        picker.load(); requests[0].2(.success(data)); picker.providerProbe("cline-pass")
+        XCTAssertEqual(requests[1].0, "clinePass.status")
+        requests[1].2(.success(["saved": false, "configured": false]))
+        XCTAssertEqual(picker.diagnostics["credentialsVisible"] as? Bool, true)
+        picker.keyProbe("cline-secret-key")
+        XCTAssertEqual(requests[2].0, "clinePass.saveKey")
+        XCTAssertEqual(requests[2].1["apiKey"] as? String, "cline-secret-key")
+        requests[2].2(.success(["saved": true, "configured": true]))
+        XCTAssertFalse(String(describing: picker.diagnostics).contains("cline-secret-key"))
+        let views = descendants(try XCTUnwrap(picker.window?.contentView))
+        XCTAssertEqual(views.compactMap { $0 as? NSSecureTextField }.first?.stringValue, "")
+        picker.selectProbe("cline-pass/qwen3.7-max")
+        XCTAssertEqual(requests.last?.0, "models.select")
+        XCTAssertEqual(requests.last?.1["provider"] as? String, "cline-pass")
+        XCTAssertEqual(WorkspaceModelSelection(["provider": "cline-pass", "model": "cline-pass/qwen3.7-max", "revision": 0])?.providerLabel, "Cline Pass")
+    }
+
+    func testNousResearchKeySetupAndModelSelection() throws {
+        _ = NSApplication.shared
+        var requests = [(String, [String: Any], (Result<[String: Any], Error>) -> Void)]()
+        var data = state
+        data["providers"] = (state["providers"] as! [[String: Any]]) + [["id": "nous", "label": "Nous Research", "detail": "API key", "models": ["Hermes-4-405B"]]]
+        let picker = ModelPicker(request: { requests.append(($0, $1, $2)) }, connected: { true }, supportsCredentials: { true }, canApply: { true }, onSelection: { _ in })
+        defer { picker.dismiss() }
+        picker.load(); requests[0].2(.success(data)); picker.providerProbe("nous")
+        XCTAssertEqual(requests[1].0, "nous.status")
+        requests[1].2(.success(["saved": false, "configured": false]))
+        XCTAssertEqual(picker.diagnostics["credentialsVisible"] as? Bool, true)
+        picker.keyProbe("nous-secret-key")
+        XCTAssertEqual(requests[2].0, "nous.saveKey")
+        XCTAssertEqual(requests[2].1["apiKey"] as? String, "nous-secret-key")
+        requests[2].2(.success(["saved": true, "configured": true]))
+        XCTAssertFalse(String(describing: picker.diagnostics).contains("nous-secret-key"))
+        let views = descendants(try XCTUnwrap(picker.window?.contentView))
+        XCTAssertEqual(views.compactMap { $0 as? NSSecureTextField }.first?.stringValue, "")
+        picker.selectProbe("Hermes-4-405B")
+        XCTAssertEqual(requests.last?.0, "models.select")
+        XCTAssertEqual(requests.last?.1["provider"] as? String, "nous")
+        XCTAssertEqual(WorkspaceModelSelection(["provider": "nous", "model": "Hermes-4-405B", "revision": 0])?.providerLabel, "Nous Research")
+    }
+
+    func testOpencodeKeySetupAndModelSelection() throws {
+        _ = NSApplication.shared
+        var requests = [(String, [String: Any], (Result<[String: Any], Error>) -> Void)]()
+        var data = state
+        data["providers"] = (state["providers"] as! [[String: Any]]) + [["id": "opencode", "label": "OpenCode", "detail": "API key or session", "models": ["kimi-k2.6"]]]
+        let picker = ModelPicker(request: { requests.append(($0, $1, $2)) }, connected: { true }, supportsCredentials: { true }, canApply: { true }, onSelection: { _ in })
+        defer { picker.dismiss() }
+        picker.load(); requests[0].2(.success(data)); picker.providerProbe("opencode")
+        XCTAssertEqual(requests[1].0, "opencode.status")
+        requests[1].2(.success(["saved": false, "configured": false]))
+        XCTAssertEqual(picker.diagnostics["credentialsVisible"] as? Bool, true)
+        picker.keyProbe("opencode-secret-key")
+        XCTAssertEqual(requests[2].0, "opencode.saveKey")
+        XCTAssertEqual(requests[2].1["apiKey"] as? String, "opencode-secret-key")
+        requests[2].2(.success(["saved": true, "configured": true]))
+        XCTAssertFalse(String(describing: picker.diagnostics).contains("opencode-secret-key"))
+        let views = descendants(try XCTUnwrap(picker.window?.contentView))
+        XCTAssertEqual(views.compactMap { $0 as? NSSecureTextField }.first?.stringValue, "")
+        picker.selectProbe("kimi-k2.6")
+        XCTAssertEqual(requests.last?.0, "models.select")
+        XCTAssertEqual(requests.last?.1["provider"] as? String, "opencode")
+        XCTAssertEqual(WorkspaceModelSelection(["provider": "opencode", "model": "kimi-k2.6", "revision": 0])?.providerLabel, "OpenCode")
+    }
+
+    func testApplePlaygroundOnDeviceModelSelectionAndLoopbackBridge() throws {
+        _ = NSApplication.shared
+        var requests = [(String, [String: Any], (Result<[String: Any], Error>) -> Void)]()
+        var data = state
+        data["providers"] = (state["providers"] as! [[String: Any]]) + [["id": "apple-playground", "label": "On this Mac (Playground)", "detail": "On-device FoundationModels", "models": ["apple-foundation-model", "apple-playground-coding", "apple-image-playground"]]]
+        let picker = ModelPicker(request: { requests.append(($0, $1, $2)) }, connected: { true }, supportsCredentials: { true }, canApply: { true }, onSelection: { _ in })
+        defer { picker.dismiss() }
+        picker.load(); requests[0].2(.success(data)); picker.providerProbe("apple-playground")
+        XCTAssertEqual(picker.diagnostics["credentialsVisible"] as? Bool, false)
+        XCTAssertEqual(picker.diagnostics["appleIntelligenceVisible"] as? Bool, true)
+        XCTAssertFalse((picker.diagnostics["appleIntelligenceStatus"] as? String ?? "").isEmpty)
+        picker.selectProbe("apple-foundation-model")
+        XCTAssertEqual(requests.last?.0, "models.select")
+        XCTAssertEqual(requests.last?.1["provider"] as? String, "apple-playground")
+        XCTAssertEqual(requests.last?.1["model"] as? String, "apple-foundation-model")
+        XCTAssertEqual(WorkspaceModelSelection(["provider": "apple-playground", "model": "apple-foundation-model", "revision": 0])?.providerLabel, "On this Mac (Playground)")
+
+        let env = OnDevicePlaygroundService.shared.workerEnvironment()
+        let baseURL = try XCTUnwrap(env["HEAV3NS_LOCAL_MODEL_URL"])
+        let token = try XCTUnwrap(env["HEAV3NS_LOCAL_MODEL_TOKEN"])
+        XCTAssertEqual(env["HEAV3NS_LOCAL_TEXT_STATUS"], env["NOVA_LOCAL_TEXT_STATUS"])
+        let parsed = OnDevicePlaygroundService.parseToolCalls(from: "Checking workspace\n<tool_call>{\"name\":\"read_file\",\"arguments\":{\"path\":\"README.md\"}}</tool_call>")
+        XCTAssertEqual(parsed.cleanedText, "Checking workspace")
+        XCTAssertEqual(parsed.toolCalls.first?.name, "read_file")
+
+        let fetchedModels = expectation(description: "loopback /v1/models returns on-device models")
+        var req = URLRequest(url: try XCTUnwrap(URL(string: "\(baseURL)/models")))
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        URLSession.shared.dataTask(with: req) { body, response, error in
+            XCTAssertNil(error)
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+            let json = (try? JSONSerialization.jsonObject(with: body ?? Data())) as? [String: Any]
+            let list = json?["data"] as? [[String: Any]] ?? []
+            XCTAssertTrue(list.contains { ($0["id"] as? String) == "apple-foundation-model" })
+            fetchedModels.fulfill()
+        }.resume()
+        wait(for: [fetchedModels], timeout: 3.0)
+
+        if OnDevicePlaygroundService.shared.localTextModelStatus() == "ready" {
+            let completed = expectation(description: "loopback /v1/chat/completions runs FoundationModels")
+            var chatReq = URLRequest(url: try XCTUnwrap(URL(string: "\(baseURL)/chat/completions")))
+            chatReq.httpMethod = "POST"
+            chatReq.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            chatReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            chatReq.httpBody = try JSONSerialization.data(withJSONObject: [
+                "model": "apple-foundation-model",
+                "stream": false,
+                "messages": [
+                    ["role": "system", "content": "Reply with the single word READY."],
+                    ["role": "user", "content": "Status check"]
+                ]
+            ])
+            URLSession.shared.dataTask(with: chatReq) { body, response, error in
+                XCTAssertNil(error)
+                XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+                let json = (try? JSONSerialization.jsonObject(with: body ?? Data())) as? [String: Any]
+                let choices = json?["choices"] as? [[String: Any]]
+                let message = choices?.first?["message"] as? [String: Any]
+                let content = (message?["content"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                XCTAssertFalse(content.isEmpty)
+                completed.fulfill()
+            }.resume()
+            wait(for: [completed], timeout: 15.0)
+        }
+    }
+
+    func testListSelectionSwitchesOnceWithoutConfirmationAndClosesAfterSuccess() throws {
+        _ = NSApplication.shared
+        var requests = [(String, [String: Any], (Result<[String: Any], Error>) -> Void)]()
+        var selected: WorkspaceModelSelection?
+        let picker = ModelPicker(request: { requests.append(($0, $1, $2)) }, connected: { true }, canApply: { true }, onSelection: { selected = $0 })
+        defer { picker.dismiss() }
+        var data = state
+        data["recent"] = [["provider": "openai-codex", "model": "custom/fast"], ["provider": "openai-codex", "model": "gpt-5.6-terra"]]
+        picker.load(); requests[0].2(.success(data))
+        let views = descendants(try XCTUnwrap(picker.window?.contentView))
+        let list = try XCTUnwrap(views.compactMap { $0 as? ModelChoiceList }.first)
+        XCTAssertEqual((list.diagnostics["matches"] as? [String] ?? []).filter { $0 == "gpt-5.6-terra" }.count, 1)
+        XCTAssertEqual(picker.diagnostics["customVisible"] as? Bool, false)
+        XCTAssertFalse(views.compactMap { $0 as? NSButton }.contains { ["Done", "Revert", "Reload", "Refresh Models", "Use in This Workspace"].contains($0.title) })
+        picker.selectProbe("custom/fast"); picker.selectProbe("custom/fast")
+        XCTAssertEqual(requests.map { $0.0 }, ["models.list", "models.select"])
+        XCTAssertEqual(requests[1].1["model"] as? String, "custom/fast")
+        XCTAssertFalse(try XCTUnwrap(views.compactMap { $0 as? KeyboardListView }.first).isEnabled)
+        data["model"] = "custom/fast"; data["revision"] = 1
+        requests[1].2(.success(data))
+        XCTAssertEqual(selected?.model, "custom/fast")
+        XCTAssertEqual(picker.diagnostics["visible"] as? Bool, false)
+    }
+    func testProviderBrowsingDoesNotSwitchAndCustomReturnIsOneExplicitAction() throws {
+        _ = NSApplication.shared
+        var requests = [(String, [String: Any], (Result<[String: Any], Error>) -> Void)]()
+        var busy = false
+        let picker = ModelPicker(request: { requests.append(($0, $1, $2)) }, connected: { true }, canApply: { !busy }, onSelection: { _ in })
+        defer { picker.dismiss() }
+        let claude = "claude-subscription-directsdk-experimental"
+        var data = state
+        data["providers"] = (state["providers"] as! [[String: Any]]) + [["id": claude, "label": "Claude Code", "detail": "Existing connection", "models": ["claude-custom"]]]
+        picker.load(); requests[0].2(.success(data)); picker.providerProbe(claude)
+        XCTAssertEqual(requests.count, 1)
+        let views = descendants(try XCTUnwrap(picker.window?.contentView))
+        let list = try XCTUnwrap(views.compactMap { $0 as? ModelChoiceList }.first)
+        XCTAssertEqual(list.diagnostics["current"] as? String, "", "Browsing another provider must not imply an active selection")
+        try XCTUnwrap(views.compactMap { $0 as? NSButton }.first { $0.title == "Other model ID…" }).performClick(nil)
+        XCTAssertEqual(picker.diagnostics["customVisible"] as? Bool, true)
+        picker.editProbe("claude-exact")
+        let field = try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first { $0.accessibilityLabel() == "Custom model ID" })
+        busy = true; picker.refreshAvailability()
+        NSApp.sendAction(field.action!, to: field.target, from: field); XCTAssertEqual(requests.count, 1)
+        busy = false; picker.refreshAvailability()
+        NSApp.sendAction(field.action!, to: field.target, from: field)
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests[1].1["provider"] as? String, claude)
+        XCTAssertEqual(requests[1].1["model"] as? String, "claude-exact")
+    }
+    func testIncompatibleListedModelExplainsRecoveryWithoutSendingSelection() {
+        _ = NSApplication.shared
+        var methods = [String]()
+        var data = state
+        data["providers"] = [["id": "openai-codex", "label": "OpenAI Codex", "models": ["claude-incompatible"], "detail": "Existing connection"]]
+        let picker = ModelPicker(request: { method, _, done in methods.append(method); done(.success(data)) }, connected: { true }, canApply: { true }, onSelection: { _ in })
+        defer { picker.dismiss() }
+        picker.load(); picker.selectProbe("claude-incompatible")
+        XCTAssertEqual(methods, ["models.list"])
+        XCTAssertEqual(picker.diagnostics["customVisible"] as? Bool, true)
+        XCTAssertTrue((picker.diagnostics["status"] as? String ?? "").contains("Choose Claude Code"))
+    }
+    func testSingleRefreshReconcilesSelectionAndRefreshesCatalogWithoutApplying() throws {
+        _ = NSApplication.shared
+        var requests = [(String, [String: Any], (Result<[String: Any], Error>) -> Void)]()
+        let picker = ModelPicker(request: { requests.append(($0, $1, $2)) }, connected: { true }, supportsDiscovery: { true }, canApply: { true }, onSelection: { _ in })
+        defer { picker.dismiss() }
+        picker.load(); requests[0].2(.success(state))
+        let discovery: [String: Any] = ["provider": "openai-codex", "models": [["id": "gpt-5.6-terra", "label": "Terra", "detail": ""], ["id": "custom/draft", "label": "Custom route", "detail": ""]], "state": "ready", "source": "API", "message": ""]
+        requests[1].2(.success(discovery))
+        picker.editProbe("custom/draft"); picker.refreshProbe()
+        XCTAssertEqual(requests[2].0, "models.list")
+        requests[2].2(.success(state))
+        XCTAssertEqual(requests[3].0, "models.discover")
+        XCTAssertEqual(requests[3].1["refresh"] as? Bool, true)
+        requests[3].2(.success(discovery))
+        XCTAssertEqual(picker.diagnostics["draft"] as? String, "custom/draft")
+        XCTAssertEqual(picker.diagnostics["customVisible"] as? Bool, true)
+        XCTAssertFalse(requests.contains { $0.0 == "models.select" })
+    }
+    func testDismissedPickerRejectsDelayedListAndCustomActivation() {
+        _ = NSApplication.shared
+        var methods = [String]()
+        var data = state; data["recent"] = [["provider": "openai-codex", "model": "other-model"]]
+        let picker = ModelPicker(request: { method, _, done in methods.append(method); done(.success(data)) }, connected: { true }, canApply: { true }, onSelection: { _ in })
+        picker.load(); picker.editProbe("custom-draft"); picker.dismiss()
+        picker.refreshAvailability(); picker.selectProbe("other-model")
+        XCTAssertEqual(methods, ["models.list"])
+        XCTAssertEqual(picker.diagnostics["applyEnabled"] as? Bool, false)
+    }
+    func testFailedSavePreservesTypedModelAndRequiresReconciliationBeforeRetry() throws {
+        _ = NSApplication.shared
+        var pending: ((Result<[String: Any], Error>) -> Void)?
+        var methods = [String]()
+        let picker = ModelPicker(request: { method, _, reply in methods.append(method); pending = reply }, connected: { true }, canApply: { true }, onSelection: { _ in })
+        defer { picker.dismiss() }
+        picker.load(); pending?(.success(state))
+        let views = descendants(try XCTUnwrap(picker.window?.contentView))
+        let model = try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first { $0.accessibilityLabel() == "Custom model ID" })
+        let apply = try XCTUnwrap(views.compactMap { $0 as? NSButton }.first { $0.title == "Switch Model" })
+        model.stringValue = "custom/model"; picker.refreshAvailability(); apply.performClick(nil)
+        XCTAssertFalse(apply.isEnabled)
+        pending?(.failure(BridgeError.message("Response lost")))
+        XCTAssertEqual(model.stringValue, "custom/model")
+        XCTAssertFalse(apply.isEnabled)
+        apply.performClick(nil); XCTAssertEqual(methods, ["models.list", "models.select"])
+        picker.load(); pending?(.success(state)); XCTAssertEqual(model.stringValue, "custom/model"); XCTAssertTrue(apply.isEnabled)
+    }
+    func testRunningWorkDisablesApplyAndLateReadCannotReopenDismissedPicker() throws {
+        _ = NSApplication.shared
+        var reply: ((Result<[String: Any], Error>) -> Void)?
+        var busy = true, selected = 0
+        let picker = ModelPicker(request: { _, _, completion in reply = completion }, connected: { true }, canApply: { !busy }, onSelection: { _ in selected += 1 })
+        picker.load(); reply?(.success(state))
+        let apply = try XCTUnwrap(descendants(try XCTUnwrap(picker.window?.contentView)).compactMap { $0 as? NSButton }.first { $0.title == "Switch Model" })
+        XCTAssertFalse(apply.isEnabled)
+        busy = false; picker.refreshAvailability(); XCTAssertFalse(apply.isEnabled, "Unchanged selection has nothing to apply")
+        picker.load(); picker.dismiss(); reply?(.success(state)); XCTAssertEqual(selected, 1)
+    }
+    func testPickerFollowsWorkspaceAppearanceAndRecentersAfterResize() throws {
+        _ = NSApplication.shared
+        let parent = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 900, height: 700), styleMask: [.titled], backing: .buffered, defer: false)
+        let picker = ModelPicker(request: { _, _, _ in }, connected: { true }, canApply: { true }, onSelection: { _ in })
+        defer { picker.dismiss(); parent.orderOut(nil) }
+        parent.appearance = NSAppearance(named: .darkAqua)
+        picker.present(for: parent)
+        XCTAssertEqual(picker.window?.appearance?.name, .darkAqua)
+        parent.setContentSize(NSSize(width: 720, height: 480))
+        picker.syncPresentation(recenter: true)
+        XCTAssertEqual(try XCTUnwrap(picker.window).frame.midX, parent.frame.midX, accuracy: 1)
+        parent.appearance = NSAppearance(named: .aqua); picker.syncPresentation()
+        XCTAssertEqual(picker.window?.appearance?.name, .aqua)
+    }
+    func testReloadAndExternalChangesPreserveTheDraftAndRejectOlderReplies() throws {
+        _ = NSApplication.shared
+        var reply: ((Result<[String: Any], Error>) -> Void)?
+        let picker = ModelPicker(request: { _, _, done in reply = done }, connected: { true }, canApply: { true }, onSelection: { _ in })
+        defer { picker.dismiss() }
+        picker.load(); reply?(.success(state))
+        let views = descendants(try XCTUnwrap(picker.window?.contentView))
+        let model = try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first { $0.accessibilityLabel() == "Custom model ID" })
+        let buttons = views.compactMap { $0 as? NSButton }
+        let apply = try XCTUnwrap(buttons.first { $0.title == "Switch Model" })
+        XCTAssertFalse(buttons.contains { ["Revert", "Done", "Reload", "Use in This Workspace"].contains($0.title) })
+        XCTAssertFalse(apply.isEnabled)
+        model.stringValue = "custom/draft"; picker.refreshAvailability()
+        var newer = state; newer["revision"] = 2; newer["model"] = "custom/confirmed"
+        picker.receive(newer)
+        XCTAssertEqual(model.stringValue, "custom/draft"); XCTAssertTrue(apply.isEnabled)
+        picker.load(); reply?(.success(state))
+        XCTAssertEqual(model.stringValue, "custom/draft"); XCTAssertFalse(apply.isEnabled)
+        picker.load(); reply?(.success(newer))
+        XCTAssertEqual(model.stringValue, "custom/draft"); XCTAssertTrue(apply.isEnabled)
+    }
+    func testRecentChoicesRememberProviderModelsAcrossPickerInstances() throws {
+        _ = NSApplication.shared
+        let claude = "claude-subscription-directsdk-experimental"
+        var data = state
+        data["providers"] = (state["providers"] as! [[String: Any]]) + [["id": claude, "label": "Claude Code", "detail": "Existing CLI", "models": ["claude-sonnet-5[1m]"]]]
+        data["recent"] = [["provider": "openai-codex", "model": "gpt-5.6-terra"], ["provider": claude, "model": "claude-opus-5[1m]"]]
+        let picker = ModelPicker(request: { _, _, done in done(.success(data)) }, connected: { true }, canApply: { true }, onSelection: { _ in })
+        defer { picker.dismiss() }; picker.load()
+        let views = descendants(try XCTUnwrap(picker.window?.contentView))
+        let popup = try XCTUnwrap(views.compactMap { $0 as? NSPopUpButton }.first { $0.accessibilityLabel() == "Provider" })
+        let model = try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first { $0.accessibilityLabel() == "Custom model ID" })
+        popup.selectItem(at: 1); NSApp.sendAction(popup.action!, to: popup.target, from: popup)
+        XCTAssertEqual(model.stringValue, "claude-opus-5[1m]")
+        model.stringValue = "claude-custom-6"; picker.refreshAvailability()
+        popup.selectItem(at: 0); NSApp.sendAction(popup.action!, to: popup.target, from: popup)
+        popup.selectItem(at: 1); NSApp.sendAction(popup.action!, to: popup.target, from: popup)
+        XCTAssertEqual(model.stringValue, "claude-custom-6")
+    }
+    func testMalformedCatalogAndUncertainPersistenceCannotEnableWrites() throws {
+        _ = NSApplication.shared
+        var data = state; data["providers"] = (state["providers"] as! [[String: Any]]) + (state["providers"] as! [[String: Any]])
+        XCTAssertNil(WorkspaceModelCatalog(data))
+        for revision: Any in [true, -1, 0.5, Double.infinity] {
+            var invalid = state; invalid["revision"] = revision; XCTAssertNil(WorkspaceModelCatalog(invalid))
+        }
+        for model in ["x\n", "", String(repeating: "a", count: 201)] {
+            var invalid = state; invalid["model"] = model; XCTAssertNil(WorkspaceModelCatalog(invalid))
+        }
+        var blocked = state; blocked["blocked"] = "Close and reopen to recover model settings."
+        let picker = ModelPicker(request: { _, _, done in done(.success(blocked)) }, connected: { true }, canApply: { true }, onSelection: { _ in })
+        defer { picker.dismiss() }; picker.load()
+        let views = descendants(try XCTUnwrap(picker.window?.contentView))
+        try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first { $0.accessibilityLabel() == "Custom model ID" }).stringValue = "custom/model"
+        picker.refreshAvailability()
+        XCTAssertFalse(try XCTUnwrap(views.compactMap { $0 as? NSButton }.first { $0.title == "Switch Model" }).isEnabled)
+    }
+    func testInvalidSelectionCannotEnableWrites() {
+        XCTAssertNil(WorkspaceModelSelection([:]))
+        XCTAssertNil(WorkspaceModelSelection(["provider": "openai-codex", "model": "x", "revision": -1]))
+    }
+    func testProviderDiscoveryPreservesTypingAndLateResultsCannotReplaceAnotherProvider() throws {
+        _ = NSApplication.shared
+        var requests = [(String, [String: Any], (Result<[String: Any], Error>) -> Void)]()
+        let picker = ModelPicker(request: { requests.append(($0, $1, $2)) }, connected: { true }, supportsDiscovery: { true }, canApply: { true }, onSelection: { _ in })
+        defer { picker.dismiss() }
+        var data = state
+        let claude = "claude-subscription-directsdk-experimental"
+        data["providers"] = (state["providers"] as! [[String: Any]]) + [["id": claude, "label": "Claude Code", "detail": "Existing connection", "models": [String]()]]
+        picker.load(); requests[0].2(.success(data))
+        XCTAssertEqual(requests[1].0, "models.discover")
+        let views = descendants(try XCTUnwrap(picker.window?.contentView))
+        let model = try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first { $0.accessibilityLabel() == "Custom model ID" })
+        let provider = try XCTUnwrap(views.compactMap { $0 as? NSPopUpButton }.first { $0.accessibilityLabel() == "Provider" })
+        model.stringValue = "custom-typed"; picker.refreshAvailability()
+        provider.selectItem(at: 1); NSApp.sendAction(provider.action!, to: provider.target, from: provider)
+        XCTAssertEqual(requests[2].1["provider"] as? String, claude)
+        model.stringValue = "claude-typed"; picker.refreshAvailability()
+        requests[1].2(.success(["provider": "openai-codex", "models": [["id": "fresh-openai", "label": "Fresh", "detail": ""]], "state": "ready", "source": "API", "message": "Listed by provider", "checkedAt": 1000]))
+        XCTAssertEqual(model.stringValue, "claude-typed"); XCTAssertFalse((picker.diagnostics["modelSuggestions"] as? [String] ?? []).contains("fresh-openai"))
+        requests[2].2(.success(["provider": claude, "models": [["id": "claude-future", "label": "Future", "detail": "Provider's route"]], "state": "ready", "source": "Claude Code", "message": "Listed by provider", "checkedAt": 1000]))
+        XCTAssertEqual(model.stringValue, "claude-typed"); XCTAssertTrue((picker.diagnostics["modelSuggestions"] as? [String] ?? []).contains("claude-future"))
+        provider.selectItem(at: 0); NSApp.sendAction(provider.action!, to: provider.target, from: provider)
+        XCTAssertEqual(model.stringValue, "custom-typed"); XCTAssertTrue((picker.diagnostics["modelSuggestions"] as? [String] ?? []).contains("fresh-openai"))
+    }
+    func testDiscoveryFailureDoesNotDisableCustomModelOrReplayAfterDismissal() throws {
+        _ = NSApplication.shared
+        var replies = [(Result<[String: Any], Error>) -> Void]()
+        let picker = ModelPicker(request: { _, _, reply in replies.append(reply) }, connected: { true }, supportsDiscovery: { true }, canApply: { true }, onSelection: { _ in })
+        picker.load(); replies[0](.success(state))
+        let views = descendants(try XCTUnwrap(picker.window?.contentView))
+        let model = try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first { $0.accessibilityLabel() == "Custom model ID" })
+        model.stringValue = "custom-model"; picker.refreshAvailability()
+        replies[1](.failure(BridgeError.message("Timeout")))
+        XCTAssertTrue(try XCTUnwrap(views.compactMap { $0 as? NSButton }.first { $0.title == "Switch Model" }).isEnabled)
+        let refresh = try XCTUnwrap(views.compactMap { $0 as? NSButton }.first { $0.title == "Refresh" })
+        refresh.performClick(nil); XCTAssertFalse(refresh.isEnabled)
+        picker.dismiss()
+        replies[2](.success(["provider": "openai-codex", "models": [["id": "late-model", "label": "Late", "detail": ""]], "state": "ready", "source": "API", "message": ""] ))
+        XCTAssertEqual(model.stringValue, "custom-model"); XCTAssertFalse((picker.diagnostics["modelSuggestions"] as? [String] ?? []).contains("late-model"))
+    }
+    func testDiscoveryRejectsDuplicateIDsAndInvalidFreshness() {
+        let model = ["id": "model", "label": "Model", "detail": ""]
+        var data: [String: Any] = ["provider": "openai-codex", "models": [model], "state": "ready", "source": "API", "message": ""]
+        XCTAssertNotNil(WorkspaceModelDiscovery(data))
+        data["models"] = [model, model]; XCTAssertNil(WorkspaceModelDiscovery(data))
+        data["models"] = [model]; data["checkedAt"] = true; XCTAssertNil(WorkspaceModelDiscovery(data))
+        data["checkedAt"] = Double.infinity; XCTAssertNil(WorkspaceModelDiscovery(data))
+    }
+    func testReconnectPreservesOfflineEditsRejectsOldCallbacksAndReconcilesNewRuntime() throws {
+        _ = NSApplication.shared
+        var connected = true
+        var replies = [(Result<[String: Any], Error>) -> Void]()
+        var methods = [String]()
+        var applied = [WorkspaceModelSelection]()
+        let picker = ModelPicker(request: { method, _, reply in methods.append(method); replies.append(reply) }, connected: { connected }, canApply: { true }, onSelection: { applied.append($0) })
+        defer { picker.dismiss() }
+        var original = state; original["revision"] = 4
+        picker.load(); replies[0](.success(original))
+        let views = descendants(try XCTUnwrap(picker.window?.contentView))
+        let model = try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first { $0.accessibilityLabel() == "Custom model ID" })
+        let apply = try XCTUnwrap(views.compactMap { $0 as? NSButton }.first { $0.title == "Switch Model" })
+        model.stringValue = "custom/pending"; picker.refreshAvailability(); apply.performClick(nil)
+        XCTAssertEqual(methods, ["models.list", "models.select"])
+        connected = false; picker.connectionChanged()
+        XCTAssertTrue(model.isEnabled, "Disconnected edits must remain selectable and editable")
+        XCTAssertFalse(apply.isEnabled)
+        model.stringValue = "custom/offline-edit"; picker.refreshAvailability()
+        var late = original; late["revision"] = 5; late["model"] = "custom/pending"
+        replies[1](.success(late))
+        XCTAssertEqual(applied.count, 1)
+        connected = true; picker.connectionChanged()
+        XCTAssertEqual(methods.last, "models.list"); XCTAssertFalse(apply.isEnabled)
+        replies[2](.success(state))
+        XCTAssertEqual(model.stringValue, "custom/offline-edit")
+        XCTAssertEqual(applied.last?.revision, 0, "A new runtime may restore an earlier durable revision")
+        XCTAssertTrue(apply.isEnabled)
+    }
+    func testClosingAndReopeningKeepsDraftAndDoesNotReplayAnUncertainSave() throws {
+        _ = NSApplication.shared
+        var replies = [(Result<[String: Any], Error>) -> Void]()
+        var methods = [String]()
+        let picker = ModelPicker(request: { method, _, reply in methods.append(method); replies.append(reply) }, connected: { true }, canApply: { true }, onSelection: { _ in })
+        defer { picker.dismiss() }
+        picker.load(); replies[0](.success(state))
+        let views = descendants(try XCTUnwrap(picker.window?.contentView))
+        let model = try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first { $0.accessibilityLabel() == "Custom model ID" })
+        let apply = try XCTUnwrap(views.compactMap { $0 as? NSButton }.first { $0.title == "Switch Model" })
+        model.stringValue = "custom/draft"; picker.refreshAvailability(); apply.performClick(nil)
+        picker.dismiss(); picker.load()
+        XCTAssertEqual(methods, ["models.list", "models.select", "models.list"])
+        var saved = state; saved["model"] = "custom/draft"; saved["revision"] = 1
+        replies[2](.success(saved)); replies[1](.failure(BridgeError.message("Old connection closed")))
+        XCTAssertEqual(model.stringValue, "custom/draft"); XCTAssertFalse(apply.isEnabled)
+        XCTAssertFalse(views.compactMap { $0 as? NSTextField }.contains { $0.stringValue.contains("Old connection") })
+    }
+
+    func testCatalogAcceptsProviderAliasRoutesWithLeadingTilde() {
+        var data = state
+        data["providers"] = [["id": "openai-codex", "label": "OpenAI Codex", "detail": "x", "models": ["gpt-5.6-terra"]],
+                             ["id": "nous", "label": "Nous Research", "detail": "x", "models": ["~x-ai/grok-4.5", "Hermes-4-405B", "~anthropic/claude-opus-latest"]]]
+        XCTAssertNotNil(WorkspaceModelCatalog(data))
+        for bad in ["~", "~~a", "~/x", "-a", ""] { XCTAssertFalse(WorkspaceModelSelection.validModel(bad), bad) }
+    }
+}

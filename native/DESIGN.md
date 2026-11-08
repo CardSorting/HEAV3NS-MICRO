@@ -1,0 +1,471 @@
+---
+name: HEAV3NS-CODE Native
+description: A native conversation workspace for directing LUMI and reviewing its work.
+---
+<!-- [LAYER: UI] -->
+
+# Design System: HEAV3NS-CODE Native
+
+## Overview
+
+**Creative North Star: "A native workspace for LUMI"**
+
+Human–agent conversation leads this macOS workspace. A quiet native shell gives the conversation room to breathe, keeps its composer available, and places project navigation and read-only evidence within reach. System typography, semantic appearance, SF Symbols, and familiar AppKit controls provide the visual character.
+
+This records the built translation of [journey-v3](../ui-prototypes/journey-v3/), approved for implementation on September 30, 2026: projects and conversations on the left, a dominant central conversation with a unified composer, and secondary Walkthrough / Changes / Code / Run on the right. The live Walkthrough extends that system with inspectable activity that follows current work automatically, with direct repair-history links. Native filename/path search and deliberate file activation connect intent to read-only evidence; conversation changes preserve separate drafts and clear stale inspection. Distinct You and LUMI messages link to reviewed local checkpoints; Run offers supporting local process control and browser preview. The same native system carries preparation, welcome, browser sign-in, the project library, and a Pods command station with run timing, project filters, contained reader-controlled activity and inline decisions across separate loaded projects. Generated concepts remain references; no raster concept ships inside the app UI.
+
+Swift/AppKit remains the implementation. [PRODUCT.md](PRODUCT.md), [JOURNEY-V3.md](../docs/desktop/JOURNEY-V3.md), the [Walkthrough contract](../docs/desktop/WALKTHROUGH.md), and [checkpoint and Run behavior](../docs/desktop/CHECKPOINTS-AND-RUN.md) define product and runtime boundaries. This record applies only to native/. Identity-only portable frontmatter is extended by [.impeccable/design.json](.impeccable/design.json), which preserves native semantic bindings and point measurements without inventing CSS colors, web previews, or tonal ramps.
+
+**Key Characteristics:**
+
+- A dominant human–agent conversation and persistent, unified native composer.
+- Projects and durable conversations on the left; secondary task context on the right.
+- A native Pods command station with stable project order, cards sized to the viewport, honest run timing, reader-controlled activity, inline approval decisions, and targeted recovery and stop actions.
+- Semantic light and dark appearance, system fonts, SF Symbols, and native chrome.
+- Readable activity and approval language with selectable technical evidence.
+- Explicit search scope, deliberate navigation, and a reliable return to the composer.
+- Message-linked project history with reviewed restore and a preserved original conversation.
+- Supporting local Run controls with a separate Stop App and explicit browser preview.
+- Runtime-owned execution, context, permissions, credentials, and task history.
+
+## Colors
+
+### Application identity
+
+The macOS app icon uses an ivory three-lobed cloud with paired code-bracket
+apertures on a deep ultramarine tile: **Cloud and code**. The cloud represents
+HEAV3NS and the familiar angle brackets represent CODE. It appears in the Dock, Finder, app
+switcher, and as a decorative 72-point image on welcome/preparation screens.
+Its flat SVG/PNG companion and monochrome PDF template share one geometric
+definition. Ultramarine `#2849bc` and ivory `#f7faff` belong to these brand assets;
+workspace controls retain the semantic colors below. The dimensional master,
+native size exports, origin, and regeneration instructions live in
+[`Assets/README.md`](Assets/README.md). Prior signal and folder artwork is archived and is
+not an active native identity.
+
+The palette follows semantic AppKit colors and window appearance. Captured shades are observations, not fixed palette tokens.
+
+### Primary
+
+NSColor.controlAccentColor marks entry actions, Open existing workspace…, Send / Queue, and folder symbols. You messages use controlAccentColor at 10% alpha, with role, SF Symbol, and trailing alignment carrying the distinction independently of tint. LUMI replies keep a clear leading surface. Native selection and control states follow the system. The wide dark project-library capture includes inactive chrome; its muted controls do not establish a separate palette.
+
+### Secondary
+
+CodeOutline uses systemPurple for lexical keywords, systemRed for strings and removed diff lines, systemGreen for added lines, and systemBlue for hunk headers. Diff prefixes and labels preserve meaning beyond color. This is lexical highlighting, not semantic language analysis. Walkthrough uses systemOrange for issue symbols and approval state, systemRed for a failed instruction, and controlAccentColor for other stage symbols; labels and symbols carry the same meaning.
+
+### Neutral
+
+NSColor.labelColor carries primary text; secondaryLabelColor carries activity, metadata, and supporting copy; placeholderTextColor carries the empty composer prompt. textBackgroundColor fills the transcript and composer; separatorColor outlines the composer. Source lists are clear over NSVisualEffectView sidebar material. AppKit supplies window grounds, text wells, separators, bezels, disabled states, selection, and focus.
+
+**The Semantic Appearance Rule.** Preserve semantic colors and native materials in both appearances. Do not convert screenshots or system accents into fixed brand colors or synthetic tonal ramps.
+
+## Typography
+
+NSFont.systemFont supplies interface and conversation text. NSFont.monospacedSystemFont supplies exact technical evidence. Standard controls retain AppKit typography; there are no bundled fonts or general tracking and line-height scales. All measurements are AppKit points.
+
+| Role | Source-backed size and weight |
+| --- | --- |
+| Welcome / other entry headings | 32 / 30 semibold |
+| Conversation title / approval question | 21 / 20 semibold |
+| Context heading and Walkthrough stage / project row title | 16 / 15 semibold |
+| Entry supporting copy | 16 or 15 regular |
+| Conversation body and composer / workspace label | 14 regular / 14 semibold |
+| Conversation rows and approval reason | 13 regular; selected row and operation name use medium |
+| Inspector headings | 13 semibold |
+| Transcript title / Walkthrough activity message / activity detail | 12 semibold / 12 medium / 12 regular |
+| Supporting state, paths, dates, hints, byte ranges | 12, 11, or 10 regular |
+| Code, diffs, exact approval path and arguments | 12 monospaced regular |
+| Secondary exact approval tool identifier | 11 monospaced regular |
+
+Walkthrough uses system prose for stage and activity, with selectable expanded details and 11-point status, duration, exit-code, and coverage captions. Transcript replies remain wrapping selectable plain text; Markdown fences remain literal.
+
+Open File rows use a medium system-font filename above a smaller secondary path. Both truncate in the middle and expose the full path in a tooltip. Search scope, result status, and keyboard hints stay secondary to the search field and selected result.
+
+Pods uses a 22-point semibold overview title, 18-point semibold project titles, 12-point semibold status and activity headings, 12-point medium context labels, 13-point instruction and semibold request headings, 12-point selectable activity and monospaced request details, and 11-point identity metadata. Timing uses 12-point regular system type with monospaced digits; quiet and connection notes use secondary 12-point prose. Project names truncate in the middle; context, instruction, status, timing and notes each stay on one line and truncate at the tail. The project title exposes the full path in its tooltip and accessibility help; context exposes the thread and instruction, and timing includes the recorded start date and time. Short cards put the current user instruction in the context row and hide its separate line. A monitoring note compressed into the timing row retains the full timing in its tooltip.
+
+Run commands, console output, and restore path lists use 11-point monospaced text. Checkpoint explanations use system prose; moment, date, and file count stay secondary.
+
+Run Details uses selectable system prose for the recorded outcome, next step,
+project-check scope and evidence coverage before the instruction and result.
+Its native Related menu sits beside View Recorded Output and connects the
+inspected instruction to its own activity, preceding continuation source and
+available checkpoints. Navigation uses the existing Back/Forward history;
+checkpoint links open the existing review panel. See
+[run insights](../docs/desktop/RUN-INSIGHTS.md) for the source audit and limits.
+Recorded Output uses 14-point semantic system prose and the existing paged
+inspector. New pages state their content-verification coverage; a storage-limit
+notice describes incomplete saved evidence rather than a Git diff. Compact footer
+layout preserves at least 80 points for the model selector and lets the secondary
+hint truncate first, with its full current text in a tooltip. See
+[shared storage](../docs/desktop/BLOB-STORAGE.md).
+
+**The Evidence Type Rule.** Use system prose for intent, explanation, and decisions. Reserve monospaced text for code, exact paths, arguments, and identifiers.
+
+## Layout
+
+The entry screens use a centered 490-point stack with 20-point gaps. The library fills the main pane beside a 200-point sidebar; its main insets are 24 top, 32 sides, and 20 bottom, with 12-point gaps and 96-point rows. Project actions precede the search and Sort by row. Name, path, and the selected date/time occupy three lines; paths truncate in the middle and dates at the tail, with full details available in the tooltip and accessibility label.
+
+The workspace uses native unified toolbar chrome and Auto Layout. Its 220-point conversation sidebar has 14-point insets and 54-point rows. The flexible center has 20 top, 22 side, and 16 bottom insets, 10-point gaps, and a 20-point transcript inter-row gap. Context uses 20 top, 14 side, and 16 bottom insets. Its wide width is 27% of window-frame width, clamped to 330–400 points; the browser is 236 points high with 32-point rows.
+
+Below 1000 points in frame width, the conversation sidebar starts hidden. Conversation / Task context governs the right panel: Conversation hides it; Task context reveals a 300-point panel beside the center. Transcript and composer remain present. Revealing compact navigation selects Conversation and hides task context. Selecting Task context, opening Walkthrough, or opening Run hides the compact sidebar and reveals the chosen context panel; the wide sidebar preference is separately retained in memory. Below 640 points in frame height, Code and Changes alternate browser and preview with Browse files / Browse changed files and Back to preview, releasing the fixed browser height. File selection waits for deliberate activation in this short layout, so arrow navigation keeps the browser visible. Walkthrough hides secondary stage explanation and evidence summary at that height, retaining its stage, activity, navigation, and review actions.
+
+Open File is a modeless native child panel over its workspace. Scope and search lead; a flexible scrolling result list follows; status, keyboard guidance, and Refresh / Open Preview complete the panel. It inherits the workspace appearance and leaves the conversation and Stop available. Picker measurements are local component choices, not additions to a global spacing or sizing scale.
+
+Walkthrough uses a vertical 9-point stack, 8-point horizontal control gaps, and a flexible scrolling native table. Collapsed activity rows are 58 points high; expanded rows grow with selectable detail and file links. Filtering and live updates preserve selected activity and earlier scroll origin; Latest activity returns to the end.
+
+Initial content requests are 1440 × 880 for a workspace and 1100 × 740 for the launcher; both minimum window frames are 720 × 480. Actual frames depend on native chrome and display bounds. Prior journey captures include wide workspace 1440 × 731, compact dark workspace/Code 720 × 480, light draft 720 × 500, light approval parent 720 × 504, and launcher 1100 × 731 / 720 × 480. Walkthrough captures are 1440 × 731 and 720 × 500, with compact approval at 720 × 504. The requested 720 × 480 Walkthrough capture was constrained by the native minimum window size; exact 480-point acceptance is not established. Navigation follow-up captures use actual frames of 1312 × 731 and 720 × 500; these are evidence dimensions, not new layout breakpoints.
+
+You messages align to the trailing edge; LUMI replies and activity align to the leading edge. Content wraps within a bounded reading width. Checkpoint links hug their intrinsic label width instead of stretching across the row. The Run region scrolls its entire form so configuration and Save Command remain reachable in compact windows; its console also scrolls recent output. Checkpoint history combines a flexible native table, separate selectable detail, paging and review controls. Its modeless panel requests 680 × 620 points of initial content with a 560 × 560-point minimum window size; native search and filter controls precede the table. The table uses 58-point rows, detail has a 100-point height, and the panel stack has 18-point insets and 10-point gaps. These are local component arrangements, not a new global size scale.
+
+Jump to Latest occupies a stable 28-point navigation footer directly below the transcript, with zero stack spacing. The footer remains reserved when the button hides, keeping the control clear of message text and avoiding layout shifts when it appears. This is a local native measurement, not a global spacing token.
+
+Resize logic reflows transcript rows and retains the earlier reading origin or follows the latest row when already within 35 points of the bottom. Physical reading-position and selection continuity remain separate acceptance work.
+
+Pods requests an 1180 × 780-point initial content area and a 640 × 480-point minimum window frame, constrained by the display. Its header, native All / Working / Attention segments and search field, then summary and Next Request sit above a vertically scrolling board. One to three equal columns follow the usable board width, resolved from the current native content rectangle and scroller preference with a 360-point minimum card width and 12-point gaps. The outer inset is 16 points, root gap 8 points, and board inset 2 points. Each card has a fixed height for the current viewport, following available board height between 300 and 400 points; incoming content cannot enlarge it. Card content margins are 12 points, with 6-point internal gaps reduced to 4 below a 380-point card height. The empty load slot retains 24-point margins.
+
+Project and status lead each card, followed by its stable slot/context, instruction, timing and any monitoring note. Approval precedes the feed. Full request details scroll within an 88-point viewport; short cards use 72 points for a routine request or 52 when a pending, error, unavailable or replacement message must remain visible. Only the repeated Allow Once help line hides in a short routine request. The activity viewport fills the remaining space with a 32-point minimum. Pause and Latest / Resume share its heading row; Conversation, the available native More menu and Stop Agent remain in a stable footer outside both text panes. Text tracks its clip-view width, wraps even long unbroken content, and grows vertically within clipped scroll panes. Hidden approval views release their width constraint, and rebuilding board rows releases previous equal-width constraints before reusing cards. These are local component measurements. The containment captures exercise three, two and one columns, including an exact 640 × 480-point frame with Next Request bringing the waiting pod's decisions, activity and footer into view.
+
+## Elevation & Depth
+
+NSVisualEffectView sidebar material with within-window blending, native chrome, source-list selection, control bezels, sheets, and popovers provide depth. Spacing, separators, and type weight organize the panes. There are no application-authored shadows, gradients, textures, or glass effects.
+
+**The Native Depth Rule.** Let AppKit render material, focus, control state, and modality. Native screenshot shadows and bezels do not establish application shadow or blur tokens.
+
+There is no decorative animation system. Native spinners communicate preparation, sign-in waiting, and live Walkthrough work. Walkthrough uses an indeterminate indicator for connected, visible running/cancelling work and a 180 ms stage-icon fade. Hidden, minimized, disconnected, approval-waiting, and terminal states stop the indicator. AppKit Reduce Motion stops it and removes the transition while retaining stage text and symbol. Fixture diagnostics exercise these states; static captures do not certify timing or physical accessibility acceptance. Filtering, draft-save delays, elapsed timers, and occlusion-aware updates schedule work rather than define animation.
+
+## Shapes
+
+Rounded, textured-rounded, and inline NSButton styles, native search fields, segmented controls, source lists, and SF Symbols retain native state rendering. The unified composer is one custom NSBox with a 10-point radius, 1-point separator-color border, and text-background fill. Its borderless inner scroll area is 64 points high; the group has 10-point insets and an 8-point gap. Transcript activity chevrons are borderless inline controls fixed at 20 × 20 points beside their labels; Walkthrough has native table disclosures. The You message surface uses a local 12-point NSBox radius and semantic accent tint; LUMI surfaces remain clear. Pods use controlBackgroundColor NSBox surfaces with separatorColor borders and a local 12-point corner radius. These component corners do not form a custom radius scale.
+
+## Components
+
+### Entry and project library
+
+Preparation, welcome, browser sign-in, saved connection, and existing-setup routes use centered native controls and clear next actions. Sign-in has waiting, cancellation, and Open Browser recovery states. A private account process reuses the existing OpenAI Codex OAuth integration and protected runtime storage; Swift receives status, a restricted authorization URL, and catalog availability, never credentials. Account changes require closing workspace windows. Disconnect removes the local connection. The provider migration in JOURNEY-V3.md remains unresolved; connection status and catalog lookup do not establish billing, subscription, or inference entitlement.
+
+The library provides Projects / Pinned / Account, search by name or path, a primary New Project… action, Open existing workspace…, and a full-width native table. Projects/Pinned expose their selected state. New Project… is also File → New Project… (⇧⌘N). Its native sheet collects a folder name and parent location, offers a folder chooser, and creates an empty folder before opening its conversation workspace. It suggests an unused Untitled Project name and remembers the parent location after successful creation. Existing names are rejected without reusing or overwriting content; actionable errors stay in the sheet with the entered values. Failed creation attempts are announced to accessibility clients.
+
+Sort by offers Last opened, Last modified, Newest created, Oldest created, and Name (A–Z), with the choice remembered. Sorting applies across the entire visible list; Pinned remains a separate filter. Equal keys use canonical paths as stable tie-breakers and unavailable dates sort last. Rows show a folder symbol, name, pinned status, full-path context, and a date with time; missing folders also show Unavailable. Their tooltip and accessibility label include opened, modified, and created dates so identically named projects can be distinguished. Canonical paths, recency, and pins persist. Open selected or double-click opens a project. The footer shows Open selected/Locate folder…, Pin/Unpin, and More…; More and right-click share path-bound Open/Locate, Pin/Unpin, Show in Finder, Copy Folder Path, and Remove from List commands. Removal never deletes files. Locate uses a native folder sheet, preserves the saved pin/history, and merges an already-listed destination without opening it. Opening an already-open canonical project focuses its window.
+
+Search matches unordered words across the full path, ignoring case and diacritics. ⌘F focuses search; Return opens the selected or first match; Escape clears the query, or returns to search from the table. Input-method composition takes precedence. Native focus and selection remain separate from activation.
+
+Project date metadata refreshes on library entry, manually with Refresh, and on return to the window after 30 seconds. Background scans inspect descendant modification dates without reading file contents or following symlinks, excluding VCS, dependency, build, cache, and runtime directories. Two scans run at once, with cooperative one-second / 20,000-entry budgets per project. Incomplete or inaccessible scans are labelled partial or unavailable. Date refresh preserves selection by canonical path; search and sorting remain usable while checking. Creation dates come from the project folder's filesystem creation date, not its Git history.
+
+### Pods and workspace project navigation
+
+Pods replaces the Switch Project pull-down beneath the current project name. The sidebar button and File → Pods (⌘0) open a separate native command station; Project Library… remains available in the sidebar footer and overview header. Entering Pods from the sidebar first saves the current conversation draft, and a failed save prevents that transition.
+
+Load Projects… opens a native multi-folder chooser. Each canonical project path has one workspace and one independent CLI worker; loading an already-open folder reuses its window. Pods follow stable workspace-opening order, with live changes updating their content without rearranging the board. Opening another thread leaves other projects and their work running. Loaded pods and their order are session state, not a cross-launch saved board; multiple concurrent workers in the same project are outside this surface's contract.
+
+Each pod shows its stable slot number, project name with full-path tooltip, current thread or compact user instruction, status and queued count, run timing, any monitoring note, an inline request when present, and selectable activity. Conversation focuses that project's workspace. A native More menu contains Checkpoints… and Reconnect Agent with their availability guards; it hides when neither action is available. Conversation and Stop Agent remain directly available in the footer. Status text carries meaning independently of accent or orange review color, including distinct Completed, Stopped, Failed, Interrupted and Timed out terminal states. Stop Agent targets only that canonical project's active and queued agent work; its enabled state follows readiness, work, cancellation and closing guards. It remains separate from Stop App.
+
+Timing shows Elapsed from the recorded run start, or a frozen Duration using the terminal timestamp. It adds Last activity age for running work, Waiting … for you from the request timestamp for approval, and the observed activity count when available. The worker supplies approval createdAt; the presentation does not invent a waiting start. Durations extend to days and hours. Missing timing has explicit copy. After two minutes without activity, a connected running pod shows a neutral note that the quiet stream does not confirm a stall. Inactivity does not cancel work or trigger an automatic retry.
+
+Live activity presents runtime-sanitized structured lifecycle events, including status, details and file evidence, followed by an available completed response. The projection shows up to 30 recent activities within a 24,000-character budget, with up to 1800 characters of each event's content and 6000 response characters. Older entries yield to the budget; shortened content and shown-versus-observed counts have explicit notices, including after reconnection, pointing to Conversation → Walkthrough for retained detail and history. These preview limits never shorten the exact approval payload. This is bounded evidence, not complete history or assistant token streaming. The heading changes to Recorded activity when the agent is no longer running or waiting for review.
+
+Pause, selected text, or actual user scrolling or keyboard navigation away from the end freezes the displayed feed and preserves the reader's selection and scroll position. Reading paused changes to Paused · Updates waiting when new text arrives; Resume applies the newest projection and returns to the end. While live, Latest deliberately returns to the end. Layout changes and resizing alone do not pause a live feed. A conversation/run identity change resets the feed to live. Pausing holds only the displayed and newest bounded projections, without accumulating an update queue; agent execution, timing and approval requests keep updating. Filtering keeps each loaded pod's reader state.
+
+Following feeds return to the latest activity after viewport changes, column reattachment and deferred text-document reflow, even when the snapshot text is unchanged. A coalesced update rechecks the current pause and selection state before moving the reading position, so a reader action takes precedence over scheduled following.
+
+An inline approval appears above activity with its tool heading and full selectable request payload ordered Arguments, Reason, then Workspace. Initial review starts at the top so the requested operation precedes the decision. Allow Once and Deny submit the exact displayed request to the owning workspace. View and workspace guards reject stale or duplicate decisions and block pending, disconnected, stopping, closing or switching states. A replacement request leaves the displayed request frozen and hides its decisions; a single Review Next Request action must load the replacement before decisions return. Pending and failure messages remain visible and attributable to that request, including in short cards. These controls let users decide within Pods without first opening the conversation.
+
+All / Working / Attention filters and Find project or task search change only the board view. Working includes running or queued work; Attention includes review requests, Disconnected, Check connection, Failed, Interrupted and Timed out states. Search matches project paths, thread names and the displayed instruction without case or diacritic sensitivity. Loaded workers, original slot numbers and project order remain intact. The summary retains the total request count when projects are hidden; No matching projects offers Show All Projects. Next Request clears both filter and query, cycles waiting requests in stable project order, and scrolls the selected card into view. An empty board invites loading projects; a spare slot in an incomplete row repeats that action.
+
+More → Reconnect Agent becomes available only after a disconnected project's old worker has exited and while the workspace is not closing; the action rechecks availability and recovers recorded state without resubmitting tasks. More → Checkpoints… opens the existing reviewed history only with a ready runtime, checkpoints-v1 capability and valid workspace window state. Restore retains its existing idle-agent, queue and project-process guards. These are project-specific recovery actions, separate from the feed's Resume.
+
+The overview's half-second timer skips snapshot refresh while its window is occluded. Closing Pods stops that timer without stopping project workers. This is state refresh, not decorative animation.
+
+### Conversation navigation and composer
+
+The left source list has New conversation, Find on this page, dated rows, earlier/latest paging, and Project Library… / Account. Search filters titles in the loaded conversation page and reports No matching conversations; it does not search all history. Selection changes durable isolated runtime context and history through negotiated conversation capability. Active, queued, uncertain, or approval-waiting work prevents switching; the runtime also refuses staged agent edits until committed or discarded. Loading history never resumes execution. Per-conversation drafts live in the bounded atomic workspace recovery file.
+
+A conversation change first saves the current draft, dismisses Open File, invalidates pending navigation and inspection replies, and holds the composer noneditable until the destination is confirmed by a fresh runtime snapshot. Adopting the destination restores its draft, clears prior inspection/history controls and Walkthrough selection, and keeps run details and recorded output within that conversation. A background completion does not activate an inactive workspace. Unconfirmed selection exposes a reconnect notice before sending can resume.
+
+Each conversation row has an inline SF Symbol trash control (28 × 28 points), with the tooltip Delete conversation… and the accessibility label “Delete conversation: [title]”. The control is hidden unless the runtime negotiates conversation-delete-v1 and disabled whenever conversation switching is unavailable, including pending work or a transition. Labels yield horizontal space to the control within the existing source-list row.
+
+Delete opens a native confirmation sheet naming the conversation, with Cancel as the default and Delete Conversation marked destructive. It explains that the sidebar entry and its draft will be removed while project files and saved checkpoints are kept, and whether a fresh conversation will open or the current conversation will stay open. Cancel preserves the draft. Confirmed deletion follows the guarded fresh-snapshot handoff before interaction resumes: deleting the active conversation opens a new empty conversation; deleting an inactive one preserves the current conversation. The deleted draft is removed from workspace recovery. This is removal from conversation navigation, with retained run and checkpoint evidence, not secure erasure.
+
+The unified composer joins plain NSTextView editing and its action row. Message LUMI… appears only while empty and without marked text. Up Next leads; Send / Queue and conditional Stop & Send trail; the keyboard hint sits below. Return submits outside marked-text composition, Shift–Return follows native editing, and quote/dash substitutions are disabled. Source guards sending by connection, conversation, instruction and queue limits, cancellation, and uncertain acceptance. Accepted drafts clear only if unchanged; failures preserve them. Up Next reviews, edits, or removes runtime-owned queued instructions. Stop & Send waits for confirmed cancellation outcomes. Physical keyboard and IME behavior remains unverified.
+
+Focus Composer (⌘L) dismisses the file picker, selects Conversation in compact mode, makes the workspace key, and places the first responder in the composer. This explicit handoff is part of native navigation, including when a child panel currently owns keyboard input.
+
+### Open File and keyboard browsing
+
+Open File… (⌘P) is available from File, Actions, and the context header when the connected runtime negotiates file-search-v1. A native search field, plain result table, document symbols, native selection, rounded actions, and semantic labels preserve the incumbent visual system. Filename/path lookup is distinct from file-content search, the Code folder filter, and conversation page search. Scope copy identifies Git ignore rules or the plain-folder exclusions; count and partial-scan copy expose bounded results.
+
+Typing clears old selectable results while the current search is pending. Loading, no match, partial scan, overlong query, and failure states have explicit copy. Refresh rebuilds results; failure changes that action to Retry and offers Code browsing as recovery. Open Preview stays disabled without a valid selection. Arrow keys select results; Return, double-click, or Open Preview deliberately opens the selected read-only file. Marked-text composition retains native input handling. Escape restores prior focus; clicking back into the conversation dismisses the picker without reclaiming focus. A result grants no read access or model context by itself.
+
+In Code, selecting a folder leaves it selected. Return, double-click, or Right opens it; Left returns to its parent. File selection previews alongside the browser when the layout has room; when the short layout alternates browser and preview, Return or double-click opens the file. Opening a path reveals its parent folder. Background workspace refresh keeps the current preview until Reload and does not replace a recorded-history page.
+
+### Transcript and task context
+
+The header names the conversation and state. A headerless table uses wrapping author-state titles, selectable plain-text bodies, compact expandable activity, and Jump to Latest in its separate footer. LUMI · Completed (or the current instruction state) occupies the role/completion line; Tool results recorded, Evidence incomplete, or Checks not run appears on a separate evidence line with Not reviewed. This separation preserves role hierarchy in compact conversation widths without implying that completion establishes verification or review. Recorded Runs exposes fuller recorded output.
+
+Walkthrough / Changes / Code / Run remain secondary. Code and Changes combine a compact browser and read-only inspector with paths, parent navigation, filtering, back/forward history, Reload, Reveal, native find, and explicit paging. The inspector close X, its control, and its handler are removed; compact visibility follows Conversation / Task context and the context entry points. Browsing adds no model context. Code uses lexical color and an “Outline · declarations on this page” popup with at most 100 lexical matches in the displayed page for supported Swift, JavaScript/TypeScript, Python, and Rust files. It is not a language-server project index.
+
+Changes identifies Working Tree or Staged baselines, including earlier and external edits. Diff prefixes accompany semantic color; untracked entries open as files. Byte-range labels, revision-aware paging, and Reload expose bounded snapshots. Inspection does not edit, stage, apply, undo, or attribute every change exclusively to LUMI.
+
+### Spider code checks
+
+Check Code opens a full-height Code Check inspector from a saved JavaScript/TypeScript file when `spider-check-v1` is available. Preserve the reading order: summary, selected file and any incomplete-coverage qualification, then located findings and review guidance, followed by detailed scope and coverage. Report prose uses semantic `NSColor.labelColor` and system type (14 points), with semibold summary, location and section headings, independent of prior code highlighting. The observation label includes the check date and time, with a full localized date/time tooltip and Reload guidance.
+
+Open File…, Find, Back/Forward and Reload reuse native inspection navigation; Reload checks current saved files. Prepare Review preserves and saves the existing composer draft, refuses an oversized combined draft without truncation, and requires Send before agent work. The report is bounded evidence, not a claim that project tests passed. [SpiderCheckDetails](Sources/Heav3nsCode/SpiderCheckDetails.swift), [WorkspaceWindow](Sources/Heav3nsCode/WorkspaceWindow.swift) and the [Spider boundary](../docs/desktop/SPIDER-CODE-CHECKS.md) define this local extension to the conversation-first workspace.
+
+### Saved State
+
+Saved State opens a full-height read-only Inspect report from the Workspace menu or Workspace Actions when `runtime-state-v1` is negotiated. The selected conversation owns the report and pending replies; switching conversations invalidates earlier results. Preserve the reading order: summary, checksum/legacy and interrupted-work coverage, Next step, newest saved instructions, then Scope and limits. Empty conversations show the next action and scope without an instruction menu. Reports disclose the 20-instruction window when older history exists.
+
+Use semantic `NSColor.labelColor` and 14-point system prose, with semibold summary and section headings. The footer dates the observation and says Reload to update. Open Instruction… opens the selected saved record in Run Details; native Find, Back/Forward and Reload retain their existing behavior. Matching checksums describe saved-content consistency, not project correctness or passing checks. Inspection never replays work, and project-file restore remains in reviewed Checkpoints. [SavedStateDetails](Sources/Heav3nsCode/SavedStateDetails.swift), [WorkspaceWindow](Sources/Heav3nsCode/WorkspaceWindow.swift), [InspectionNavigation](Sources/Heav3nsCode/InspectionNavigation.swift) and the [runtime boundary](../docs/desktop/RUNTIME-STATE-STORE.md) define this local extension.
+
+### Live Walkthrough
+
+Walkthrough automatically follows running, approval-waiting, or cancelling work before queued work. The instruction dropdown is removed. A repair link can open its recorded instruction; reopening Walkthrough or accepting a new instruction resumes following current work. Recorded Runs supplies older history. Stage text derives from structured activity and known operations, with explicit approval, connection-loss, interrupted, and terminal states. No percentage or fixed linear checklist is implied. After 30 seconds without an update, explanatory copy reports quiet work without declaring failure.
+
+A native activity table retains stable identities, inline disclosures, text filtering, an Issues filter, reported durations, and literal exit codes. Return or Space toggles a selected row in source; newly observed issues expand without moving keyboard focus. Expanded file links use the existing authorized read-only inspection service. Changes opens the current Git comparison; Run details opens durable instruction details and recorded-output access. Review request… opens the existing immutable approval sheet. Activity never grants file access or creates a new execution or approval path.
+
+The negotiated walkthrough-v1 capability carries structured core events into a bounded retained activity window. Coverage labels expose omitted history; Retry activity load preserves recorded work. Ordered merges resist older snapshots, checkpoints preserve partial progress, and restart marks unfinished work interrupted without replay. Bounded checkpoints can lose later activity on a crash; this is not a complete audit log. Command results, Checks not confirmed, Output incomplete, and Not reviewed remain separate from completion and human review.
+
+### Message checkpoints and reviewed restore
+
+You messages are trailing, tinted, and role-labelled; LUMI replies are leading, with distinct SF Symbols and accessible role labels. Tool activity remains separate. Intrinsic inline Checkpoint before message / Checkpoint after reply controls open the linked version. Checkpoints in the header, Actions, or ⌘7 opens workspace-wide history when checkpoints-v1 is negotiated.
+
+History leads with Search all checkpoints by message or revision and native All / Flagged / Safety segments. Search covers the full saved message beyond its abbreviated label and the local revision across all records before paging; matching uses Unicode NFKC normalization and lowercasing. Matching totals, Newest, Newer, and Older expose 100-entry pages. Newest returns to the first matching page; stale page offsets clamp to the last valid page when results shrink. Newest-first ordering uses checkpoint IDs to break equal timestamp ties consistently. Empty history, no flags, no safety copies, no matches, overlong search, and load failure each explain the next action.
+
+Rows name Before message, After reply, or Before restore · Safety copy. Selectable detail adds the full date and time, message label, snapshot file count, and local checkpoint revision; the file count describes the snapshot, not changed files. Copy Revision copies the full identifier and identifies LUMI’s isolated checkpoint store. The panel title names its parent workspace. Persistent local flags use the native flag symbol and Flag / Unflag action.
+
+A message link clears search and filters, resolves its exact ID across pages, and retargets an existing panel. The latest search, filter, or linked-checkpoint intent wins over an in-flight response; debounced search disables selection actions and restore against old results. Unflagging an item in Flagged clears that removed target before reloading. A missing ID leaves no restore target and exposes an unavailable state; explicit Refresh recovers browsable history without silently substituting a checkpoint during the failed lookup.
+
+Review Restore… compares current files and shows changed paths, count, and scope in a native sheet. Cancel is the default. Restore & Continue requires idle agent work, queue, and project runner, creates and flags a safety copy, and continues restored files/context in a new conversation while preserving the original. Switching conversations does not restore files. Stale comparisons require a fresh review.
+
+The runtime saves a checkpoint before engine admission and after settlement; starting-checkpoint failure blocks admission, while final-checkpoint failure leaves an explicit warning. History uses the isolated local Git object store at `.broccolidb/desktop-checkpoints.git`, separate from repository commits, the user's branch, HEAD, and staging area; earlier messages get no retroactive versions. Scope excludes generated and ignored untracked files, known secret paths, symlinks, databases, and external effects. Restore protects excluded current files, including newly ignored files absent from the safety snapshot. Recovery uses a durable journal and safety checkpoint; it is not a filesystem-wide atomic transaction or backup service. Exact exclusions, snapshot bounds, preview expiry, and recovery limits belong to the [runtime contract](../docs/desktop/CHECKPOINTS-AND-RUN.md), not visual tokens.
+
+### Run, console, and browser preview
+
+Run Project in the toolbar, Actions, or ⌘R opens the supporting Run tab without starting a process. Native target selection with an adjacent always-visible Refresh action, a selectable literal command/folder, Run / Stop App, status, Open in Browser, Refresh, and Set Run Command… make the next action explicit. The custom form contains Command, Project folder, Preview URL, Save Command, and Discard Edits; saving persists workspace configuration without executing it. Unsaved edits remain visible with explicit save guidance and survive Refresh, tab changes, reconnection, and failed saves within the window lifetime. Save Command commits them; Discard Edits restores the selected target configuration. Closing-window draft persistence is outside this contract. The whole region scrolls to retain the form's final action at compact sizes.
+
+The project-run-v1 runtime discovers bounded metadata for Node, Swift, Rust, Python, and static projects, including nested target folders. Changed target metadata requires Refresh before Run. Dependencies are not installed automatically. The monospaced console shows bounded recent output, output-limit disclosure, and process/exit status. Open in Browser opens an explicit HTTP(S) loopback URL in the user's browser only while the process runs; it does not certify readiness or imply hosting.
+
+Pending start/stop shows Starting… / Stopping… and suppresses duplicate requests. Unknown app status disables Run and Open in Browser, retains the last console output, and explains automatic retry plus Refresh recovery. A failed action reconciles status before another launch becomes available; replies from obsolete request generations cannot overwrite newer state. The displayed command/folder follows the actual active target even when discovery no longer includes it.
+
+One project app runs per workspace. Stop App owns the project process group; Stop LUMI governs agent work. Closing a workspace stops both. Configuration is disabled while the app runs. Worker-death cleanup protects owned processes, with detached descendants outside the guarantee. Runtime environment filtering and output redaction do not remove a local command's access to user-readable files. Keep these scope statements subordinate to the visible command and control state.
+
+Browser-ready HTML targets use Preview App / Stop Preview and describe a built-in web preview in Details. Preview App starts the runtime-owned local server and opens the browser once its listener is ready. Status explains that no setup is needed and that saved edits appear on browser reload. Polling, reconnecting, and automatic recovery never open tabs. The browser-only error boundary keeps automatic process-repair controls hidden for static previews. The target/Refresh row and separate launch/stop row fit the supporting pane at compact sizes.
+
+### Approval, recovery, and native lifecycle
+
+Approval required offers Deny and Review Request…. A 620 × 380-point native sheet leads with Allow this operation?, readable operation name, and exact secondary tool identifier. System-font Workspace / Reason / Arguments labels structure the request; reason is system prose, while exact paths and arguments are selectable monospace. Scrolling retains the full payload. Close leaves the immutable operation waiting; Deny and Allow Once resolve it. No decision has a Return key equivalent. Initial focus is in details, Escape closes, and stale/disconnected/submitting/stopping states disable decisions. Wide dark and compact light captures show all decisions using synthetic requests.
+
+Persistent notices above the composer distinguish recovery from changing activity status. Reconnect waits for worker exit; uncertain acceptance is reconciled by original request ID without replay. Stop covers outstanding work; Force Stop is gated by the current cancellation deadline. Native alerts govern active-work close/quit and wait for shutdown. Independent workspaces own their window, runtime client, draft, and navigation state. The four-window product boundary is intended; source does not enforce a four-window cap.
+
+Native menus, editing commands, inspector find/history, toolbar Stop, and a searchable Actions sheet preserve macOS conventions. Explicit accessibility labels cover major inputs, lists, task context, outline, inspection, approval, and actions. Native APIs and source-defined shortcuts do not establish complete keyboard, IME, VoiceOver, or focus-order acceptance.
+
+### Authority and verification
+
+The October 1 Saved State finish review returned **SHIP at the Saved State UI scope**, with no material UI findings across the supplied [light](../build/desktop-state-1790908508873/ui-light.png), [dark](../build/desktop-state-1790908508873/ui-dark.png), [opened instruction](../build/desktop-state-1790908508873/ui-saved-state-open.png) and [empty conversation](../build/desktop-state-1790908508873/ui-saved-state-empty.png) captures. Validation reports 185 native tests, 222 runtime tests, TypeScript checking and the packaged fixture passed. Backend-only continuation and checkpoint-hydration guards added no UI changes and do not broaden the visual verdict. Exact contrast, VoiceOver and physical keyboard behavior were not independently checked. No new raster assets ship and no web detector ran for this AppKit surface.
+
+The October 1 Spider finish review returned **SHIP at the scope of three corrections**: semantic report color, findings-first compact reading order and dated observations, all resolved. The replacement captures are [light](../build/desktop-spider-1790907825233/ui-light.png), [dark](../build/desktop-spider-1790907825233/ui-dark.png), [preserved review draft](../build/desktop-spider-1790907825233/ui-spider-review.png), [file navigation](../build/desktop-spider-1790907825233/ui-spider-file.png) and [Reload](../build/desktop-spider-1790907825233/ui-spider-reload.png). The [packaged fixture](../build/desktop-spider-1790907825233/evidence.json) passed; supplied validation records report 182 native and 213 runtime tests passed. No new raster assets ship and no AppKit design detector ran. This scoped verdict is not whole-application certification; provider repair quality, full accessibility and distribution remain outside this evidence.
+
+Checkpoint and Run presentation authority includes [CheckpointWindow](Sources/Heav3nsCode/CheckpointWindow.swift) and [ProjectRunView](Sources/Heav3nsCode/ProjectRunView.swift). Pods presentation authority is [PodsWindow](Sources/Heav3nsCode/PodsWindow.swift), [PodLayout](Sources/Heav3nsCode/PodLayout.swift), [PodLiveView](Sources/Heav3nsCode/PodLiveView.swift) and [PodMonitoring](Sources/Heav3nsCode/PodMonitoring.swift); snapshot and recovery wiring in WorkspaceWindow and App, approval timestamps in the [desktop worker](../src/desktop/worker.ts), and the [integration contract](../docs/desktop/INTEGRATION.md) establish its behavior. Presentation authority is [JourneyStyle](Sources/Heav3nsCode/JourneyStyle.swift), [LauncherWindow](Sources/Heav3nsCode/LauncherWindow.swift), [ConversationSidebar](Sources/Heav3nsCode/ConversationSidebar.swift), [WorkspaceWindow](Sources/Heav3nsCode/WorkspaceWindow.swift), [WalkthroughView](Sources/Heav3nsCode/WalkthroughView.swift), [ApprovalReview](Sources/Heav3nsCode/ApprovalReview.swift), [QuickOpenWindow](Sources/Heav3nsCode/QuickOpenWindow.swift), [KeyboardListView](Sources/Heav3nsCode/KeyboardListView.swift), [NavigationSidebar](Sources/Heav3nsCode/NavigationSidebar.swift), and [CodeOutline](Sources/Heav3nsCode/CodeOutline.swift). Journey/state sources are [App](Sources/Heav3nsCode/App.swift), [ProjectLibrary](Sources/Heav3nsCode/ProjectLibrary.swift), [AccountClient](Sources/Heav3nsCode/AccountClient.swift), [WorkspaceDraftStore](Sources/Heav3nsCode/WorkspaceDraftStore.swift), [WalkthroughState](Sources/Heav3nsCode/WalkthroughState.swift), and [RuntimeClient](Sources/Heav3nsCode/RuntimeClient.swift). [IntegrationProbe](Sources/Heav3nsCode/IntegrationProbe.swift) provides native capture and bounds reporting. [PodsWindowTests](Tests/Heav3nsCodeTests/PodsWindowTests.swift) exercises containment, exact payloads, request guards and reading-state behavior.
+
+The [workspace](.impeccable/review/journey-v3/hero-repro.png), [Code](.impeccable/review/journey-v3/workspace-ui-code.png), [Changes](.impeccable/review/journey-v3/workspace-ui-changes.png), [new conversation](.impeccable/review/journey-v3/workspace-ui-new-conversation.png), [light draft](.impeccable/review/journey-v3/workspace-ui-draft-light.png), and [expanded light activity](.impeccable/review/journey-v3/workspace-ui-expanded-light.png) show the built workspace. [Wide projects](.impeccable/review/journey-v3/launcher-launcher-projects.png), [compact projects](.impeccable/review/journey-v3/launcher-launcher-narrow-projects.png), [welcome](.impeccable/review/journey-v3/launcher-launcher-welcome.png), [sign-in](.impeccable/review/journey-v3/launcher-launcher-signin.png), and [light approval](.impeccable/review/journey-v3/approval-ui-approval-light-overlay-0.png) complete the inspected journey.
+
+The [review](.impeccable/review/journey-v3/review.json) and [verdict](.impeccable/review/journey-v3/verdict.json) resolve J3-F01–J3-F04: unified composer/placeholder, full-width library/single-line dates, readable approval, and compact disclosures. “Ship” covers those four fixes and attributable regressions only. [Verification](.impeccable/review/journey-v3/verification.json) records 37 native tests, 38 desktop tests, four OAuth-helper tests, TypeScript checks, isolated account status/EOF cleanup, 20 workspace bounds reports, and a locally signed development build; the finish run also reports passing lint. [Provenance](.impeccable/review/journey-v3/evidence.json) identifies capture origins and supplemental light states. History/approval fixtures are synthetic; file/diff reads and conversation switching use the packaged runtime. No OAuth or model task ran in these UI fixtures. The reviewer inspected captures and targeted source without rerunning tests; no design detector ran.
+
+The [Walkthrough review](.impeccable/review/walkthrough-v1/review.json) returns “ship” with no material fixes for eight valid captured states and targeted native source: live wide/compact, pinned history, file preview, failure wide/compact, compact approval, and recovered work. Matching JSON provides diagnostics. [Verification](.impeccable/review/walkthrough-v1/verification.json) records 42 native, 44 desktop, and nine CLI engine tests, TypeScript, changed-file lint, and an ad-hoc development build. A scripted engine drives the production bridge, store, transport, and native UI with actual file reads; real CLI scheduler callbacks are tested separately. The [packaged runtime check](.impeccable/review/walkthrough-v1/packaged-runtime.json) verifies walkthrough-v1 negotiation, persisted metadata/paths, and file inspection in the bundled Node/CLI. No provider, OAuth, or approval command ran in these fixtures.
+
+The Walkthrough reviewer sampled native captures and integration source, without independently reviewing backend/engine sources or rerunning tests; no native design detector ran. Physical keyboard/IME, full VoiceOver/focus order, increased contrast, physical Reduce Motion/timing acceptance, production-provider performance, ambiguous owner-lock crash reconciliation, Developer ID signing, notarization, and public distribution remain unverified. Local signatures and scoped reviews do not certify them.
+
+The separate [navigation review](.impeccable/review/navigation-v1/review.json) initially requested the picker-to-composer focus correction. Its final “ship” verdict covers that resolved fix and attributable regressions: all nine refreshed captures are valid, with no attributable regressions observed. They include wide/compact Open File and Code, empty search, new conversation, restored draft, compact conversation, and [composer focus](.impeccable/review/navigation-v1/composer-focused-wide.png). The active native probe confirmed the actual workspace key window and composer first responder, with the picker hidden, before capture could change focus.
+
+Navigation [verification](.impeccable/review/navigation-v1/verification.json) records 49 native and 49 desktop tests, TypeScript, changed-file lint at error severity, and a locally signed development build. [Provenance](.impeccable/review/navigation-v1/provenance.json) identifies the raw native captures and scripted engine over production DesktopSession and inspection. The [packaged runtime check](.impeccable/review/navigation-v1/packaged-runtime.json) verifies real filename search and conversation-bound run/output inspection in the bundled CLI without a provider request. Prior journey and Walkthrough evidence remains historical. Physical keyboard/IME, VoiceOver, provider OAuth, and release acceptance are not established by this navigation pass.
+
+The [checkpoint and Run review](.impeccable/review/checkpoints-run-v1/review.json) initially found a P1 where message links could select another checkpoint. Its final “ship” verdict covers the resolved exact-ID selection fix and attributable regressions only, not the full surface or release readiness. Ten valid native captures include wide messages/history/Run, compact Run/configuration, [reachable Save Command](.impeccable/review/checkpoints-run-v1/run-save-visible-compact.png), [saved custom command](.impeccable/review/checkpoints-run-v1/run-saved-compact.png), restore review at both sizes, and the new restored conversation. No generated UI imagery or web detector was used.
+
+Checkpoint/Run [provenance](.impeccable/review/checkpoints-run-v1/provenance.json), matching diagnostics, and test logs record 52 native and 68 desktop tests, TypeScript, changed-file lint at error severity, native flow assertions, and a locally signed development build. The [packaged runtime proof](.impeccable/review/checkpoints-run-v1/packaged-runtime.json) covers checkpoint capability/empty history and a saved, discovered, executed custom command with expected output. A scripted engine used the production worker/client and a real local process, without a model provider. The reviewer read captures and targeted source, without independently rerunning tests or signatures. Manual VoiceOver, physical keyboard/IME, full focus order, large-content stress, measured contrast, production provider behavior, every runner framework, long sessions, and release acceptance remain unverified. The final backend-only safeguard for newly ignored files was separately regression-tested after the visual review; native UI source was unchanged. That test does not broaden the design verdict. Earlier review records retain their original scope and counts.
+
+The [Run resilience review](.impeccable/review/run-resilience-v1/review.json) returns “ship” with no material findings for the bounded native Run refinement and attributable compact transcript changes only. Its five required captures are [wide Run](.impeccable/review/run-resilience-v1/run-wide.png), [compact Run](.impeccable/review/run-resilience-v1/run-compact.png), [retained draft after Refresh](.impeccable/review/run-resilience-v1/draft-after-refresh-compact.png), [reachable Save / Discard](.impeccable/review/run-resilience-v1/save-visible-compact.png), and [saved command](.impeccable/review/run-resilience-v1/saved-compact.png), with matching diagnostics. Actual frames are 1312 × 731 and 720 × 500 points; exact 720 × 480 acceptance is not inferred. The comparison-only before capture is not acceptance evidence.
+
+Run resilience [provenance](.impeccable/review/run-resilience-v1/provenance.json) and supplied logs record 58 native and 68 desktop tests, TypeScript, changed-file lint, GUI flow, and [packaged runtime](.impeccable/review/run-resilience-v1/packaged-runtime.json) passing. The raw native captures use an explicitly scripted engine through the production worker/client and a real local process, without a provider request. The fresh reviewer inspected the five captures, diagnostics, targeted native source, and supplied records, and independently matched source/build/runtime hashes; tests and live interaction were not rerun. Pending/error behavior relies on source and supplied tests; reconnection draft retention was source-assessed without a dedicated exercised test. The footer geometry assertion verifies separation from the transcript. Manual VoiceOver, complete focus traversal, physical keyboard/IME, measured or increased contrast, long-content stress, production providers/OAuth, all runner frameworks, long sessions, notarization, distribution, and release acceptance remain unverified. This review preserves the scope and counts of every historical review above.
+
+The fresh [checkpoint navigation review](.impeccable/review/checkpoint-navigation-v1/review.json) returns “ship” with no material findings for the bounded navigation refinement and attributable regressions only. Its seven accepted raw native window-group captures are [wide history](.impeccable/review/checkpoint-navigation-v1/history-wide.png), [flagged history](.impeccable/review/checkpoint-navigation-v1/flagged-wide.png), [empty search](.impeccable/review/checkpoint-navigation-v1/empty-search-wide.png), [wide restore review](.impeccable/review/checkpoint-navigation-v1/restore-wide.png), [compact history](.impeccable/review/checkpoint-navigation-v1/history-compact.png), [compact restore review](.impeccable/review/checkpoint-navigation-v1/restore-compact.png), and [Safety history](.impeccable/review/checkpoint-navigation-v1/safety-compact.png), with matching diagnostics. Wide parent frames are 1312 × 731 points and compact parents are 720 × 500 points. The modeless panel can extend beyond its parent; the group captures include it. Exact 720 × 480 acceptance and the panel’s minimum-size extreme are not established.
+
+Checkpoint navigation [provenance](.impeccable/review/checkpoint-navigation-v1/provenance.json) and supplied logs record 61 native and 69 desktop tests, TypeScript, changed-file lint, native UI flow, and packaged runtime passing. The scripted engine drives the production worker/client with real local app execution and file restoration, without a provider request. Flow evidence records restoration into a new conversation; packaged-runtime evidence establishes bundled capability negotiation and empty checkpoint history, not populated-history navigation. The fresh reviewer inspected the seven captures, diagnostics, targeted source, and supplied logs, and independently matched all four source/build/runtime hashes; the reviewer did not launch the app, rerun tests, or rebuild. The pending debounce guard was source-assessed. Reviewed restore remains unchanged, and backend recovery guarantees were not re-certified. No web detector ran. Manual VoiceOver, complete focus traversal, physical keyboard/IME, measured or increased contrast, long-content and large-history performance, long sessions, production providers/OAuth, notarization, distribution, and release acceptance remain unverified. Historical reviews retain their original scope and counts.
+
+The [conversation deletion review](.impeccable/review/conversation-delete-v1/review.json) returns “ship” with no material findings for sidebar deletion and attributable regressions only. Five accepted raw native captures cover [wide dark sidebar](.impeccable/review/conversation-delete-v1/sidebar-wide-dark.png), [wide confirmation](.impeccable/review/conversation-delete-v1/confirmation-wide.png), [confirmed active deletion](.impeccable/review/conversation-delete-v1/deleted-wide.png), [compact sidebar](.impeccable/review/conversation-delete-v1/sidebar-compact.png), and [compact confirmation](.impeccable/review/conversation-delete-v1/confirmation-compact.png), with matching diagnostics. [Provenance](.impeccable/review/conversation-delete-v1/provenance.json) reports 62 native and 71 desktop tests, TypeScript, lint, UI flow, and [packaged runtime](.impeccable/review/conversation-delete-v1/packaged-runtime.json) passing. The scripted engine used the production worker and native client without invoking a provider; UI flow covers cancellation retaining the draft and confirmed active deletion clearing it and opening a fresh chat. Bundled-runtime evidence covers active deletion and safe retry. The independent reviewer matched source and build hashes; inactive deletion was source-assessed, and tests and packaged-runtime checks were not independently rerun. Physical keyboard/default-button behavior, complete focus traversal, VoiceOver, measured contrast, long-title stress, provider behavior, and release readiness remain unverified. No HTML/CSS detector ran. Earlier reviews retain their original scope and counts.
+
+The historical project-navigation finish review, whose Switch Project menu is now superseded by Pods, resolves the initial P2 compact-entry-point finding: opening Walkthrough or Run from a revealed compact sidebar now hides that sidebar, selects Task context, and displays the requested panel. Its scoped “ship” verdict covers that scored fix and attributable regressions only, not whole-surface certification. Six raw native captures show [wide dark project menu](.impeccable/review/project-navigation-v1/menu-wide-dark.png), [compact light project menu](.impeccable/review/project-navigation-v1/menu-compact-light.png), [wide dark Code](.impeccable/review/project-navigation-v1/code-wide-dark.png), [compact light Code](.impeccable/review/project-navigation-v1/code-compact-light.png), [compact Walkthrough](.impeccable/review/project-navigation-v1/walkthrough-compact-light.png), and [compact Run](.impeccable/review/project-navigation-v1/run-compact-light.png), each with matching diagnostics. The menu captures show actual tracked native menus.
+
+Project-navigation [provenance](.impeccable/review/project-navigation-v1/provenance.json) records 63 native tests, TypeScript, lint, native navigation flow, and local signature checks passing. The flow includes menu availability and compact sidebar/context transitions; [verification](.impeccable/review/project-navigation-v1/verification.json) also records scoped search, compact preview, draft restoration, stale-history clearing, and composer focus handoff. The isolated fixture invoked no provider. The independent-review handoff supplies the scoped verdict; these records do not establish whole-surface, physical keyboard/IME, VoiceOver, provider, or release acceptance. Earlier reviews retain their original scope and counts.
+
+The historical [Pods overview review](.impeccable/review/pods-v1/review.md), preceding the command-station refinement, returns “ship” for the overview and attributable native-navigation changes, with no material findings. Three accepted raw native window captures show [wide concurrent projects](.impeccable/review/pods-v1/pods-wide.png), [one targeted worker stopped](.impeccable/review/pods-v1/pods-stopped.png), and [compact Pods](.impeccable/review/pods-v1/pods-compact.png), with matching diagnostics. [Verification](.impeccable/review/pods-v1/verification.json) records concurrent agents, targeted stop, approval visibility and compact behavior; [provenance](.impeccable/review/pods-v1/provenance.json) and the supplied log record 63 passing native tests. Three independent real workspace workers receive scripted agent events; no provider was invoked. The reviewer inspected captures and targeted source, matched four source/build hashes, and independently ran an AppKit constraint lifecycle probe; app launch, build and tests were not independently rerun. This is a code-led native extension with no approved visual comp or generated raster product assets. Actual empty/loaded transitions, below-fold compact interaction, exact minimum sizes, physical keyboard, complete focus traversal, VoiceOver, contrast, long content, many-project performance, long sessions, production providers and release readiness remain unverified. Historical reviews retain their original scope and counts.
+
+The [Pods command-station review](.impeccable/review/pods-command-v1/review.md) identified one material finding: arguments were hidden below reason and workspace before an enabled decision. The [finish verdict](.impeccable/review/pods-command-v1/verdict.md) returns **ship** after Arguments moved first; updated wide and compact captures show the fixture command before the controls. Four replacement raw native captures show [wide activity and approval](.impeccable/review/pods-command-v1/pods-wide.png), [targeted stop](.impeccable/review/pods-command-v1/pods-stopped.png), [compact Next Request](.impeccable/review/pods-command-v1/pods-compact.png), and [inline decision completed](.impeccable/review/pods-command-v1/pods-decided.png). Real independent workspace workers use scripted lifecycle and approval fixtures; no provider was invoked. Verification records concurrent activity, targeted stop, inline decision and compact behavior. The implementation handoff reports 66 native tests, three focused post-fix tests, TypeScript, lint and signature verification passed. The reviewer matched source and binary hashes and re-inspected the corrected captures; that is not an independent rerun of those tests. The verdict closes the single scored finding only. Accessibility-tree inspection, keyboard-only use, increased contrast, minimum-height acceptance, multi-request replacement and long-argument interaction remain uncaptured; live-provider execution and token streaming are not certified. This native refinement adds no raster product assets.
+
+The [Pods long-run review](.impeccable/review/pods-longrun-v1/review.md) returns **ship** with no material findings for the supplied captures and sampled long-running-task refinement. Five accepted raw native captures show [wide Pods](.impeccable/review/pods-longrun-v1/pods-wide.png), [Attention](.impeccable/review/pods-longrun-v1/pods-attention.png), [empty search](.impeccable/review/pods-longrun-v1/pods-search-empty.png), [compact approval](.impeccable/review/pods-longrun-v1/pods-compact.png), and the [simulated long-run clock](.impeccable/review/pods-longrun-v1/pods-longrun-clock.png), each with matching JSON. [Verification](.impeccable/review/pods-longrun-v1/verification.json) and [provenance](.impeccable/review/pods-longrun-v1/provenance.json) record 71 native tests, 77 desktop tests, five final focused native tests, TypeScript, lint, build/signature checks and the three-project GUI fixture passing. Independent real workers receive scripted activity without a provider. The clock fixture changes only displayed timestamps to 27 hours elapsed and five minutes quiet; stored timestamps and workers are unchanged. It is not multi-day endurance evidence.
+
+The reviewer validated the five captures, matched seven source/build hashes, and inspected source and supplied test records without rerunning suites or operating the GUI. Reconnect and Checkpoints were source-reviewed, unavailable in the captured snapshots and not clicked from Pods. Pause, selection, scrolling and bounded retention rely on source and focused tests, including 10,000 feed updates, without dedicated paused-state captures; occlusion behavior is source-reviewed. Physical VoiceOver, end-to-end keyboard use, increased contrast, exact minimum-window acceptance, long-session resource growth, provider behavior and release readiness remain unverified. This code-led AppKit refinement has no approved comp or raster product assets; no HTML/CSS detector ran. All historical review scope and counts above remain unchanged.
+
+The [Pods containment review](.impeccable/review/pods-containment-v1/review.md) found one P2: an unpaused feed could remain on older activity after resize. The [final verdict](.impeccable/review/pods-containment-v1/verdict.md) returns **ship** for resolved P2-1 only, without broadening into a new general audit or release certification. Four replacement raw native captures show [wide bursts](.impeccable/review/pods-containment-v1/pods-burst-wide.png) at 1180 × 730 points, [medium bursts](.impeccable/review/pods-containment-v1/pods-burst-medium.png) at 820 × 650, [minimum-frame approval](.impeccable/review/pods-containment-v1/pods-burst-minimum.png) at exactly 640 × 480, and [empty search](.impeccable/review/pods-containment-v1/pods-burst-empty.png) at 640 × 480, each with matching JSON and 2× image resolution. All nine card records across the three column counts report following and atLatest, with no card overlap, escaped controls, control overlap or horizontal overflow. The minimum frame retains the waiting pod's approval, activity, Conversation and Stop Agent controls.
+
+Containment [provenance](.impeccable/review/pods-containment-v1/provenance.json) and [verification](.impeccable/review/pods-containment-v1/verification.json) report 75 full native tests, 13 final focused native tests after the reflow correction, TypeScript, warning-free changed-script lint, build/signature checks and the three-worker burst GUI fixture passing. Independent real workspace workers receive scripted activity bursts and long approval arguments without invoking a provider. The regression test covers unchanged-text resizing in both directions, deferred text-document reflow, and a selected paused reader retaining its text and selection. The capture harness isolates Pods mode from unrelated workspace outcome captures and retains errors. The reviewer reopened the four captures, inspected source and supplied records, and matched all ten final source/build hashes; suites and GUI operation were not independently rerun.
+
+The containment verdict leaves More, Reconnect and Checkpoints without GUI-click evidence; replacement-request behavior is source/unit reviewed. Physical VoiceOver, keyboard-only acceptance, increased contrast, provider execution, long-session resource growth, endurance and release readiness remain unestablished. This is a code-led macOS Operate refinement preserving the conversation-first AppKit identity, semantic colors, system typography and native controls, with no approved comp or raster product assets. No HTML/CSS detector ran. Every earlier review entry, scope and count above remains historical and unchanged.
+
+## Pods ergonomics and recovery pass — October 2026
+
+Pods reuses the workspace action palette and native menu routing: ⌘F searches the board, ⌘O opens its multi-folder picker, and ⇧⌘P offers loading, search and filters. ⌘J / ⇧⌘J cycle requests in both directions; ⌘5 also enters request review. Navigation focuses the complete selectable details, leaving approval buttons without a default Return action. Search supports unordered words across project, conversation and instruction text. Batch loading preserves board focus, prevents stacked sheets and reports unavailable folders together.
+
+The interaction choices follow [Apple’s keyboard guidance](https://developer.apple.com/design/human-interface-guidelines/keyboards/) and [focus and selection guidance](https://developer.apple.com/design/human-interface-guidelines/focus-and-selection/): keep standard commands contextual and put focus on the content being reviewed. The existing action palette supplies a familiar searchable command surface, consistent with the rest of the workspace. This pass preserves AppKit materials, typography, SF symbols, stable pod order and the current visual hierarchy.
+
+Card actions carry the displayed workspace context as well as its canonical path. Worker or conversation changes invalidate old controls; complete request equality also protects the shared approval sheet. Decisions retain separate attempt identities, ignore late replies, and distinguish rejection from an unknown transport outcome. Explicit Stop rejection restores retry; a slow stop points to the existing Conversation recovery controls. Selecting feed text pauses immediately, and empty or disconnected feeds describe their actual state.
+
+The [verification record](../build/macos-pods-qa/verification.json) returns **pass for the implemented and reviewed scope**: 196 native tests, 20 final focused tests, both packaged worker fixtures and the build/signature checks pass. The keyboard pass uses the actual macOS app; the native regression suite and isolated worker fixtures cover request replacement, pending/duplicate decisions, connection loss, targeted Stop, reader preservation and layout bounds. Wide, medium and minimum layouts were visually inspected together, then compact and minimum captures confirmed the final build. Provider execution, physical VoiceOver, minimum-supported-macOS testing and multi-day endurance are outside this pass. No raster product assets were added. Historical reviews above retain their original scope and counts.
+
+## Pods transport and memory follow-up — October 2026
+
+This Operate pass preserves the existing AppKit layout and navigation. Worker and
+account channels now share a bounded byte mailbox and one small decoded delivery
+batch. Bursts yield to the main queue, completed requests use one deadline timer
+per channel, and closing releases queued payloads and suppresses late callbacks.
+Account failure retires the old channel before notifying callers, so reconnecting
+from a failure callback cannot revive stale browser requests or close the new
+connection. Pods also invalidate their refresh timer on destruction.
+
+The retained activity model now stores only display fields, with both a 120-entry
+and 256 KiB serialized budget per run. UTF-8 limits cover pathological combining
+characters, batch reduction avoids repeated rebuilding, and coverage counts
+survive eviction. Recorded lifecycle fields prevent Completed from appearing
+while the final checkpoint is still saving. Existing Pause, selection, request
+review, Stop and reconnect affordances remain the user-facing workflow.
+
+The [verification record](../build/macos-pods-memory-qa/verification.json) returns
+**pass for the implemented and reviewed scope**: 215 native tests, 425 shared
+worker tests (one Linux-only case skipped on macOS), 40 Python tests with runtime
+integration on both macOS and an ARM64 Linux container, TypeScript checking,
+packaged lifecycle and containment fixtures, and macOS signature verification.
+Wide, medium and minimum captures were inspected in one batch; no visual repair
+was needed. Both Linux architectures were repackaged. The isolated native
+transport test drained 100,000 events in 20 bursts: process peak RSS reached
+24.5 MiB and increased by 64 KiB during the final 50,000 events. This measures the
+transport test process, not the complete app or provider workers. Multi-day
+endurance, live-provider memory, physical VoiceOver and minimum-macOS verification
+remain outside this pass. No product raster assets were added.
+
+## Do's and Don'ts
+
+- **Do** keep conversation dominant and its unified composer available beside secondary context.
+- **Do** preserve native semantic colors, fonts, controls, symbols, and window behavior.
+- **Do** preserve stable Pods opening order, keep project state and decisions attributable to the exact canonical project/request, and retain the current workspace while opening another.
+- **Do** show approval arguments before decisions, preserve a reader's activity position, and distinguish structured live activity from completed responses.
+- **Do** distinguish elapsed time, terminal duration, activity age and approval wait; retain request totals and stable pod slots when filtering.
+- **Do** keep Pause / Resume local to feed reading, disclose shown versus observed history, and recover recorded state without resubmitting work.
+- **Do** size Pods from the usable viewport, contain wrapping payloads within their scroll panes, and keep approval decisions, Conversation and Stop Agent outside them.
+- **Do** follow the latest activity after viewport and text-document reflow while letting current pause and selection state take precedence.
+- **Don't** silently replace a displayed request or describe lifecycle updates as assistant token streaming.
+- **Don't** infer a stalled run from quiet activity or automatically retry it.
+- **Do** keep compact workspace navigation and the selected context panel mutually exclusive.
+- **Do** fill the library's main pane, protect single-line dates, and let paths truncate.
+- **Do** use readable approval prose with exact selectable technical payloads and explicit decisions.
+- **Do** align conversation context, drafts, history, and admission with confirmed runtime state.
+- **Do** make conversation deletion explicit, default its confirmation to Cancel, discard only the deleted draft, and preserve project files and saved checkpoints.
+- **Do** distinguish read-only evidence, Git baselines, review status, and verification limits.
+- **Do** preserve explicit follow-current versus pinned history and honest stage, coverage, and issue labels.
+- **Do** state each search scope and keep folder selection separate from opening; require file activation when preview replaces the browser.
+- **Do** restore the intended native key window and responder when returning to the composer.
+- **Do** distinguish You and LUMI with alignment, role labels and symbols as well as tint.
+- **Do** resolve the exact message checkpoint, review restore scope, and preserve the original conversation and safety copy.
+- **Do** state full-history search scope, keep the latest navigation intent authoritative, distinguish snapshot counts from changed files, and name the isolated local checkpoint revision.
+- **Do** keep Save Command and Discard Edits reachable, preserve unsaved edits within the window lifetime, show the active command, and keep Stop App distinct from Stop LUMI.
+- **Do** separate role/completion from check/review evidence and reserve the 28-point Jump to Latest footer.
+- **Do** make pending actions and unknown status explicit, preserve console evidence, and reconcile status before another launch.
+- **Don't** silently substitute a checkpoint or imply complete environment recovery, server readiness, or deployment.
+- **Don't** replace Swift/AppKit with illustrative SwiftUI snippets, a web shell, or raster concepts.
+- **Don't** infer fixed palettes, tonal ramps, or a radius scale from native screenshots.
+- **Don't** promote the page outline to a language-server index or Git changes to exclusive run attribution.
+- **Don't** grant permission on default Return, replay uncertain submissions, or resume execution from history.
+- **Don't** equate connection/catalog status with subscription, billing, or inference entitlement.
+- **Don't** promote scoped reviews, synthetic fixtures, or local signing into release or accessibility certification.
+- **Don't** describe removal from conversation navigation as secure erasure of retained run or checkpoint evidence.
+
+## Workspace model choice — October 1, 2026
+
+Entry no longer checks an account before showing welcome/projects. Optional ChatGPT connection remains in the library. A native model control beneath the composer opens a modeless provider/model picker, also available through Workspace Actions. The picker uses a native provider popup and searchable model list, explicit workspace scope, inline recovery, and one Refresh action. Selecting a listed model switches immediately and dismisses only after confirmed persistence. Other model ID reveals a custom entry with Return or Switch Model. Switching waits for active and queued work to finish; browsing leaves Stop reachable. System controls, colors, typography, and existing navigation remain authoritative. See [model-selection behavior](../docs/desktop/MODEL-SELECTION.md).
+
+The model list merges eight recent workspace choices with current and discovered models without duplicate IDs or a second Recent selector. Revision-aware refresh preserves custom edits, and persistent errors remain separate from availability text. Workspace → Model & Provider and Shift–Command–M mirror the composer entry. Connection descriptions report configuration without implying account entitlement. The model panel remains modeless and uses native popup and text-field controls; data validation and failed-persistence admission rules are runtime boundaries, not client-only affordances.
+
+Connection recovery preserves the picker and its editable draft within the workspace window lifetime. Reconnect reads the new worker's saved selection before enabling switching and invalidates callbacks from the previous connection. Opening focuses search or a retained custom entry; dismissal restores the prior responder. The native action palette supports unordered search terms and explicit navigation aliases, preserves matching selection, respects input-method composition, and exposes library, connection, and reconnect actions. No new visual system or authentication prerequisite is introduced.
+
+Model suggestions now load automatically from the selected connection, with provider source and freshness beside Refresh. That single action reconciles the saved choice and refreshes the selected provider catalog. Last successful lists survive refresh failures with explicit stale guidance, while exact custom IDs and typed drafts remain available. Separate provider caches and callback identities protect switching, dismissal, and reconnect. The native search field and model list, semantic colors, and modeless workspace flow remain the visual authority; discovery never silently picks a model or claims inference entitlement.
+
+Live activity now includes explicit code and command excerpts inside the existing native disclosure rows. Monospaced, selectable previews preserve formatting and remain bounded within a scroll pane; file links and Inspect run details connect the preview to evidence. Provider drafts and tool execution have distinct identities and labels. Public ChatGPT draft updates are coalesced; command output appears when execution completes. New active previews expand once, while user collapse, history selection, and timeline reading position remain authoritative. The source reference is the local LUMI app's inline code and command rows, adapted to the existing AppKit surface.
+
+Conversation roles use quiet semantic fills: accent for the user, neutral for replies, teal for action records, purple for provider drafts, and orange for issues. Text and symbols retain role/status distinctions without relying on color. Live previews occupy a 120pt scroll pane; detail summaries use at most four lines with full text in their tooltip and run details. Automatically opened previews collapse on completion; user-opened records stay open. The composer identifies autonomous execution and Stop, and completed run evidence retains the recorded authority.
+
+The activity inspector adds a compact native kind filter and local Copy/Copy excerpt action. Draft receipt uses “Received · Not executed” with a document icon, while agent updates have a neutral surface. Role text, icons and restrained semantic fills convey the same distinctions. Active preview selection pins its disclosure and reading position through incoming records and completion; the inspector updates existing rows instead of replacing the reader’s text view.
+
+Filtered inspection shows matching and available activity counts beside a contextual Clear filters action. Internal run-status events remain outside that visible count; retained-history limits remain explicit. Search-to-results navigation supports Down Arrow, and Escape in search clears the active filters. This stays local to the selected instruction and does not execute or restart work. Skill evidence is labeled as a skill load result rather than agent prose.
+
+Measured progress now sits beneath the current stage: concrete batch completion while tools execute, and loaded action/check counts otherwise. Local command rows stream the latest complete, redacted output lines inside the same 120pt pane, keeping the command visible and showing observed bytes and lines. A selected excerpt stays stable with “Selection held · Clear selection to follow”; clearing the selection displays the newest evidence. Provider waiting text reports actual silence, and elapsed time is never presented as a completion percentage.
+
+The next refinement makes output reading an explicit mode. Scrolling away holds the displayed excerpt and reveals a compact **Follow output** action beside Copy; selection uses **Selection held**, while scrollback uses **Reading earlier output**. Neither pauses agent execution. Quiet command observations report elapsed time and the age of captured output with unchanged counters. Disconnected summaries say **Last recorded**, and stale action detail is identified as a previous update. Provider-wait details are visible in the stage explanation. Latest activity targets the table's bottom even when the newest expanded row exceeds the available height.
+
+
+Workspace Actions now uses a modeless native child panel, matching Open File and the model picker. Search retains its existing visual treatment, keyboard navigation and aliases; the conversation and Stop remain available. Returning to the workspace dismisses the panel without reclaiming focus. Reopening replaces it, and closing the workspace detaches it. A timed-out instruction lookup keeps the connection alive and exposes Check Status in the notice and Check Instruction Status in Workspace Actions. Checking disables the retry action; Send remains unavailable until the saved acceptance is reconciled.
+
+Run keeps discovery validity separate from process status: a failed refresh cannot enable a stale command. Changed command metadata refreshes choices without executing them and preserves unsaved configuration. Running previews expose Open in Browser, Copy Link, and a selectable local address together outside Details. These actions require confirmed running status and a validated local URL.
+
+Model selection uses the existing Workspace Actions search/list pattern. Single-line IDs omit descriptions; a checkmark identifies the active choice. Current/recent IDs precede naturally sorted discovery results. Click or Return activates, arrows browse, and Escape clears search before closing. Provider changes clear the query; catalog refresh preserves the highlighted ID and scroll position, or clears a removed highlight without choosing a replacement.
+
+### Conversation memory
+
+Workspace → Conversation Memory… (⌘8), also in Workspace Actions, opens a modeless
+search/list/detail editor scoped to the selected conversation. The main conversation
+and Stop remain reachable. Native fields and a resizable text editor use semantic
+colors and accessible labels. Save Memory (⌘S), Copy Draft, Discard & Refresh, and
+confirmed removal make changes explicit. Pending work permits inspection while
+edits wait; connection changes and conflicts preserve the draft. See the
+[capability audit](../docs/desktop/CONVERSATION-MEMORY.md).
+
+Stale memory edits offer an inline comparison between the saved version and the
+preserved draft, including their categories. Use Saved Version and Keep My Draft
+make the choice explicit; keeping a draft still requires Save Memory. The window
+grows for comparison while preserving a readable minimum width. Saved dates aid
+orientation, and refresh/save retain the selected record across pagination and
+sorting. ⌘F belongs to the key memory window; search-to-list arrows/Return, Escape
+to clear or return to search, and restored parent focus follow the existing
+native picker conventions.
+
+### Conversation context
+
+Workspace → Conversation Context (⌘9) uses the existing inspector with native
+Back/Forward, Find and Reload. A timestamp identifies its observed snapshot;
+plain-language sections explain active history, rolling summaries, saved memory
+and current work. Open… connects to memory, Saved State, recorded runs and checkpoints.
+The observation uses a localized date and time. Empty
+states explain the next action, and conversation switching clears previous
+inspection state. This surface reports observed counts without token percentages
+or context-quality scores. See the [full-layer audit](../docs/desktop/AGENT-CONTEXT.md).
+The shared Code tab is now named Inspect to reflect files, run evidence and
+conversation context. Context hides the unrelated file browser and uses the full
+reading pane; choosing Files restores browsing. Its compact title is Context,
+with the full name in the tooltip, and section headings use native semibold text.
+
+### Reasoning control
+
+The composer footer places a compact native Reasoning menu beside the model name. Its visible label shows the saved level; the menu uses checkmarks and short speed/depth hints. One choice applies immediately for subsequent instructions. Default means the provider default. Unknown model capabilities leave the default visible with an explanatory tooltip. There is no separate activation button or settings sheet. Workspace Actions also exposes Change Reasoning Level. Active work, persistence, connection loss, and uncertain saves retain the existing model-selection safety boundaries; the menu reconciles uncertain state through a read-only check.
+
+
+### Retained history refinement — October 1, 2026
+
+Conversation Context's Open… menu now leads to Retained History in the same
+full-width reading pane. Native system body text, semantic colors, selectable
+content, Find, Back/Forward and Previous/Next preserve the established reading
+workflow. Role/date labels distinguish messages and rolling summaries. The scope
+note separates retained messages from saved memory and other prompt sources;
+Reload captures a new snapshot. Page errors preserve the last valid content and
+name Reload as recovery. A localized observation time and page-search scope are
+available in the footer tooltip. No additional sidebar, modal or health gauge.
+
+### OpenRouter provider — October 2, 2026
+
+OpenRouter extends the existing modeless Model & Provider picker. When the runtime advertises `openrouter-credentials-v1`, choosing OpenRouter reveals a native secure API-key field with explicit Save Key and Remove Key buttons above model search. Inline status distinguishes a saved key, an environment-provided key, and missing credentials; saved status does not claim verified model access. Credential controls wait during active work and pending saves. Dismissal clears the secure draft, and reopening reads the saved state before completing credential reconciliation. OpenRouter uses the same searchable model list, exact custom-ID entry, immediate model selection, semantic light/dark colors, and system typography as the existing providers.

@@ -1,0 +1,18 @@
+{
+  "identity": "HEAV3NS-CODE — Sovereign of Heavens and Code",
+  "concept": "A serious, majestic celestial sovereign inspired by Hoyoverse aesthetic, crowned with glowing crystalline spires, rune-etched halo, and cosmic starlight indigo mantle.",
+  "tool": "Built-in image_gen",
+  "master": "AppIcon-Master.png",
+  "masterPixels": [
+    1024,
+    1024
+  ],
+  "prompt": "macOS application icon featuring an original serious anime sovereign character inspired by the aesthetic of Genshin Impact and Honkai Star Rail (Hoyoverse). A majestic, solemn, and intensely serious celestial ruler of heavens and code. The character has sharp, elegant features, piercing luminous golden-cyan eyes with focused solemn gaze, and flowing silver-white hair with faint iridescent starlight indigo tips. Wearing an ornate, sharp, glowing celestial sovereign crown of gold filigree and geometric crystalline shards, with subtle floating holy code glyphs and celestial halo accents. Dressed in a regal, high-collared midnight navy and white sovereign mantle adorned with intricate gold celestial embroidery and cosmic circuit accents. Composed as a premium native macOS app icon: the character bust is centered inside a continuous rounded-rectangle (squircle) macOS icon tile on a rich deep space indigo and dark ultramarine backdrop with subtle starlight rim lighting. Clean crisp edges, genuine transparent background outside the rounded tile, exquisite digital anime character art, regal, solemn, dignified, and breathtakingly detailed.",
+  "exports": "scripts/build-native-assets.swift",
+  "vectorCompanion": "Original flat cloud/code geometry, intentionally distinct from the dimensional raster rendering.",
+  "previousIdentities": [
+    "Archive/Cloud-Code",
+    "Archive/Workspace-Conversation",
+    "Archive/Signal"
+  ]
+}
