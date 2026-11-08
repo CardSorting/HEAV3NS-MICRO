@@ -11,7 +11,7 @@
   <a href="../CONSTITUTION.md">Constitution</a>
 </p>
 
-An **Architecture Decision Record (ADR)** captures a significant architectural choice in **HEAV3NS-MICRO**, its context, the alternatives evaluated, its consequences, and the **executable verification commands** (`cargo test`, `joy-check`, or `docs-check`) that keep the decision continuously enforced in the codebase.
+An **Architecture Decision Record (ADR)** captures a significant architectural choice in **HEAV3NS-MICRO**, its context, the alternatives evaluated, its consequences, and the **executable verification commands** (`cargo test`, `swift test`, `joy-check`, or `docs-check`) that keep the decision continuously enforced in the codebase.
 
 Our ADR format follows **MADR (Markdown Any Decision Records)**, extended with an explicit `## Verification` section so no ADR ever degrades into unverified prose.
 
@@ -30,6 +30,7 @@ flowchart TD
   ADR7["ADR-0007: Contractual Sovereignty & I* Traits"]
   ADR8["ADR-0008: Secret Redactor & Security Policy"]
   ADR9["ADR-0009: Diátaxis Docs & Automated Guardrails"]
+  ADR10["ADR-0010: Native Desktop AppKit Integration & RPC"]
 
   ADR1 --> ADR7
   ADR1 --> ADR2
@@ -40,6 +41,8 @@ flowchart TD
   ADR7 --> ADR6
   ADR8 --> ADR6
   ADR1 --> ADR9
+  ADR6 --> ADR10
+  ADR1 --> ADR10
 ```
 
 ---
@@ -58,6 +61,7 @@ flowchart TD
 | [ADR-0007](0007-contractual-sovereignty-and-i-interfaces.md) | Contractual Sovereignty via Pure `I<Name>` Port Interfaces | **Accepted** | Core Architecture | `src/domain/interfaces/mod.rs` |
 | [ADR-0008](0008-secret-redaction-and-security-policy.md) | Deterministic Secret Redaction & Sensitive Path Interdiction | **Accepted** | Runtime Security | `test_secret_redactor_and_sensitive_path_guard` |
 | [ADR-0009](0009-diataxis-documentation-and-knowledge-governance.md) | Diátaxis + Institutional Memory Documentation Architecture | **Accepted** | Documentation | `node bin/docs-check.mjs` |
+| [ADR-0010](0010-native-desktop-integration-and-rpc-protocol.md) | Native Desktop AppKit Integration, Modular UI Decomposition, and Stdio JSON-RPC Protocol | **Accepted** | Desktop IDE & IPC | `swift test` & `cargo test` |
 
 ---
 

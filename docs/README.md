@@ -52,7 +52,8 @@ Workspace-verified figures from [papers/companion-brief.md](papers/companion-bri
 | Agent Flight Test scenarios | **5** (`FT-01..FT-05`, `19/19` checks passing) | [`src/core/flight_runner.rs`](../src/core/flight_runner.rs) |
 | Joyzoning Stability Index ($SI$) | **100% (`SOVEREIGN`)** | [`VALIDATION_REPORT.md`](../VALIDATION_REPORT.md) |
 | Joyzoning Build Health | **100% (`Grade: A+ — SOVEREIGN`)** | [`VALIDATION_REPORT.md`](../VALIDATION_REPORT.md) |
-| Architecture Decision Records (ADRs) | **9** + template | [`docs/adr/README.md`](adr/README.md) |
+| Architecture Decision Records (ADRs) | **10** + template | [`docs/adr/README.md`](adr/README.md) |
+| Native macOS AppKit Tests | **308** tests passing (`0` failures) | [`native/Tests/Heav3nsCodeTests/`](../native/Tests/Heav3nsCodeTests/) |
 | Operational Playbooks | **5** runbooks | [`docs/playbooks/README.md`](playbooks/README.md) |
 | Blameless Engineering Postmortems | **5** + template | [`docs/postmortems/README.md`](postmortems/README.md) |
 | Concept Wiki & Knowledge Base Articles | **4** wiki guides · **3** KB articles | [`docs/wiki/README.md`](wiki/README.md) · [`docs/kb/README.md`](kb/README.md) |

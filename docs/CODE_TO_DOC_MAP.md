@@ -1,7 +1,7 @@
 <!-- [LAYER: UI] -->
 # Code-to-Doc Map (`HEAV3NS-MICRO`)
 
-Use this lookup table whenever you modify code in `src/` to locate the corresponding documentation pages to update.
+Use this lookup table whenever you modify code in `src/` or `native/` to locate the corresponding documentation pages to update.
 
 ## Stateless Plumbing (`src/plumbing/`)
 
@@ -47,10 +47,25 @@ Use this lookup table whenever you modify code in `src/` to locate the correspon
 | `src/core/request_queue.rs` | [`docs/architecture/current.md`](architecture/current.md) · [`docs/PROJECT_MAP.md`](PROJECT_MAP.md) |
 | `src/core/flight_runner.rs` & `substrate_tests.rs` | [`VALIDATION_REPORT.md`](../VALIDATION_REPORT.md) · [`README.md`](../README.md) |
 
-## UI & Composition Roots (`src/ui/`, `src/lib.rs`, `src/main.rs`)
+## UI, IPC Protocols & Composition Roots (`src/ui/`, `src/lib.rs`, `src/main.rs`)
 
 | Source | Documentation |
 | :--- | :--- |
 | `src/ui/cli_presenter.rs` | [`README.md`](../README.md) · [`docs/PROJECT_MAP.md`](PROJECT_MAP.md) |
+| `src/ui/stdio_worker.rs` | [`docs/architecture/current.md`](architecture/current.md) · [`docs/adr/0010-native-desktop-integration-and-rpc-protocol.md`](adr/0010-native-desktop-integration-and-rpc-protocol.md) |
+| `src/ui/rpc_dispatch.rs` | [`docs/architecture/current.md`](architecture/current.md) · [`docs/adr/0010-native-desktop-integration-and-rpc-protocol.md`](adr/0010-native-desktop-integration-and-rpc-protocol.md) |
 | `src/lib.rs` & `src/main.rs` | [`README.md`](../README.md) · [`docs/architecture/current.md`](architecture/current.md) |
 
+## Native macOS AppKit Client (`native/Sources/Heav3nsCode/`)
+
+| Source | Documentation |
+| :--- | :--- |
+| `WorkspaceWindow.swift` | [`native/PRODUCT.md`](../native/PRODUCT.md) · [`docs/architecture/current.md`](architecture/current.md) |
+| `WorkspaceAttachmentViews.swift` | [`native/DESIGN.md`](../native/DESIGN.md) · [`docs/architecture/current.md`](architecture/current.md) |
+| `WorkspaceWindow+Navigation.swift` | [`native/ROADMAP.md`](../native/ROADMAP.md) · [`docs/architecture/current.md`](architecture/current.md) |
+| `WorkspaceWindow+Inspection.swift` | [`native/PRODUCT.md`](../native/PRODUCT.md) · [`docs/architecture/current.md`](architecture/current.md) |
+| `WorkspaceWindow+Execution.swift` | [`native/ROADMAP.md`](../native/ROADMAP.md) · [`docs/architecture/current.md`](architecture/current.md) |
+| `WorkspaceWindow+Swarm.swift` & `+SwarmSettings.swift` | [`docs/PROJECT_MAP.md`](PROJECT_MAP.md) · [`docs/architecture/current.md`](architecture/current.md) |
+| `WorkspaceWindow+Events.swift` | [`docs/architecture/current.md`](architecture/current.md) · [`docs/adr/0010-native-desktop-integration-and-rpc-protocol.md`](adr/0010-native-desktop-integration-and-rpc-protocol.md) |
+| `RuntimeClient.swift` & `ControlFrameReader.swift` | [`docs/adr/0010-native-desktop-integration-and-rpc-protocol.md`](adr/0010-native-desktop-integration-and-rpc-protocol.md) · [`docs/architecture/current.md`](architecture/current.md) |
+| `PodsWindow.swift` & `PodLiveView.swift` | [`native/PRODUCT.md`](../native/PRODUCT.md) · [`native/DESIGN.md`](../native/DESIGN.md) |

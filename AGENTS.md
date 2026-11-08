@@ -56,16 +56,18 @@ Every source file in `HEAV3NS-MICRO` belongs to one of the five canonical Joyzon
    - `http_provider.rs`, `scripted_provider.rs`, `vfs_store.rs`, `transaction_journal.rs`, `shell_runner.rs`, `fs_tools.rs`, `search_tools.rs`
 4. **`CORE` (`src/core/`)** — Application use-case orchestration (`// [LAYER: CORE]`):
    - `engine.rs`, `slash_and_swarm.rs`, `session_store.rs`, `tool_governor.rs`, `tool_specs.rs`, `tool_registry.rs`, `request_queue.rs`, `flight_runner.rs`, `substrate_tests.rs`
-5. **`UI` (`src/ui/`, `src/lib.rs`, `src/main.rs`)** — CLI presenters, stdio JSONL worker, and Composition Roots (`// [LAYER: UI]`):
-   - `ui/cli_presenter.rs`, `lib.rs`, `main.rs`
+5. **`UI` (`src/ui/`, `src/lib.rs`, `src/main.rs`, `native/`)** — CLI presenters, stdio JSONL worker, RPC dispatch, Composition Roots, and Native macOS AppKit Client (`// [LAYER: UI]`):
+   - `src/ui/`: `cli_presenter.rs`, `stdio_worker.rs`, `rpc_dispatch.rs`
+   - `src/lib.rs`, `src/main.rs`
+   - `native/Sources/Heav3nsCode/`: Native macOS AppKit client decomposed into sovereign modules under Tier 1 Optimal caps (`WorkspaceWindow.swift`, `WorkspaceAttachmentViews.swift`, `WorkspaceWindow+Events.swift`, `WorkspaceWindow+Execution.swift`, `WorkspaceWindow+Inspection.swift`, `WorkspaceWindow+Navigation.swift`, `WorkspaceWindow+Swarm.swift`, `WorkspaceWindow+SwarmSettings.swift`)
 
 ---
 
 ## Phase 2: The Five Mandatory Coding Rules
 
-1. **Rule 1 (`[LAYER: <ZONE>]` Header Tag)**: Every `.rs` file starts with `// [LAYER: <ZONE>]` on line 1; every `.md` file starts with `<!-- [LAYER: <ZONE>] -->`.
-2. **Rule 2 (Principle of Geographic Alignment)**: A file's physical path (`src/<zone>/...`) must match its `[LAYER: <ZONE>]` header (`SPI-208`).
-3. **Rule 3 (Import Depth & Single-Line `use` Discipline)**: Keep `use crate::...;` statements on a single line so polyglot scanners resolve all symbol edges; never introduce circular dependencies (`SPI-201`).
+1. **Rule 1 (`[LAYER: <ZONE>]` Header Tag)**: Every `.rs` and `.swift` file starts with `// [LAYER: <ZONE>]` on line 1; every `.md` file starts with `<!-- [LAYER: <ZONE>] -->`.
+2. **Rule 2 (Principle of Geographic Alignment)**: A file's physical path (`src/<zone>/...` or `native/...`) must match its `[LAYER: <ZONE>]` header (`SPI-208`).
+3. **Rule 3 (Import Depth & Single-Line `use`/`import` Discipline)**: Keep `use crate::...;` statements on a single line so polyglot scanners resolve all symbol edges; never introduce circular dependencies (`SPI-201`).
 4. **Rule 4 (Contractual Sovereignty `I<ClassName>`)**: Every concrete adapter in `src/infrastructure/` consumed by `src/core/` must have a corresponding `pub trait I<StructName>` in `src/domain/interfaces/mod.rs` (`SPI-107`).
 5. **Rule 5 (Module Size & Simplicity Caps)**: Every file must remain in **Tier 1 Optimal (`< 800` lines, `SPI-203`)**; every `src/domain/` file must contain `<= 3` structs.
 
@@ -78,9 +80,12 @@ Run these commands before concluding any change:
 # 1. Rust unit & integration test suite (8 suites + 5-scenario Flight Test)
 cargo test
 
-# 2. Strict Joyzoning & Spider audit (must exit 0 with 100% Stability Index)
+# 2. Native macOS AppKit test suite (308 unit and integration tests)
+cd native && swift test && cd ..
+
+# 3. Strict Joyzoning & Spider audit (must exit 0 with 100% Stability Index)
 node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --theme strict
 
-# 3. StabilityDoctor architectural health check
+# 4. StabilityDoctor architectural health check
 node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --doctor
 ```

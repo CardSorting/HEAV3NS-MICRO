@@ -3,20 +3,20 @@
 
 <!-- AUTO-ROLLING METADATA BLOCK
 schema_version: 1.6.0
-last_reconciled: 2026-10-29T00:05:00-06:00
-reconciliation_trigger: side_queries_and_viewport_pass
-rolling_cycle: 2026.Q4-M1
+last_reconciled: 2026-11-08T15:30:00-07:00
+reconciliation_trigger: zenith_pass_runtime_integration_and_demonolithization
+rolling_cycle: 2026.Q4-M2
 health: Active / World-Class Architecture
 wip_capacity: 3
 active_wip_count: 0
-test_suite_status: 257_executed_0_failed_37_skipped
+test_suite_status: 308_executed_0_failed_6_skipped
 baseline_commit: HEAD
 auditor: Antigravity, Cursor, Linear & Apple HIG Systems Auditor
 -->
 
 ## 1. Surface Center of Gravity & Principles
 
-**Core Purpose:** Deliver a native, calm, AppKit-driven macOS desktop control station ("Operate") for directing LUMI and inspecting execution evidence without requiring the user to edit code, juggle external browsers, or endure web-wrapper latency.
+**Core Purpose:** Deliver a native, calm, AppKit-driven macOS desktop control station ("Operate") for directing the HEAV3NS agent swarm and inspecting execution evidence without requiring the user to edit code, juggle external browsers, or endure web-wrapper latency.
 
 **Primary Operator:** Developers and technical leads directing autonomous AI coding swarms across long-horizon projects.
 
@@ -26,7 +26,7 @@ auditor: Antigravity, Cursor, Linear & Apple HIG Systems Auditor
 3. **Zero modal lock-in:** No agent question, approval request, or secondary tool may freeze the user's composer or block drafting follow-up instructions.
 4. **Approachable, familiar navigation:** Navigation must mirror the most predictable patterns of industry-leading native macOS apps (Xcode, Finder, Safari) and elite developer tools (Google Antigravity, Cursor, Linear, JetBrains).
 5. **AppKit native fidelity:** Strictly maintain semantic `NSColor`, system dynamic fonts, native selection/focus, Apple HIG accessibility (`accessibilityLabel`), and standard keyboard navigation (`Cmd+1..9`, `Cmd+[`, `Cmd+]`, `Cmd+F`, `Cmd+P`, `Cmd+K`).
-6. **Runtime boundary honesty:** Presentation belongs to Swift/AppKit; execution, credentials, BroccoliDB persistence, checkpoints, and permissions belong to the LUMI engine (`RuntimeClient.swift`). Unsupported actions must never simulate success.
+6. **Runtime boundary honesty:** Presentation belongs to Swift/AppKit; execution, credentials, transactional VFS persistence, checkpoints, and permissions belong to the HEAV3NS-MICRO engine (`RuntimeClient.swift`). Unsupported actions must never simulate success.
 
 ---
 
