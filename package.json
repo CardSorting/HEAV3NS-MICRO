@@ -1,0 +1,23 @@
+{
+  "name": "heav3ns-micro",
+  "version": "0.1.0",
+  "description": "Hyper-Compressed Rust Micro Agent Runtime with Joyzoning spatial sovereignty and Diátaxis documentation governance",
+  "type": "module",
+  "scripts": {
+    "docs:check": "node bin/docs-check.mjs",
+    "joy-check": "node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --theme strict",
+    "test": "cargo test",
+    "verify": "npm run docs:check && npm run joy-check && cargo test"
+  },
+  "keywords": [
+    "heav3ns-joy",
+    "heav3ns-micro",
+    "rust",
+    "agent-runtime",
+    "joyzoning",
+    "diataxis",
+    "madr"
+  ],
+  "author": "HEAV3NS Team",
+  "license": "MIT"
+}
