@@ -44,7 +44,7 @@ pub fn parse_args() -> CliOptions {
             "--flight" | "--benchmark-flight" => opts.mode = RunMode::FlightTest,
             "--bench" => opts.mode = RunMode::Bench,
             "--smoke" => opts.mode = RunMode::Smoke,
-            "--stdio" | "--worker" => opts.mode = RunMode::StdioWorker,
+            "--stdio" | "--worker" | "--desktop-worker" | "--desktop-account" => opts.mode = RunMode::StdioWorker,
             "-h" | "--help" => opts.mode = RunMode::Help,
             "--json" => opts.format = "json".to_string(),
             "--format" => {

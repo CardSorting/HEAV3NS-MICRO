@@ -1,8 +1,9 @@
-// [LAYER: INFRASTRUCTURE]
+// [LAYER: UI]
 import AppKit
 import WebKit
 
 final class NativeAppPreviewView: NSStackView, WKNavigationDelegate {
+    func dispose() { clear() }
     let webView: WKWebView
     private let urlLabel = JourneyStyle.label("", size: 11, secondary: true)
     private lazy var reloadButton = JourneyButton("Reload", symbol: "arrow.clockwise") { [weak self] in self?.reload() }

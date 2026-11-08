@@ -40,8 +40,24 @@ final class AccountClient {
         let env = ProcessInfo.processInfo.environment
         let node = EngineManager.shared.resolveNode(override: nodeOverride, environment: env)
         let cli = EngineManager.shared.resolveCLI(override: cliOverride, environment: env)
-        guard FileManager.default.isExecutableFile(atPath: node.path), FileManager.default.fileExists(atPath: cli.path) else { throw BridgeError.message("The bundled account service is missing. Rebuild or reinstall the app.") }
         let child = Process(), writer = Pipe(), reader = Pipe()
+        if let nodeOverride, FileManager.default.isExecutableFile(atPath: nodeOverride.path) {
+            guard FileManager.default.fileExists(atPath: cli.path) else {
+                throw BridgeError.message("The bundled account service is missing. Rebuild or reinstall the app.")
+            }
+            child.executableURL = nodeOverride; child.arguments = [cli.path, "--desktop-account"]
+        } else {
+            let (execURL, isBinary, _) = EngineManager.shared.resolveExecutable(override: cliOverride, environment: env)
+            if isBinary && FileManager.default.isExecutableFile(atPath: execURL.path) {
+                child.executableURL = execURL; child.arguments = ["--desktop-account"]
+            } else if FileManager.default.isExecutableFile(atPath: node.path) && FileManager.default.fileExists(atPath: cli.path) {
+                child.executableURL = node; child.arguments = [cli.path, "--desktop-account"]
+            } else if FileManager.default.isExecutableFile(atPath: execURL.path) {
+                child.executableURL = execURL; child.arguments = ["--desktop-account"]
+            } else {
+                throw BridgeError.message("The bundled account service is missing. Rebuild or reinstall the app.")
+            }
+        }
         generation = UUID(); let generation = generation
         input = writer; output = reader
         let frames = ControlFrameReader(receive: { [weak self] messages in
@@ -55,7 +71,6 @@ final class AccountClient {
             self.fail("The account service disconnected. Try connecting again.")
         })
         self.reader = frames
-        child.executableURL = node; child.arguments = [cli.path, "--desktop-account"]
         child.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
         child.environment = env.merging(["NO_COLOR": "1", "TERM": "dumb"]) { _, value in value }
         child.standardInput = writer; child.standardOutput = reader; child.standardError = FileHandle.nullDevice
@@ -87,6 +102,7 @@ final class AccountClient {
     }
     private func fail(_ message: String) { stop(message: message) }
     func stop() { stop(message: "The account connection was closed.") }
+    func dispose() { stop() }
     private func stop(message: String) {
         deadlineTimer?.cancel(); deadlineTimer = nil; deadlines.removeAll(); generation = UUID()
         let pending = callbacks; callbacks.removeAll()

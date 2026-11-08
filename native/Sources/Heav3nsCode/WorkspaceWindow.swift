@@ -3,421 +3,200 @@ import AppKit
 import CryptoKit
 import Foundation
 
-final class AttachmentTokenBar: NSStackView {
-    private(set) var urls = [URL]()
-    var onRemove: ((URL) -> Void)?
-    var onChange: (() -> Void)?
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        orientation = .horizontal; alignment = .centerY; spacing = 6
-        translatesAutoresizingMaskIntoConstraints = false
-        isHidden = true
-    }
-    required init?(coder: NSCoder) { fatalError("init(coder:) unavailable") }
-
-    func add(url: URL) {
-        guard !urls.contains(url) else { return }
-        urls.append(url)
-        render(); onChange?()
-    }
-
-    func remove(url: URL) {
-        urls.removeAll { $0 == url }
-        render(); onRemove?(url); onChange?()
-    }
-
-    func clear() {
-        urls.removeAll(); render(); onChange?()
-    }
-
-    private func render() {
-        arrangedSubviews.forEach { $0.removeFromSuperview() }
-        isHidden = urls.isEmpty
-        for url in urls {
-            let pill = NSStackView()
-            pill.orientation = .horizontal; pill.alignment = .centerY; pill.spacing = 4
-            pill.edgeInsets = NSEdgeInsets(top: 2, left: 6, bottom: 2, right: 6)
-            pill.wantsLayer = true; pill.layer?.cornerRadius = 5
-            pill.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
-
-            let icon = NSImageView(image: NSWorkspace.shared.icon(forFile: url.path))
-            icon.widthAnchor.constraint(equalToConstant: 14).isActive = true
-            icon.heightAnchor.constraint(equalToConstant: 14).isActive = true
-
-            let name = JourneyStyle.label(url.lastPathComponent, size: 11, weight: .medium)
-            name.maximumNumberOfLines = 1; name.lineBreakMode = .byTruncatingMiddle
-
-            let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? 0
-            let sizeLabel = JourneyStyle.label(ByteCountFormatter.string(fromByteCount: size, countStyle: .file), size: 10, secondary: true)
-
-            let remove = JourneyButton("", symbol: "xmark.circle.fill") { [weak self] in
-                self?.remove(url: url)
-            }
-            remove.bezelStyle = .inline; remove.toolTip = "Remove attachment"
-            remove.widthAnchor.constraint(equalToConstant: 14).isActive = true
-            remove.heightAnchor.constraint(equalToConstant: 14).isActive = true
-
-            for child in [icon, name, sizeLabel, remove] { pill.addArrangedSubview(child) }
-            addArrangedSubview(pill)
-        }
-    }
-}
-
-final class ComposerView: NSTextView {
-    var submit: (() -> Void)?
-    var onFileDropped: ((URL) -> Void)?
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        registerForDraggedTypes([.fileURL])
-    }
-    override init(frame frameRect: NSRect, textContainer: NSTextContainer?) {
-        super.init(frame: frameRect, textContainer: textContainer)
-        registerForDraggedTypes([.fileURL])
-    }
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        registerForDraggedTypes([.fileURL])
-    }
-    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        if sender.draggingPasteboard.canReadItem(withDataConformingToTypes: [NSPasteboard.PasteboardType.fileURL.rawValue]) {
-            return .copy
-        }
-        return super.draggingEntered(sender)
-    }
-    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        if let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], !urls.isEmpty {
-            for url in urls { onFileDropped?(url) }
-            return true
-        }
-        return super.performDragOperation(sender)
-    }
-    override func paste(_ sender: Any?) {
-        if let urls = NSPasteboard.general.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], !urls.isEmpty {
-            for url in urls { onFileDropped?(url) }
-            return
-        }
-        super.paste(sender)
-    }
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        guard string.isEmpty, !hasMarkedText() else { return }
-        let origin = NSPoint(x: textContainerOrigin.x + (textContainer?.lineFragmentPadding ?? 5), y: textContainerOrigin.y)
-        ("Message LUMI…" as NSString).draw(at: origin, withAttributes: [.font: font ?? NSFont.systemFont(ofSize: 14), .foregroundColor: NSColor.placeholderTextColor])
-    }
-    override func didChangeText() { super.didChangeText(); needsDisplay = true }
-    override func keyDown(with event: NSEvent) {
-        if event.keyCode == 36, !hasMarkedText(), !event.modifierFlags.contains(.shift) {
-            submit?(); return
-        }
-        super.keyDown(with: event)
-    }
-}
-
-private final class TranscriptScrollView: NSScrollView {
-    var beforeResize: ((Bool, NSPoint) -> Void)?
-    override func setFrameSize(_ newSize: NSSize) {
-        if newSize != frame.size {
-            beforeResize?(documentVisibleRect.maxY >= (documentView?.bounds.height ?? 0) - 35, contentView.bounds.origin)
-        }
-        super.setFrameSize(newSize)
-    }
-}
-
-final class TurnScrubberRail: NSView {
-    struct TurnItem: Equatable {
-        let index: Int
-        let rowIndex: Int
-        let preview: String
-        let isActive: Bool
-        let isError: Bool
-        var isWaitingReview = false
-    }
-    var turns: [TurnItem] = [] {
-        didSet {
-            isHidden = turns.count < 2
-            needsDisplay = true
-        }
-    }
-    var onSelectTurn: ((Int) -> Void)?
-    private var hoveredIndex: Int?
-    private var trackingArea: NSTrackingArea?
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true; translatesAutoresizingMaskIntoConstraints = false
-        widthAnchor.constraint(equalToConstant: 18).isActive = true
-    }
-    required init?(coder: NSCoder) { fatalError("init(coder:) unavailable") }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea { removeTrackingArea(trackingArea) }
-        let area = NSTrackingArea(rect: bounds, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow], owner: self, userInfo: nil)
-        addTrackingArea(area)
-        self.trackingArea = area
-    }
-
-    private func dotCenter(for index: Int) -> NSPoint {
-        let count = turns.count
-        guard count > 0 else { return .zero }
-        let totalHeight = bounds.height - 24
-        let step = totalHeight / CGFloat(max(1, count - 1))
-        let y = bounds.height - 12 - (CGFloat(index) * min(step, 24))
-        return NSPoint(x: bounds.midX, y: max(12, min(bounds.height - 12, y)))
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        guard turns.count >= 2 else { return }
-        if let first = turns.indices.first, let last = turns.indices.last {
-            let p1 = dotCenter(for: first), p2 = dotCenter(for: last)
-            let path = NSBezierPath()
-            path.move(to: p1); path.line(to: p2); path.lineWidth = 1.0
-            NSColor.separatorColor.withAlphaComponent(0.4).setStroke()
-            path.stroke()
-        }
-        for (i, turn) in turns.enumerated() {
-            let center = dotCenter(for: i)
-            let isHovered = (hoveredIndex == i)
-            let radius: CGFloat = isHovered ? 4.5 : ((turn.isActive || turn.isWaitingReview) ? 4.0 : 3.0)
-            let dotRect = NSRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
-            let dotPath = NSBezierPath(ovalIn: dotRect)
-            let color: NSColor = turn.isError ? .systemRed : (turn.isWaitingReview ? .systemOrange : (turn.isActive ? .controlAccentColor : (isHovered ? .secondaryLabelColor : .tertiaryLabelColor)))
-            color.setFill()
-            dotPath.fill()
-        }
-    }
-
-    override func mouseMoved(with event: NSEvent) {
-        let location = convert(event.locationInWindow, from: nil)
-        let previous = hoveredIndex
-        hoveredIndex = turns.indices.first(where: {
-            let center = dotCenter(for: $0)
-            let dx = location.x - center.x, dy = location.y - center.y
-            return (dx * dx + dy * dy) <= 64
-        })
-        if previous != hoveredIndex {
-            needsDisplay = true
-            if let hoveredIndex, turns.indices.contains(hoveredIndex) {
-                toolTip = turns[hoveredIndex].preview
-            } else { toolTip = nil }
-        }
-    }
-    override func mouseExited(with event: NSEvent) {
-        hoveredIndex = nil; toolTip = nil; needsDisplay = true
-    }
-    override func mouseUp(with event: NSEvent) {
-        let location = convert(event.locationInWindow, from: nil)
-        if let target = turns.indices.first(where: {
-            let center = dotCenter(for: $0)
-            let dx = location.x - center.x, dy = location.y - center.y
-            return (dx * dx + dy * dy) <= 100
-        }) {
-            onSelectTurn?(turns[target].rowIndex)
-        }
-    }
-}
-
 final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextViewDelegate, NSToolbarDelegate {
     let folder: URL
-    private(set) var client = RuntimeClient()
+    var client = RuntimeClient()
     var onClosed: (() -> Void)?
     var onProjects: (() -> Void)?
     var onAccount: (() -> Void)?
-    private let status = NSTextField(wrappingLabelWithString: "Preparing workspace…")
-    private let stopButton = NSButton(title: "Stop", target: nil, action: nil)
-    private let sendButton = NSButton(title: "Send", target: nil, action: nil)
-    private let queueButton = NSButton(title: "Up Next", target: nil, action: nil)
-    private let queueContent = QueuedInstructions()
-    private let queuePopover = NSPopover()
-    private var queueEditor: QueuedInstructionEditor?
-    private var editingQueued: QueuedInstruction?
-    private var removingQueued = Set<String>()
-    private var swarmDeferred = false
-    private var swarmDeferEnabled = false
-    private var criticalReviewEnabled = false
-    private var legionEnabled = false
-    private var maxSpecialists = 4
-    private let jumpButton = NSButton(title: "Jump to Latest", target: nil, action: nil)
-    private let composer = ComposerView()
-    private let attachmentBar = AttachmentTokenBar()
-    private let jumpBar = NSPathControl()
-    private let toolbarHistory = NSSegmentedControl(images: [
+    let status = NSTextField(wrappingLabelWithString: "Preparing workspace…")
+    let stopButton = NSButton(title: "Stop", target: nil, action: nil)
+    let sendButton = NSButton(title: "Send", target: nil, action: nil)
+    let queueButton = NSButton(title: "Up Next", target: nil, action: nil)
+    let queueContent = QueuedInstructions()
+    let queuePopover = NSPopover()
+    var queueEditor: QueuedInstructionEditor?
+    var editingQueued: QueuedInstruction?
+    var removingQueued = Set<String>()
+    var swarmDeferred = false
+    var swarmDeferEnabled = false
+    var criticalReviewEnabled = false
+    var legionEnabled = false
+    var maxSpecialists = 4
+    let jumpButton = NSButton(title: "Jump to Latest", target: nil, action: nil)
+    let composer = ComposerView()
+    let attachmentBar = AttachmentTokenBar()
+    let jumpBar = NSPathControl()
+    let toolbarHistory = NSSegmentedControl(images: [
         NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Back in history")!,
         NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Forward in history")!
     ], trackingMode: .momentary, target: nil, action: nil)
-    private let transcript = NSTableView()
-    private let transcriptScroll = TranscriptScrollView()
-    private let turnScrubber = TurnScrubberRail()
-    private let inspection = NSTextView()
-    private let inspectionScroll = NSScrollView()
-    private let documentView = NativeDocumentView()
-    private var binaryDocumentLoader: BinaryDocumentLoader?
-    private let viewportStore: WorkspaceViewportStore
-    private var currentViewport: WorkspaceViewport?
-    private var viewportBranch: String?
-    private var viewportObserver: NSObjectProtocol?
-    private var viewportSaveTimer: Timer?
-    private var viewportRestoring = false
-    private var viewportSaveFailed = false
-    private var viewportBranchGeneration = 0
-    private var viewportBranchTimer: Timer?
-    private var viewportBranchCheckPending = false
-    private var viewportBranchCheckFailureShown = false
-    private let inspector = NSStackView()
-    private let inspectorTitle = NSTextField(labelWithString: "Inspect")
-    private let navigation = NavigationSidebar()
-    private lazy var conversations = ConversationSidebar(folder: folder)
-    private let leftSidebar = NSVisualEffectView()
-    private let navigatorTabs = NSSegmentedControl(labels: ["Chats", "Files", "Changes"], trackingMode: .selectOne, target: nil, action: nil)
-    private let leftNavigatorStack = NSStackView()
-    private let chatTitle = JourneyStyle.label("New conversation", size: 21, weight: .semibold)
-    private let chatState = JourneyStyle.label("Tell LUMI what you want to build.", size: 12, secondary: true)
-    private let contextPanel = NSStackView()
-    private let contextTabs = NSSegmentedControl(labels: ["Walkthrough", "Changes", "Inspect", "Run"], trackingMode: .selectOne, target: nil, action: nil)
-    private let projectRun = ProjectRunView()
-    private let projectRunScroll = NSScrollView()
-    private var checkpointWindow: CheckpointWindow?
-    private let checkpointsButton = NSButton(title: "Checkpoints", target: nil, action: nil)
-    private let walkthrough = WalkthroughView()
-    private var walkthroughLoaded: String?
-    private var walkthroughLoadGeneration = 0
-    private var workspaceRefreshTimer: Timer?
-    private let outline = NSPopUpButton()
-    private var declarations = [CodeDeclaration]()
-    private var contextWidth: NSLayoutConstraint?
-    private var browserHeight: NSLayoutConstraint?
-    private let contextSeparator = JourneyStyle.rule()
-    private let browseContext = NSButton(title: "Browse files", target: nil, action: nil)
-    private var browsingCompact = true
-    private var isContextMaximized = false
-    var canMaximizeContext: Bool { showingInspector && !contextPanel.isHidden }
-    @objc func toggleMaximizeContext() {
-        guard canMaximizeContext else { return }
-        isContextMaximized.toggle()
-        adapt()
-    }
-    private var currentConversation: String?
-    private var conversationList = [ConversationSummary]()
-    private var conversationOffset = 0
-    private var moreConversations = false
-    private var switchingConversation = false
-    private var expectedConversation: String?
-    private var conversationGeneration = 0
-    private var draftByConversation = [String: String]()
-    private let approval = NSStackView()
-    private let approvalText = NSTextView()
-    private let reviewApprovalButton = NSButton(title: "Review Request…", target: nil, action: nil)
-    private let denyButton = NSButton(title: "Deny", target: nil, action: nil)
-    private let allowButton = NSButton(title: "Allow Once", target: nil, action: nil)
-    private var approvalReview: ApprovalReview?
-    private struct ApprovalDecision: Equatable {
+    let transcript = NSTableView()
+    let transcriptScroll = TranscriptScrollView()
+    let turnScrubber = TurnScrubberRail()
+    let inspection = NSTextView()
+    let inspectionScroll = NSScrollView()
+    let documentView = NativeDocumentView()
+    var binaryDocumentLoader: BinaryDocumentLoader?
+    let viewportStore: WorkspaceViewportStore
+    var currentViewport: WorkspaceViewport?
+    var viewportBranch: String?
+    var viewportObserver: NSObjectProtocol?
+    var viewportSaveTimer: Timer?
+    var viewportRestoring = false
+    var viewportSaveFailed = false
+    var viewportBranchGeneration = 0
+    var viewportBranchTimer: Timer?
+    var viewportBranchCheckPending = false
+    var viewportBranchCheckFailureShown = false
+    let inspector = NSStackView()
+    let inspectorTitle = NSTextField(labelWithString: "Inspect")
+    let navigation = NavigationSidebar()
+    lazy var conversations = ConversationSidebar(folder: folder)
+    let leftSidebar = NSVisualEffectView()
+    let navigatorTabs = NSSegmentedControl(labels: ["Chats", "Files", "Changes"], trackingMode: .selectOne, target: nil, action: nil)
+    let leftNavigatorStack = NSStackView()
+    let chatTitle = JourneyStyle.label("New conversation", size: 21, weight: .semibold)
+    let chatState = JourneyStyle.label("Tell LUMI what you want to build.", size: 12, secondary: true)
+    let contextPanel = NSStackView()
+    let contextTabs = NSSegmentedControl(labels: ["Walkthrough", "Changes", "Inspect", "Run"], trackingMode: .selectOne, target: nil, action: nil)
+    let projectRun = ProjectRunView()
+    let projectRunScroll = NSScrollView()
+    var checkpointWindow: CheckpointWindow?
+    let checkpointsButton = NSButton(title: "Checkpoints", target: nil, action: nil)
+    let walkthrough = WalkthroughView()
+    var walkthroughLoaded: String?
+    var walkthroughLoadGeneration = 0
+    var workspaceRefreshTimer: Timer?
+    let outline = NSPopUpButton()
+    var declarations = [CodeDeclaration]()
+    var contextWidth: NSLayoutConstraint?
+    var browserHeight: NSLayoutConstraint?
+    let contextSeparator = JourneyStyle.rule()
+    let browseContext = NSButton(title: "Browse files", target: nil, action: nil)
+    var browsingCompact = true
+    var isContextMaximized = false
+    var currentConversation: String?
+    var conversationList = [ConversationSummary]()
+    var conversationOffset = 0
+    var moreConversations = false
+    var switchingConversation = false
+    var expectedConversation: String?
+    var conversationGeneration = 0
+    var draftByConversation = [String: String]()
+    let approval = NSStackView()
+    let approvalText = NSTextView()
+    let reviewApprovalButton = NSButton(title: "Review Request…", target: nil, action: nil)
+    let denyButton = NSButton(title: "Deny", target: nil, action: nil)
+    let allowButton = NSButton(title: "Allow Once", target: nil, action: nil)
+    var approvalReview: ApprovalReview?
+    struct ApprovalDecision: Equatable {
         let id = UUID()
         let request: ApprovalRequest
         let context: UUID
     }
-    private var decidingApproval: ApprovalDecision?
-    private var approvalFailureAttempt: ApprovalDecision?
-    private var approvalReviewContext: UUID?
-    private var podContextID = UUID()
-    private var approvalFailure: String?
-    private let surfaces = NSSegmentedControl(labels: ["Conversation", "Task context"], trackingMode: .selectOne, target: nil, action: nil)
-    private var rows = [TranscriptRow]()
-    private var runs = [[String: Any]]()
-    private struct SideQuestion {
+    var decidingApproval: ApprovalDecision?
+    var approvalFailureAttempt: ApprovalDecision?
+    var approvalReviewContext: UUID?
+    var podContextID = UUID()
+    var approvalFailure: String?
+    let surfaces = NSSegmentedControl(labels: ["Conversation", "Task context"], trackingMode: .selectOne, target: nil, action: nil)
+    var rows = [TranscriptRow]()
+    var runs = [[String: Any]]()
+    struct SideQuestion {
         let id: String, conversation: String, question: String
         var answer: String? = nil
         var failed = false
         var contextLimited = false
     }
-    private var sideQuestions = [SideQuestion]()
-    private var sideQuestionPending: String?
-    private var projectTaskRevision = -1
-    private var projectTaskDisplayedRevision = -1
-    private var projectTaskMovePending = false
-    private var projectTaskOffset = 0
-    private var projectTaskPreviousOffsets = [Int]()
-    private var projectTaskFilters = [ProjectTaskFilter]()
-    private var projectTasksLoading = false
-    private var projectTasksRefreshPending = false
-    private var sequence = 0
-    private var active: String?
-    private var pendingRequest: String?
-    private var currentApproval: ApprovalRequest?
-    private var forceAvailable = false
-    private var closing = false
-    private var stopped = false
-    private var showingInspector = true
-    private var connection = "Preparing"
-    private var directory = "."
-    private var nextChunk: (() -> Void)?
-    private var previousChunk: (() -> Void)?
-    private var reloadInspection: (() -> Void)?
-    private var inspectionHistory = InspectionHistory()
-    private let inspectionBack = NSButton()
-    private let inspectionForward = NSButton()
-    private let inspectionFind = NSButton()
-    private let recordedOutput = NSButton(title: "View Recorded Output", target: nil, action: nil)
-    private let checkCode = NSButton(title: "Check Code", target: nil, action: nil)
-    private let prepareCodeReview = NSButton(title: "Prepare Review", target: nil, action: nil)
-    private var spiderDetails: SpiderCheckDetails?
-    private var savedStateDetails: SavedStateDetails?
-    private let relatedEvidence = NSPopUpButton(frame: .zero, pullsDown: true)
-    private var memoryWindow: ConversationMemoryWindow?
-    private var evidenceLinks = [RunDetails.Related]()
-    private var contextLinks = [ConversationContextLink]()
-    private var showingContextSummary = false
-    private let previousButton = NSButton(title: "Previous", target: nil, action: nil)
-    private let pageLabel = NSTextField(labelWithString: "Read only")
-    private let breadcrumb = NSPathControl()
-    private let diffScope = NSSegmentedControl(labels: ["Working Tree", "Staged"], trackingMode: .selectOne, target: nil, action: nil)
-    private let revealButton = NSButton(title: "Reveal in Finder", target: nil, action: nil)
-    private let reconnectButton = NSButton(title: "Reconnect", target: nil, action: nil)
-    private let stopSendButton = NSButton(title: "Stop & Send", target: nil, action: nil)
-    private let notice = NSTextField(wrappingLabelWithString: "")
-    private let noticeBar = NSStackView()
-    private let modelButton = NSButton(title: "Model & Provider…", target: nil, action: nil)
-    private var modelPicker: ModelPicker?
-    private let reasoningPicker = ReasoningPicker()
-    private let hint = NSTextField(labelWithString: "Enter to send · Shift–Enter for a new line")
-    private var sidebarPreferred = true
-    private var compactSidebarRevealed = false
-    private var navigationGeneration = 0
-    private var inspectionGeneration = 0
-    private var navigationOffset = 0
-    private var navigationQuery = ""
-    private var nextNavigationPage: (() -> Void)?
-    private var previousNavigationPage: (() -> Void)?
-    private var navigationData = [SidebarEntry]()
-    private var inspectedFile: String?
-    private var inspectedDiff: String?
-    private var expandedActions = Set<String>()
-    private var uncertainSubmission: WorkspaceDraft.Submission?
-    private var checkingSubmission = false
-    private let draftStore: WorkspaceDraftStore
-    private var recoverySubmission: WorkspaceDraft.Submission?
-    private var draftTimer: Timer?
-    private var savedDraftText = ""
-    private var savedDraftAttachments: [String] = []
-    private var savedSubmission: WorkspaceDraft.Submission?
-    private var draftSaveFailed = false
-    private var stopThenSend: (text: String, runs: Set<String>)?
-    private var elapsedTimer: Timer?
-    private var palette: ActionPalette?
-    private var quickOpen: QuickOpenWindow?
-    private let openFileButton = NSButton(title: "Open File…", target: nil, action: nil)
-    private var needsRebuild = false
-    private var cancelRequested = false
-    private var stopAcknowledged = true
-    private var cancellationToken: UUID?
-    private var recovering = false
-    private let terminalStates: Set<String> = ["completed", "failed", "cancelled", "timed_out", "interrupted"]
-    private let moreButton = NSButton(title: "Next Page", target: nil, action: nil)
-    private var layoutTimer: Timer?
-    private var resizeAnchor: (following: Bool, origin: NSPoint)?
-    private let probe = IntegrationProbe()
+    var sideQuestions = [SideQuestion]()
+    var sideQuestionPending: String?
+    var projectTaskRevision = -1
+    var projectTaskDisplayedRevision = -1
+    var projectTaskMovePending = false
+    var projectTaskOffset = 0
+    var projectTaskPreviousOffsets = [Int]()
+    var projectTaskFilters = [ProjectTaskFilter]()
+    var projectTasksLoading = false
+    var projectTasksRefreshPending = false
+    var sequence = 0
+    var active: String?
+    var pendingRequest: String?
+    var currentApproval: ApprovalRequest?
+    var forceAvailable = false
+    var closing = false
+    var stopped = false
+    var showingInspector = true
+    var connection = "Preparing"
+    var directory = "."
+    var nextChunk: (() -> Void)?
+    var previousChunk: (() -> Void)?
+    var reloadInspection: (() -> Void)?
+    var inspectionHistory = InspectionHistory()
+    let inspectionBack = NSButton()
+    let inspectionForward = NSButton()
+    let inspectionFind = NSButton()
+    let recordedOutput = NSButton(title: "View Recorded Output", target: nil, action: nil)
+    let checkCode = NSButton(title: "Check Code", target: nil, action: nil)
+    let prepareCodeReview = NSButton(title: "Prepare Review", target: nil, action: nil)
+    var spiderDetails: SpiderCheckDetails?
+    var savedStateDetails: SavedStateDetails?
+    let relatedEvidence = NSPopUpButton(frame: .zero, pullsDown: true)
+    var memoryWindow: ConversationMemoryWindow?
+    var evidenceLinks = [RunDetails.Related]()
+    var contextLinks = [ConversationContextLink]()
+    var showingContextSummary = false
+    let previousButton = NSButton(title: "Previous", target: nil, action: nil)
+    let pageLabel = NSTextField(labelWithString: "Read only")
+    let breadcrumb = NSPathControl()
+    let diffScope = NSSegmentedControl(labels: ["Working Tree", "Staged"], trackingMode: .selectOne, target: nil, action: nil)
+    let revealButton = NSButton(title: "Reveal in Finder", target: nil, action: nil)
+    let reconnectButton = NSButton(title: "Reconnect", target: nil, action: nil)
+    let stopSendButton = NSButton(title: "Stop & Send", target: nil, action: nil)
+    let notice = NSTextField(wrappingLabelWithString: "")
+    let noticeBar = NSStackView()
+    let modelButton = NSButton(title: "Model & Provider…", target: nil, action: nil)
+    var modelPicker: ModelPicker?
+    let reasoningPicker = ReasoningPicker()
+    let hint = NSTextField(labelWithString: "Enter to send · Shift–Enter for a new line")
+    var sidebarPreferred = true
+    var compactSidebarRevealed = false
+    var navigationGeneration = 0
+    var inspectionGeneration = 0
+    var navigationOffset = 0
+    var navigationQuery = ""
+    var nextNavigationPage: (() -> Void)?
+    var previousNavigationPage: (() -> Void)?
+    var navigationData = [SidebarEntry]()
+    var inspectedFile: String?
+    var inspectedDiff: String?
+    var expandedActions = Set<String>()
+    var uncertainSubmission: WorkspaceDraft.Submission?
+    var checkingSubmission = false
+    let draftStore: WorkspaceDraftStore
+    var recoverySubmission: WorkspaceDraft.Submission?
+    var draftTimer: Timer?
+    var savedDraftText = ""
+    var savedDraftAttachments: [String] = []
+    var savedSubmission: WorkspaceDraft.Submission?
+    var draftSaveFailed = false
+    var stopThenSend: (text: String, runs: Set<String>)?
+    var elapsedTimer: Timer?
+    var palette: ActionPalette?
+    var quickOpen: QuickOpenWindow?
+    let openFileButton = NSButton(title: "Open File…", target: nil, action: nil)
+    var needsRebuild = false
+    var cancelRequested = false
+    var stopAcknowledged = true
+    var cancellationToken: UUID?
+    var recovering = false
+    let terminalStates: Set<String> = ["completed", "failed", "cancelled", "timed_out", "interrupted"]
+    let moreButton = NSButton(title: "Next Page", target: nil, action: nil)
+    var layoutTimer: Timer?
+    var resizeAnchor: (following: Bool, origin: NSPoint)?
+    let probe = IntegrationProbe()
+
+    var canMaximizeContext: Bool { showingInspector && !contextPanel.isHidden }
     var hasWork: Bool { runs.contains { !terminalStates.contains($0["state"] as? String ?? "") } || pendingRequest != nil }
     var isClosing: Bool { closing }
     var canInspectBack: Bool { inspectionHistory.canGoBack && window?.attachedSheet == nil }
@@ -433,6 +212,10 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
     var canToggleAgentDefer: Bool { canAccessAgentSwarm && (swarmDeferEnabled || swarmDeferred) }
     var canRequestCriticalReview: Bool { canAccessAgentSwarm && criticalReviewEnabled }
     var isSwarmDeferred: Bool { swarmDeferred }
+    var canSwitchConversation: Bool { client.isReady && client.capabilities.contains("conversations") && !hasWork && !switchingConversation && uncertainSubmission == nil && !closing }
+
+    @objc func showProjectRun() { contextTabs.selectedSegment = 3; showingInspector = true; surfaces.selectedSegment = 1; switchSurface() }
+    @objc func showCheckpoints() { openCheckpoints(selected: nil) }
 
     init(folder: URL, runtimeClient: RuntimeClient? = nil, draftStore: WorkspaceDraftStore? = nil, viewportStore: WorkspaceViewportStore? = nil) {
         self.folder = folder
@@ -456,116 +239,43 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         }
         window.center()
     }
-    private func configureClient() {
-        viewportBranchGeneration += 1; viewportBranchCheckPending = false; viewportBranchCheckFailureShown = false
-        let source = client
-        projectTaskRevision = -1; projectTaskDisplayedRevision = -1; projectTaskOffset = 0; projectTaskPreviousOffsets = []; projectTaskMovePending = false; projectTasksLoading = false; projectTasksRefreshPending = false
-        client.onNotice = { [weak self, weak source] message in
-            guard let self, self.client === source else { return }
-            self.showNotice(message)
-        }
-        client.onConnection = { [weak self, weak source] value in
-            guard let self, let source, self.client === source else { return }; self.connection = value; self.updateStatus(); self.walkthroughLoaded = nil; self.updateWalkthrough()
-            self.modelPicker?.connectionChanged()
-            self.projectRun.connect(self.client)
-            if self.client.isReady {
-                source.request("agentSwarm.settings", params: ["action": "get"]) { [weak self, weak source] result in
-                    guard let self, let source, self.client === source, case .success(let settings) = result else { return }
-                    let master = settings["enabled"] as? Bool == true
-                    self.criticalReviewEnabled = master || settings["criticalCompletionReview"] as? Bool == true
-                    self.legionEnabled = master || settings["legion"] as? Bool == true
-                    self.maxSpecialists = settings["maxSpecialists"] as? Int ?? 4
-                    self.updateStatus()
-                }
-                source.request("task.deferStatus") { [weak self, weak source] result in
-                    guard let self, let source, self.client === source, case .success(let status) = result else { return }
-                    self.swarmDeferEnabled = status["enabled"] as? Bool == true
-                    self.swarmDeferred = status["deferred"] as? Bool == true
-                    self.updateStatus()
-                }
-                self.reconnectButton.isHidden = true
-                if self.recovering && self.uncertainSubmission == nil { self.showNotice("Reconnected. Recorded history is restored; no work was restarted.") }
-                self.recovering = false
-                self.reconcileSubmission()
-                self.refreshNavigation()
-                self.refreshProjectTasks()
-                self.loadConversations()
-                if self.client.capabilities.contains("model-selection-v1") {
-                    source.request("models.list", params: [:]) { [weak self, weak source] result in
-                        guard let self, self.client === source else { return }
-                        if case .success(let data) = result, let selection = WorkspaceModelSelection(data) { self.updateModel(selection) }
-                    }
-                }
-                self.probe?.connected(self)
-            } else if value != "Connecting to LUMI…" {
-                self.walkthrough.projectTasksUnavailable("Connect to LUMI to view project tasks.")
-                self.walkthrough.setProjectTaskMovesEnabled(false)
-                self.reasoningPicker.connectionLost()
-                self.switchingConversation = false; self.expectedConversation = nil
-                self.quickOpen?.dismiss()
-                self.stopThenSend = nil
-                self.showNotice(value)
-                self.reconnectButton.isHidden = self.client.process?.isRunning == true
-                self.updateStatus()
-            }
-        }
-        client.onEvent = { [weak self, weak source] event in
-            guard let self, self.client === source else { return }; self.receive(event)
-        }
-        client.onExit = { [weak self, weak source] in
-            guard let self, self.client === source else { return }
-            self.stopped = true; self.reconnectButton.isHidden = self.closing
-            self.elapsedTimer?.invalidate(); self.elapsedTimer = nil
-            if self.closing { self.window?.close() }
-            else { self.updateStatus() }
-        }
-    }
-    func configurePods(_ show: @escaping () -> Void) { conversations.onPods = { [weak self] in guard let self, self.saveDraft() else { return }; show() } }
-    var podSnapshot: PodSnapshot {
-        let run = runs.first { $0["id"] as? String == active } ?? runs.last
-        let queued = runs.filter { $0["state"] as? String == "queued" }.count
-        let review = currentApproval != nil
-        let runState = run?["state"] as? String ?? ""
-        let activities = run?["activities"] as? [[String: Any]] ?? []
-        let disconnected = connection == "Preparing" || connection == "Connecting to LUMI…" ? "Connecting" : "Disconnected"
-        let terminalLabel = ["failed": "Failed", "interrupted": "Interrupted", "completed": "Completed", "cancelled": "Stopped", "timed_out": "Timed out"][runState] ?? "Idle"
-        let label = !client.isReady ? disconnected : switchingConversation ? "Opening thread" : cancelRequested ? "Stopping" : uncertainSubmission != nil ? "Check connection" : decidingApproval != nil ? "Saving decision" : review ? "Needs review" : pendingRequest != nil ? "Submitting" : hasWork ? "Working" : terminalLabel
-        let parsedActivities = run.map(WalkthroughProjection.activities) ?? []
-        let activeActivity = parsedActivities.filter { $0.isActive && $0.scope != "turn" }.max { $0.sequence < $1.sequence } ?? parsedActivities.max { $0.sequence < $1.sequence }
-        let podActivity = !client.isReady ? "Open thread to reconnect" : pendingRequest != nil ? "Submitting instruction…" : activeActivity.map { $0.scope == "turn" && !$0.detail.isEmpty ? $0.detail : $0.displayTitle } ?? (run?["activities"] as? [[String: Any]])?.last?["message"] as? String ?? (hasWork ? "Agent is working" : "Ready for another instruction")
-        return PodSnapshot(path: folder.path, thread: chatTitle.stringValue, status: label,
-            activity: podActivity,
-            instruction: String((run?["text"] as? String ?? "").prefix(220)), response: String((run?["response"] as? String ?? "").prefix(300)),
-            queued: queued, running: client.isReady && hasWork && !review, needsReview: review,
-            canStop: client.isReady && hasWork && !cancelRequested && !closing,
-            stream: PodStreamProjection.text(run), streamIdentity: "\(currentConversation ?? ""):\(run?["id"] as? String ?? "")",
-            approval: currentApproval, canDecide: client.isReady && decidingApproval == nil && !cancelRequested && !closing && !switchingConversation,
-            decisionPending: decidingApproval != nil, approvalError: approvalFailure,
-            connected: client.isReady, startedAt: run?["startedAt"] as? Double ?? (hasWork ? run?["createdAt"] as? Double : nil),
-            finishedAt: terminalStates.contains(runState) ? run?["updatedAt"] as? Double : nil,
-            lastActivityAt: activities.compactMap { $0["timestamp"] as? Double }.max(),
-            approvalRequestedAt: review ? (run?["approval"] as? [String: Any])?["createdAt"] as? Double : nil,
-            activityCount: max(run?["activityCount"] as? Int ?? 0, activities.count),
-            canReconnect: !client.isReady && client.process?.isRunning != true && !closing,
-            canOpenCheckpoints: client.isReady && client.capabilities.contains("checkpoints-v1") && !switchingConversation && !closing && window?.attachedSheet == nil,
-            contextID: podContextID, stopNeedsAttention: cancelRequested && forceAvailable)
-    }
-    func matchesPodTarget(_ target: PodTarget) -> Bool { target.path == folder.path && target.context == podContextID && !closing }
-    required init?(coder: NSCoder) { fatalError("init(coder:) unavailable") }
-    func attach() { client.start(folder: folder); window?.makeFirstResponder(composer) }
 
-    private func button(_ title: String, _ action: Selector, symbol: String? = nil) -> NSButton {
+    required init?(coder: NSCoder) { fatalError("init(coder:) unavailable") }
+
+    deinit {
+        dispose()
+    }
+
+    /// Releases timers, observers, and auxiliary windows to ensure clean termination (`SPI-110`).
+    func dispose() {
+        viewportBranchTimer?.invalidate(); viewportBranchTimer = nil
+        viewportSaveTimer?.invalidate(); viewportSaveTimer = nil
+        workspaceRefreshTimer?.invalidate(); workspaceRefreshTimer = nil
+        draftTimer?.invalidate(); draftTimer = nil
+        elapsedTimer?.invalidate(); elapsedTimer = nil
+        layoutTimer?.invalidate(); layoutTimer = nil
+        if let viewportObserver { NotificationCenter.default.removeObserver(viewportObserver); self.viewportObserver = nil }
+        binaryDocumentLoader?.cancel(); binaryDocumentLoader = nil
+        memoryWindow?.dismiss(); memoryWindow = nil
+        palette?.cancelOperation(nil); palette = nil
+        modelPicker?.dismiss(restoreFocus: false); modelPicker = nil
+        checkpointWindow?.close(); checkpointWindow = nil
+    }
+
+    func button(_ title: String, _ action: Selector, symbol: String? = nil) -> NSButton {
         let b = NSButton(title: title, target: self, action: action)
         b.bezelStyle = .rounded
         b.setContentHuggingPriority(.required, for: .horizontal)
         if let symbol { b.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title); b.imagePosition = .imageLeading }
         return b
     }
-    private func stack(_ views: [NSView], vertical: Bool = false, spacing: CGFloat = 8) -> NSStackView {
+
+    func stack(_ views: [NSView], vertical: Bool = false, spacing: CGFloat = 8) -> NSStackView {
         let s = NSStackView(views: views); s.orientation = vertical ? .vertical : .horizontal
         s.alignment = vertical ? .leading : .centerY; s.spacing = spacing; s.distribution = .fill; s.translatesAutoresizingMaskIntoConstraints = false
         return s
     }
+
     private func build() {
         guard let content = window?.contentView else { return }
         status.font = .systemFont(ofSize: 11); status.textColor = .secondaryLabelColor
@@ -735,8 +445,6 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         transcriptScroll.setContentHuggingPriority(.init(1), for: .horizontal)
 
         surfaces.selectedSegment = 0; surfaces.target = self; surfaces.action = #selector(switchSurface); surfaces.isHidden = true
-        // Reserve a stable navigation row so the jump control never covers a reply
-        // or changes the reading position when it appears.
         let transcriptNavigation = stack([NSView(), jumpButton], spacing: 8)
         transcriptNavigation.heightAnchor.constraint(equalToConstant: 28).isActive = true
         let work = stack([transcriptArea, transcriptNavigation], vertical: true, spacing: 0)
@@ -783,44 +491,66 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         }
         attachmentBar.onChange = { [weak self] in self?.saveDraft() }
         let composerScroll = NSScrollView(); composerScroll.documentView = composer; composerScroll.hasVerticalScroller = true
-        composerScroll.borderType = .noBorder; composerScroll.drawsBackground = false; composerScroll.autohidesScrollers = true
-        composer.isVerticallyResizable = true; composer.autoresizingMask = [.width]
-        composerScroll.heightAnchor.constraint(equalToConstant: 64).isActive = true
-        sendButton.target = self; sendButton.action = #selector(submit); sendButton.bezelStyle = .rounded; sendButton.isEnabled = false
-        sendButton.bezelColor = .controlAccentColor
+        composerScroll.borderType = .noBorder
+        composerScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        composerScroll.heightAnchor.constraint(lessThanOrEqualToConstant: 160).isActive = true
+        let composerBody = stack([attachmentBar, composerScroll], vertical: true, spacing: 6)
+        attachmentBar.widthAnchor.constraint(equalTo: composerBody.widthAnchor).isActive = true
+        composerScroll.widthAnchor.constraint(equalTo: composerBody.widthAnchor).isActive = true
+
+        let composerBottomBar = NSStackView()
+        composerBottomBar.orientation = .horizontal; composerBottomBar.alignment = .centerY; composerBottomBar.spacing = 8
+        composerBottomBar.translatesAutoresizingMaskIntoConstraints = false
+        status.setContentHuggingPriority(.init(1), for: .horizontal)
+        status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        composerBottomBar.addArrangedSubview(status)
         queueButton.target = self; queueButton.action = #selector(showQueue); queueButton.bezelStyle = .rounded
         queueButton.toolTip = "Review, edit, or remove queued instructions (⌘4)"
         queueButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        composerBottomBar.addArrangedSubview(queueButton)
         queuePopover.behavior = .transient; queuePopover.contentViewController = queueContent
-        queueContent.onEdit = { [weak self] in self?.editQueued($0) }
         queueContent.onRemove = { [weak self] in self?.removeQueued($0) }
-        hint.lineBreakMode = .byTruncatingTail
-        hint.setContentCompressionResistancePriority(.init(100), for: .horizontal)
-        stopSendButton.target = self; stopSendButton.action = #selector(stopAndSend); stopSendButton.bezelStyle = .rounded; stopSendButton.isHidden = true
+        sendButton.target = self; sendButton.action = #selector(submit); sendButton.bezelStyle = .rounded
+        sendButton.bezelColor = .controlAccentColor
+        sendButton.keyEquivalent = "\r"
+        sendButton.setAccessibilityLabel("Send instruction to LUMI")
+        stopSendButton.target = self; stopSendButton.action = #selector(stopAndSend); stopSendButton.bezelStyle = .rounded
+        stopSendButton.isHidden = true
+        composerBottomBar.addArrangedSubview(stopSendButton)
+        composerBottomBar.addArrangedSubview(stopButton)
+        composerBottomBar.addArrangedSubview(sendButton)
+        for control in [queueButton, stopSendButton, stopButton, sendButton] { control.setContentHuggingPriority(.required, for: .horizontal) }
+
+        let composerSurface = NSStackView(views: [composerBody, composerBottomBar])
+        composerSurface.orientation = .vertical; composerSurface.alignment = .leading; composerSurface.spacing = 8
+        composerSurface.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+        composerSurface.wantsLayer = true; composerSurface.layer?.cornerRadius = 8
+        composerSurface.layer?.borderWidth = 1; composerSurface.layer?.borderColor = NSColor.separatorColor.cgColor
+        composerSurface.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        composerBody.widthAnchor.constraint(equalTo: composerSurface.widthAnchor, constant: -24).isActive = true
+        composerBottomBar.widthAnchor.constraint(equalTo: composerSurface.widthAnchor, constant: -24).isActive = true
+
+        let dismissNotice = button("", #selector(dismissNotice), symbol: "xmark")
+        dismissNotice.bezelStyle = .inline; dismissNotice.toolTip = "Dismiss notice"
+        dismissNotice.widthAnchor.constraint(equalToConstant: 16).isActive = true
+        dismissNotice.heightAnchor.constraint(equalToConstant: 16).isActive = true
+        noticeBar.orientation = .horizontal; noticeBar.alignment = .centerY; noticeBar.spacing = 8
+        noticeBar.edgeInsets = NSEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
+        noticeBar.wantsLayer = true; noticeBar.layer?.cornerRadius = 6
+        noticeBar.layer?.backgroundColor = NSColor.systemOrange.withAlphaComponent(0.12).cgColor
+        notice.font = .systemFont(ofSize: 12); notice.textColor = .labelColor
+        notice.setContentHuggingPriority(.init(1), for: .horizontal)
         reconnectButton.target = self; reconnectButton.action = #selector(reconnect); reconnectButton.bezelStyle = .rounded; reconnectButton.isHidden = true
-        notice.font = .systemFont(ofSize: 11); notice.maximumNumberOfLines = 3; notice.isSelectable = true
-        notice.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let dismiss = button("", #selector(dismissNotice), symbol: "xmark"); dismiss.setAccessibilityLabel("Dismiss message")
-        noticeBar.orientation = .horizontal; noticeBar.alignment = .centerY; noticeBar.spacing = 6; noticeBar.isHidden = true
-        [notice, reconnectButton, dismiss].forEach(noticeBar.addArrangedSubview)
-        hint.font = .systemFont(ofSize: 11); hint.textColor = .secondaryLabelColor
+        [notice, reconnectButton, dismissNotice].forEach(noticeBar.addArrangedSubview)
+        noticeBar.isHidden = true
+
         modelButton.target = self; modelButton.action = #selector(showModels); modelButton.bezelStyle = .rounded
         modelButton.setAccessibilityLabel("Choose model and provider")
         modelButton.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil); modelButton.imagePosition = .imageTrailing
         modelButton.setContentHuggingPriority(.required, for: .horizontal)
         modelButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         modelButton.cell?.lineBreakMode = .byTruncatingMiddle
-        let composerBar = stack([queueButton, NSView(), stopSendButton, sendButton]); composerBar.distribution = .fill
-        let composerSurface = NSBox(); composerSurface.boxType = .custom; composerSurface.titlePosition = .noTitle
-        composerSurface.borderWidth = 1; composerSurface.cornerRadius = 10
-        composerSurface.fillColor = .textBackgroundColor; composerSurface.borderColor = .separatorColor; composerSurface.contentViewMargins = .zero
-        let composerContent = NSView(); composerSurface.contentView = composerContent
-        let composerGroup = stack([attachmentBar, composerScroll, composerBar], vertical: true, spacing: 8)
-        composerContent.addSubview(composerGroup); JourneyStyle.pin(composerGroup, to: composerContent, inset: 10)
-        attachmentBar.widthAnchor.constraint(equalTo: composerGroup.widthAnchor).isActive = true
-        composerScroll.widthAnchor.constraint(equalTo: composerGroup.widthAnchor).isActive = true
-        composerBar.widthAnchor.constraint(equalTo: composerGroup.widthAnchor).isActive = true
-        chatTitle.maximumNumberOfLines = 1; chatTitle.lineBreakMode = .byTruncatingTail
+
         checkpointsButton.target = self; checkpointsButton.action = #selector(showCheckpoints); checkpointsButton.bezelStyle = .rounded
         checkpointsButton.image = NSImage(systemSymbolName: "clock.arrow.circlepath", accessibilityDescription: nil); checkpointsButton.imagePosition = .imageLeading
         checkpointsButton.toolTip = "Restore project files before or after a message"
@@ -874,9 +604,10 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         adapt(); updateWalkthrough()
     }
 
-    private var welcomeRow: TranscriptRow {
+    var welcomeRow: TranscriptRow {
         TranscriptRow(id: "welcome", title: "What would you like to work on?", text: "Describe what you want to build, fix, or understand. LUMI will work with you here.\n\nFollow its activity in Walkthrough. Browse project files and review changes in Task context.", activity: false)
     }
+
     private func buildContextPanel() {
         contextPanel.orientation = .vertical; contextPanel.alignment = .leading; contextPanel.spacing = 10
         contextPanel.edgeInsets = NSEdgeInsets(top: 20, left: 14, bottom: 16, right: 14)
@@ -924,6 +655,7 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         walkthrough.setContentHuggingPriority(.init(1), for: .vertical)
         inspector.setContentHuggingPriority(.init(1), for: .vertical)
     }
+
     @objc private func changeContext() {
         showingInspector = true; surfaces.selectedSegment = 1
         if contextTabs.selectedSegment == 0 { walkthrough.followCurrentInstruction() }
@@ -931,2749 +663,27 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         else if contextTabs.selectedSegment == 2 { navigation.select(.files) }
         adapt()
     }
+
     @objc private func toggleContextBrowser() { browsingCompact.toggle(); adapt() }
-    @objc func showWalkthrough() { walkthrough.followCurrentInstruction(); contextTabs.selectedSegment = 0; showingInspector = true; surfaces.selectedSegment = 1; switchSurface() }
-    @objc func showProjectRun() { contextTabs.selectedSegment = 3; showingInspector = true; surfaces.selectedSegment = 1; switchSurface() }
-    @objc func showCheckpoints() { openCheckpoints(selected: nil) }
-    private func openCheckpoints(selected: String?) {
-        guard client.isReady, client.capabilities.contains("checkpoints-v1"), !switchingConversation, let window, window.attachedSheet == nil else { return }
-        quickOpen?.dismiss(restoreFocus: false)
-        if let existing = checkpointWindow, existing.window?.isVisible == true { if let selected { existing.selectCheckpoint(selected) }; existing.window?.makeKeyAndOrderFront(nil); return }
-        checkpointWindow = CheckpointWindow(request: { [weak self] method, params, complete in self?.client.request(method, params: params, completion: complete) }, selected: selected, canRestore: { [weak self] in
-            guard let self else { return false }; return self.canSwitchConversation && !self.projectRun.running
-        }, restore: { [weak self] id, token, complete in self?.restoreCheckpoint(id, token: token, complete: complete) })
-        checkpointWindow?.present(for: window)
-    }
-    private func restoreCheckpoint(_ id: String, token: String, complete: @escaping (Result<Void, Error>) -> Void) {
-        guard canSwitchConversation, saveDraft() else { complete(.failure(BridgeError.message("Finish or stop LUMI before restoring. Your draft is preserved."))); return }
-        switchingConversation = true; expectedConversation = nil
-        navigationGeneration += 1; inspectionGeneration += 1; conversationGeneration += 1; walkthroughLoadGeneration += 1; updateStatus()
-        client.request("checkpoint.restore", params: ["id": id, "token": token]) { [weak self] result in
-            guard let self else { return }
-            switch result {
-            case .failure(let error): self.switchingConversation = false; self.expectedConversation = nil; self.updateStatus(); complete(.failure(error))
-            case .success(let data):
-                self.expectedConversation = data["conversation"] as? String
-                self.client.requestSnapshot(afterPending: true) { [weak self] in
-                    guard let self else { return }
-                    guard self.currentConversation == self.expectedConversation else { self.client.closeInput(); complete(.failure(BridgeError.message("Restore could not be confirmed. Reconnect before sending."))); return }
-                    self.switchingConversation = false; self.expectedConversation = nil
-                    self.showNotice(data["message"] as? String ?? "Restored in a new conversation."); self.loadConversations(); self.refreshNavigation(); self.updateStatus(); complete(.success(())); self.focusComposer()
-                }
-            }
-        }
-    }
-    private func updateWalkthrough() {
-        walkthrough.update(runs: runs, connected: client.isReady)
-        updateWalkthroughVisibility()
-        loadWalkthrough()
-        probe?.walkthroughChanged(self, stage: walkthroughStage)
-    }
-    private func moveProjectTask(_ task: ProjectTask, status: String) {
-        guard client.isReady, client.capabilities.contains("project-tasks-move-v1"), !projectTaskMovePending, projectTaskDisplayedRevision >= 0 else { return }
-        projectTaskMovePending = true; walkthrough.setProjectTaskMovesEnabled(false)
-        let source = client
-        source.request("project.tasks.move", params: ["board": task.board, "id": task.id, "status": status, "revision": projectTaskDisplayedRevision]) { [weak self, weak source] result in
-            guard let self, let source, self.client === source else { return }
-            self.projectTaskMovePending = false
-            self.walkthrough.setProjectTaskMovesEnabled(source.isReady && source.capabilities.contains("project-tasks-move-v1"))
-            if case .failure(let error) = result { self.showNotice(error.localizedDescription) }
-            self.refreshProjectTasks()
-        }
-    }
-    private func refreshProjectTasks() {
-        guard client.isReady, client.capabilities.contains("project-tasks-v1") else {
-            walkthrough.projectTasksUnavailable(client.isReady ? "This runtime does not provide project tasks." : "Connect to LUMI to view project tasks.")
-            return
-        }
-        if projectTasksLoading { projectTasksRefreshPending = true; return }
-        projectTasksLoading = true; projectTasksRefreshPending = false
-        walkthrough.setProjectTaskMovesEnabled(false); walkthrough.projectTasksLoading()
-        let source = client
-        let offset = projectTaskOffset
-        let filters = projectTaskFilters
-        let query = filters.map { ["field": $0.field.rawValue.lowercased(), "operator": $0.operation.rawValue, "value": $0.value] }
-        source.request("project.tasks.list", params: ["offset": offset, "filters": query]) { [weak self, weak source] result in
-            guard let self, let source, self.client === source else { return }
-            self.projectTasksLoading = false
-            switch result {
-            case .success(let data):
-                if let snapshot = ProjectTaskSnapshot(data), snapshot.revision >= self.projectTaskRevision, offset == self.projectTaskOffset, filters == self.projectTaskFilters {
-                    self.projectTaskRevision = snapshot.revision; self.projectTaskDisplayedRevision = snapshot.revision; self.walkthrough.showProjectTasks(snapshot)
-                    self.walkthrough.setProjectTaskMovesEnabled(source.capabilities.contains("project-tasks-move-v1") && !self.projectTaskMovePending)
-                } else { self.projectTasksRefreshPending = true }
-            case .failure(let error): self.walkthrough.projectTasksUnavailable(error.localizedDescription)
-            }
-            if self.projectTasksRefreshPending { self.refreshProjectTasks() }
-        }
-    }
-    var walkthroughStage: String { walkthrough.diagnostics["stage"] as? String ?? "" }
-    private func updateWalkthroughVisibility() {
-        walkthrough.setSurfaceVisible(!walkthrough.isHiddenOrHasHiddenAncestor && window?.occlusionState.contains(.visible) == true && window?.isMiniaturized != true)
-    }
-    private func loadWalkthrough() {
-        guard client.isReady, client.capabilities.contains("walkthrough-v1"), let id = walkthrough.selectedID, walkthroughLoaded != id else { return }
-        walkthroughLoaded = id; walkthroughLoadGeneration += 1
-        let generation = walkthroughLoadGeneration
-        client.request("activity.list", params: ["run": id]) { [weak self] result in
-            guard let self, generation == self.walkthroughLoadGeneration, self.walkthrough.selectedID == id else { return }
-            switch result {
-            case .success(let data):
-                guard data["run"] as? String == id, let index = self.runs.firstIndex(where: { $0["id"] as? String == id }) else { return }
-                var activityRun = self.runs[index]
-                activityRun["activities"] = data["activities"]
-                activityRun["activitySequence"] = data["activitySequence"]
-                activityRun["activityCount"] = data["activityCount"]
-                self.runs[index] = WalkthroughProjection.merged(self.runs[index], activityRun)
-                self.walkthrough.showLoadError(nil); self.updateWalkthrough()
-            case .failure: self.walkthrough.showLoadError("Activity could not be loaded. Recorded work is unchanged.")
-            }
-        }
-    }
-    @objc private func jumpToDeclaration() {
-        let index = outline.indexOfSelectedItem - 1
-        guard declarations.indices.contains(index) else { return }
-        inspection.setSelectedRange(declarations[index].range); inspection.scrollRangeToVisible(declarations[index].range)
-        window?.makeFirstResponder(inspection)
-    }
-    private var canSwitchConversation: Bool { client.isReady && client.capabilities.contains("conversations") && !hasWork && !switchingConversation && uncertainSubmission == nil && !closing }
-    private func loadConversations(next: Bool = false) {
-        guard client.isReady, client.capabilities.contains("conversations") else { return }
-        conversationGeneration += 1; let generation = conversationGeneration
-        let offset = next ? conversationOffset + 100 : 0
-        client.request("conversation.list", params: ["offset": offset]) { [weak self] result in
-            guard let self, generation == self.conversationGeneration else { return }
-            switch result {
-            case .success(let data):
-                let entries = (data["conversations"] as? [[String: Any]] ?? []).compactMap { value -> ConversationSummary? in
-                    guard let id = value["id"] as? String else { return nil }
-                    let date = Date(timeIntervalSince1970: (value["updatedAt"] as? Double ?? 0) / 1000).formatted(date: .abbreviated, time: .omitted)
-                    return ConversationSummary(id: id, title: value["title"] as? String ?? "Conversation", detail: date)
-                }
-                self.conversationList = entries; self.conversationOffset = offset; self.moreConversations = data["more"] as? Bool == true
-                self.renderConversations()
-            case .failure(let error): self.conversations.show(self.conversationList, selected: self.currentConversation, canSwitch: self.canSwitchConversation, more: false, message: error.localizedDescription)
-            }
-        }
-    }
-    private func renderConversations() {
-        conversations.supportsDeletion = client.capabilities.contains("conversation-delete-v1")
-        conversations.show(conversationList, selected: currentConversation, canSwitch: canSwitchConversation, more: moreConversations, earlierPage: conversationOffset > 0)
-        chatTitle.stringValue = conversationList.first(where: { $0.id == currentConversation })?.title ?? runs.first?["text"] as? String ?? "New conversation"
-    }
-    @objc func newConversation() { switchConversation(nil) }
-    private func selectConversation(_ id: String) { switchConversation(id) }
-    private func confirmDeleteConversation(_ id: String) {
-        guard canSwitchConversation, client.capabilities.contains("conversation-delete-v1"),
-              let item = conversationList.first(where: { $0.id == id }), let window, window.attachedSheet == nil else { return }
-        let alert = NSAlert()
-        alert.messageText = "Delete conversation?"
-        alert.informativeText = "“\(item.title)” will be removed from the sidebar and its draft discarded. Project files and saved checkpoints are kept.\n\n" + (id == currentConversation ? "A new conversation will open." : "Your current conversation will stay open.")
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Delete Conversation").hasDestructiveAction = true
-        alert.beginSheetModal(for: window) { [weak self] response in
-            guard response == .alertSecondButtonReturn else { return }
-            self?.switchConversation(id, deleting: true)
-        }
-    }
-    private func switchConversation(_ id: String?, deleting: Bool = false) {
-        guard canSwitchConversation, saveDraft() else { return }
-        switchingConversation = true; expectedConversation = nil; podContextID = UUID()
-        navigationGeneration += 1; inspectionGeneration += 1; conversationGeneration += 1
-        walkthroughLoadGeneration += 1; quickOpen?.dismiss()
-        updateStatus()
-        client.request(deleting ? "conversation.delete" : (id == nil ? "conversation.create" : "conversation.select"), params: id.map { ["id": $0] } ?? [:]) { [weak self] result in
-            guard let self else { return }
-            switch result {
-            case .success(let data):
-                if deleting, let id {
-                    self.draftByConversation.removeValue(forKey: id)
-                    if self.currentConversation == id { self.composer.string = "" }
-                    self.savedDraftText = "\u{0}"
-                }
-                self.expectedConversation = data["conversation"] as? String
-                self.client.requestSnapshot(afterPending: true) { [weak self] in
-                    guard let self else { return }
-                    guard self.currentConversation == self.expectedConversation else {
-                        self.showNotice("The conversation could not be confirmed. Reconnect before sending.")
-                        self.client.closeInput(); return
-                    }
-                    if deleting, let id {
-                        self.draftByConversation.removeValue(forKey: id)
-                        self.savedDraftText = "\u{0}"
-                        if self.saveDraft() { self.showNotice("Conversation deleted. Project files and checkpoints are kept.") }
-                    }
-                    self.switchingConversation = false; self.expectedConversation = nil
-                    self.loadConversations(); self.refreshNavigation(); self.updateStatus()
-                    // A background reply must not take focus from another window.
-                    if self.window?.isKeyWindow == true { self.focusComposer() }
-                }
-            case .failure(let error):
-                self.switchingConversation = false; self.expectedConversation = nil
-                self.showNotice(error.localizedDescription); self.renderConversations()
-                self.refreshNavigation(); self.walkthroughLoaded = nil; self.updateWalkthrough()
-            }
-            self.updateStatus()
-        }
-    }
-    private func adoptConversation(_ id: String) {
-        guard id != currentConversation else { return }
-        if let previous = currentConversation {
-            draftByConversation[previous] = composer.string
-            composer.string = draftByConversation[id] ?? ""
-        }
-        currentConversation = id; podContextID = UUID()
-        runs = []; active = nil; expandedActions.removeAll()
-        resetConversationInspection()
-        walkthrough.reset(); walkthroughLoaded = nil; walkthroughLoadGeneration += 1
-        savedDraftText = "\u{0}" // Persist selection even when both drafts are empty.
-        saveDraft()
+
+    @objc func showWalkthrough() {
+        walkthrough.followCurrentInstruction(); contextTabs.selectedSegment = 0; showingInspector = true; surfaces.selectedSegment = 1; switchSurface()
     }
 
-    private func resetConversationInspection() {
-        layoutTimer?.invalidate(); layoutTimer = nil; needsRebuild = false
-        navigationGeneration += 1; inspectionGeneration += 1
-        workspaceRefreshTimer?.invalidate(); workspaceRefreshTimer = nil
-        inspectionHistory = InspectionHistory(); reloadInspection = nil; nextChunk = nil; previousChunk = nil
-        inspectionBack.isEnabled = false; inspectionForward.isEnabled = false
-        toolbarHistory.setEnabled(false, forSegment: 0)
-        toolbarHistory.setEnabled(false, forSegment: 1)
-        updateJumpBar()
-        inspectedFile = nil; inspectedDiff = nil; declarations = []
-        inspection.string = "Choose a file, change, or recorded instruction to inspect."
-        inspectorTitle.stringValue = "Inspect"; pageLabel.stringValue = "Read only"
-        evidenceLinks = []; contextLinks = []; showingContextSummary = false; relatedEvidence.isHidden = true
-        spiderDetails = nil; checkCode.isHidden = true; prepareCodeReview.isHidden = true
-        [breadcrumb, diffScope, revealButton, outline, recordedOutput, moreButton, previousButton].forEach { $0.isHidden = true }
-        nextNavigationPage = nil; previousNavigationPage = nil; navigationData = []
-        navigationQuery = ""; navigation.resetFilter()
-        navigation.show([], location: navigation.destination.title, message: "Opening conversation…")
-        contextTabs.selectedSegment = 0
+    @objc func toggleMaximizeContext() {
+        guard canMaximizeContext else { return }
+        isContextMaximized.toggle()
         adapt()
     }
 
-    // The toolbar stays in native window chrome. Stop never enters overflow.
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.init("navigation"), .init("history"), .init("jumpBar"), .flexibleSpace, .init("project"), .init("state"), .init("stop"), .init("actions")]
-    }
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { toolbarDefaultItemIdentifiers(toolbar) }
-    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
-        let item = NSToolbarItem(itemIdentifier: identifier)
-        switch identifier.rawValue {
-        case "history":
-            item.label = "History"
-            item.toolTip = "Navigate Back (⌘[) or Forward (⌘])"
-            item.view = toolbarHistory
-        case "jumpBar":
-            item.label = "Jump Bar"
-            item.toolTip = "Current Workspace Context (Jump Bar)"
-            item.view = jumpBar
-        case "project":
-            item.label = "Run Project"; item.toolTip = "Run Project (⌘R)"
-            item.image = NSImage(systemSymbolName: "play.circle", accessibilityDescription: "Run Project")
-            item.target = self; item.action = #selector(showProjectRun)
-        case "navigation":
-            item.label = "Navigation"; item.toolTip = "Toggle Navigation (⌘B)"
-            item.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: "Toggle Navigation")
-            item.target = self; item.action = #selector(toggleNavigation)
-        case "state":
-            item.label = "Runtime State"; item.view = status
-            status.widthAnchor.constraint(lessThanOrEqualToConstant: 260).isActive = true
-        case "stop": item.label = "Stop LUMI"; item.view = stopButton; item.visibilityPriority = .user
-        case "actions":
-            item.label = "Actions"; item.toolTip = "Workspace Actions (⌘⇧P)"
-            item.image = NSImage(systemSymbolName: "ellipsis.circle", accessibilityDescription: "Workspace Actions")
-            item.target = self; item.action = #selector(showActions)
-        default: return nil
-        }
-        return item
-    }
-    @objc private func toolbarHistoryClicked() {
-        if toolbarHistory.selectedSegment == 0 {
-            inspectBack()
-        } else if toolbarHistory.selectedSegment == 1 {
-            inspectForward()
-        }
-    }
-    @objc private func openJumpBarSegment() {
-        guard let item = jumpBar.clickedPathItem, let url = item.url else { return }
-        var isDir: ObjCBool = false
-        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) {
-            if isDir.boolValue {
-                showFiles()
-            } else {
-                readFile(url.path)
-            }
-        }
-    }
-    private func updateJumpBar() {
-        switch inspectionHistory.current {
-        case .file(let path):
-            let fullURL = path.hasPrefix("/") ? URL(fileURLWithPath: path) : folder.appendingPathComponent(path)
-            jumpBar.url = fullURL
-        case .diff(let path, _):
-            let fullURL = path.hasPrefix("/") ? URL(fileURLWithPath: path) : folder.appendingPathComponent(path)
-            jumpBar.url = fullURL
-        default:
-            if let convo = currentConversation, !convo.isEmpty {
-                let title = chatTitle.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                jumpBar.url = folder.appendingPathComponent(title.isEmpty ? "Chat" : title)
-            } else {
-                jumpBar.url = folder
-            }
-        }
-    }
-    private func updateModel(_ selection: WorkspaceModelSelection) {
-        reasoningPicker.receive(selection)
-        reasoningPicker.refresh(supported: client.isReady && client.capabilities.contains("reasoning-selection-v1"))
-        modelButton.title = selection.model
-        modelButton.toolTip = "\(selection.providerLabel) · \(selection.model) · Choose model and provider for this workspace"
-        modelButton.setAccessibilityLabel("\(selection.providerLabel), model \(selection.model). Choose model and provider")
-    }
-    @objc func showModels() {
-        guard canChooseModels, let window else { return }
-        if let picker = modelPicker {
-            if picker.window?.isVisible == true { picker.window?.makeKeyAndOrderFront(nil) }
-            else { picker.present(for: window) }
-            return
-        }
-        modelPicker = ModelPicker(request: { [weak self] method, params, completion in
-            guard let self else { completion(.failure(BridgeError.message("Workspace closed."))); return }
-            self.client.request(method, params: params, completion: completion)
-        }, connected: { [weak self] in
-            self?.client.isReady == true && self?.client.capabilities.contains("model-selection-v1") == true
-        }, supportsDiscovery: { [weak self] in self?.client.capabilities.contains("model-discovery-v1") == true }, supportsCredentials: { [weak self] in self?.client.capabilities.contains("openrouter-credentials-v1") == true }, canApply: { [weak self] in
-            guard let self else { return false }
-            return self.canRequestRecovery && self.stopThenSend == nil && !self.reasoningPicker.pending
-        }, onSelection: { [weak self] in self?.updateModel($0) })
-        modelPicker?.present(for: window)
-    }
-    private func buildActions() -> [WorkspaceAction] {
-        var actions = [
-            WorkspaceAction(title: "Open Workspace…", shortcut: "⌘O") { NSApp.sendAction(#selector(ApplicationDelegate.openFolder), to: NSApp.delegate, from: nil) },
-            WorkspaceAction(title: "Focus Composer", shortcut: "⌘L") { [weak self] in self?.focusComposer() },
-            WorkspaceAction(title: "Show Chats", shortcut: "⇧⌘C", keywords: ["chat", "conversations", "threads", "sidebar"]) { [weak self] in self?.showChats() },
-            WorkspaceAction(title: "Show Files", shortcut: "⌘1") { [weak self] in self?.showFiles() },
-            WorkspaceAction(title: "Show Changes", shortcut: "⌘2") { [weak self] in self?.showChanges() },
-            WorkspaceAction(title: "Show Recorded Runs", shortcut: "⌘3", keywords: ["history", "sessions"]) { [weak self] in self?.showSessions() },
-            WorkspaceAction(title: "Show Walkthrough", shortcut: "⌘6") { [weak self] in self?.showWalkthrough() },
-            WorkspaceAction(title: "Show Up Next", shortcut: "⌘4", keywords: ["queue", "pending instructions"]) { [weak self] in self?.showQueue() },
-            WorkspaceAction(title: "Toggle Navigation", shortcut: "⌘B", keywords: ["sidebar"]) { [weak self] in self?.toggleNavigation() },
-            WorkspaceAction(title: "Refresh Current Destination", shortcut: "") { [weak self] in self?.refreshNavigation() }
-        ]
-        if reasoningPicker.isEnabled { actions.insert(WorkspaceAction(title: "Change Reasoning Level…", shortcut: "", keywords: ["effort", "thinking", "speed", "depth"]) { [weak self] in self?.reasoningPicker.performClick(nil) }, at: 1) }
-        if client.capabilities.contains("model-selection-v1") { actions.insert(WorkspaceAction(title: "Choose Model & Provider…", shortcut: "⇧⌘M", keywords: ["switch", "change", "AI"]) { [weak self] in self?.showModels() }, at: 1) }
-        if !client.isReady, client.process?.isRunning != true, !closing { actions.insert(WorkspaceAction(title: "Reconnect Workspace", shortcut: "", keywords: ["connection", "retry", "recover"]) { [weak self] in self?.reconnect() }, at: 0) }
-        if client.isReady, uncertainSubmission != nil, !checkingSubmission { actions.insert(WorkspaceAction(title: "Check Instruction Status", shortcut: "", keywords: ["retry", "submission", "recover"]) { [weak self] in self?.reconcileSubmission() }, at: 0) }
-        actions.append(WorkspaceAction(title: "Project Library…", shortcut: "", keywords: ["projects", "open recent"]) { [weak self] in self?.onProjects?() })
-        actions.append(WorkspaceAction(title: "ChatGPT Connection…", shortcut: "", keywords: ["account", "sign in", "authentication"]) { [weak self] in self?.onAccount?() })
-        actions.append(WorkspaceAction(title: "Sovereign Swarm Radar…", shortcut: "⌥⌘R", keywords: ["radar", "telemetry", "nodes", "edge", "latency", "swarm"]) { SwarmRadarWindow.shared.present() })
-        if canOpenFile { actions.insert(WorkspaceAction(title: "Open File…", shortcut: "⌘P") { [weak self] in self?.showQuickOpen() }, at: 1) }
-        if client.isReady && (swarmDeferEnabled || swarmDeferred) {
-            actions.insert(WorkspaceAction(title: swarmDeferred ? "Resume Agent Work" : "Defer Agent Work", shortcut: "", keywords: ["swarm", "pause", "resume", "safe boundary"]) { [weak self] in self?.toggleAgentDefer() }, at: 1)
-        }
-        if client.isReady {
-            actions.insert(WorkspaceAction(title: "Command Recovery…", shortcut: "", keywords: ["terminal", "command", "reconcile", "uncertain", "receipt"]) { [weak self] in self?.showCommandRecovery() }, at: 1)
-        }
-        if client.isReady {
-            actions.insert(WorkspaceAction(title: "Agent Swarm Settings…", shortcut: "", keywords: ["review", "legion", "defer", "agents"]) { [weak self] in self?.showAgentSwarmSettings() }, at: 1)
-            if criticalReviewEnabled {
-                actions.insert(WorkspaceAction(title: "Review Latest Completion…", shortcut: "", keywords: ["critical", "adversarial", "audit", "swarm"]) { [weak self] in self?.requestCriticalReview() }, at: 1)
-            }
-            if legionEnabled { actions.insert(WorkspaceAction(title: "Engage Specialist Team…", shortcut: "", keywords: ["swarm", "legion", "delegate", "agents"]) { [weak self] in self?.engageSpecialists() }, at: 1) }
-            actions.insert(WorkspaceAction(title: "Formation Status…", shortcut: "", keywords: ["swarm", "legion", "reports", "reconcile"]) { [weak self] in self?.showFormationStatus() }, at: 1)
-            actions.insert(WorkspaceAction(title: "Formation History…", shortcut: "", keywords: ["swarm", "legion", "past reports", "reconcile"]) { [weak self] in self?.showFormationHistory() }, at: 1)
-            actions.insert(WorkspaceAction(title: "Inspect Latest Specialist Stream…", shortcut: "", keywords: ["swarm", "legion", "transcript", "stream"]) { [weak self] in self?.showLatestSpecialistStream() }, at: 1)
-        }
-        if client.capabilities.contains("project-run-v1") { actions.insert(WorkspaceAction(title: "Run Project", shortcut: "⌘R") { [weak self] in self?.showProjectRun() }, at: 1) }
-        if client.capabilities.contains("checkpoints-v1") { actions.insert(WorkspaceAction(title: "Checkpoints", shortcut: "⌘7") { [weak self] in self?.showCheckpoints() }, at: 1) }
-        if canShowMemory { actions.insert(WorkspaceAction(title: "Conversation Memory…", shortcut: "⌘8", keywords: ["remember", "context", "facts", "preferences", "notes"]) { [weak self] in self?.showMemory() }, at: 1) }
-        if canShowContext { actions.insert(WorkspaceAction(title: "Conversation Context", shortcut: "⌘9", keywords: ["history", "summary", "retained", "memory", "inspect"]) { [weak self] in self?.showContext() }, at: 1) }
-        if canCheckCode { actions.insert(WorkspaceAction(title: "Check Code", shortcut: "", keywords: ["spider", "syntax", "imports", "cycles", "diagnostics"]) { [weak self] in self?.showCodeCheck() }, at: 1) }
-        if canShowSavedState { actions.insert(WorkspaceAction(title: "Saved State", shortcut: "", keywords: ["history", "storage", "integrity", "recovery", "runtime"]) { [weak self] in self?.showSavedState() }, at: 1) }
-        if canSwitchConversation { actions.insert(WorkspaceAction(title: "New Conversation", shortcut: "⌘N") { [weak self] in self?.newConversation() }, at: 1) }
-        if hasWork { actions.insert(WorkspaceAction(title: "Stop All Work", shortcut: "⌘.") { [weak self] in self?.stop() }, at: 1) }
-        if canReviewApproval { actions.insert(WorkspaceAction(title: "Review Request…", shortcut: "⌘5") { [weak self] in self?.showApprovalReview() }, at: 1) }
-        if canDecideApproval {
-            actions.insert(WorkspaceAction(title: "Allow Operation Once", shortcut: "⇧⌘A", keywords: ["approval", "permission", "allow", "run"]) { [weak self] in self?.allowOnce() }, at: 1)
-            actions.insert(WorkspaceAction(title: "Deny Operation", shortcut: "⇧⌘D", keywords: ["approval", "reject", "cancel"]) { [weak self] in self?.deny() }, at: 2)
-        }
-        if canContinueWork, let continuation = WorkspaceContinuation.latest(in: runs) {
-            actions.insert(WorkspaceAction(title: continuation.title, shortcut: "") { [weak self] in self?.continueWork(continuation) }, at: 0)
-        }
-        if showingInspector { actions.append(WorkspaceAction(title: "Reload Inspected Content", shortcut: "") { [weak self] in self?.refreshInspection() }) }
-        if canMaximizeContext { actions.append(WorkspaceAction(title: isContextMaximized ? "Restore Task Context Size" : "Maximize Task Context", shortcut: "⌃⌘M", keywords: ["maximize", "expand", "context", "panel", "preview", "run", "inspect"]) { [weak self] in self?.toggleMaximizeContext() }) }
-        if canInspectBack { actions.append(WorkspaceAction(title: "Back in Inspector", shortcut: "⌘[") { [weak self] in self?.inspectBack() }) }
-        if canInspectForward { actions.append(WorkspaceAction(title: "Forward in Inspector", shortcut: "⌘]") { [weak self] in self?.inspectForward() }) }
-        if canFindInInspection { actions.append(WorkspaceAction(title: "Find in Current Page", shortcut: "⌘F") { [weak self] in self?.findInInspection() }) }
-        else if canFindInWalkthrough { actions.append(WorkspaceAction(title: "Filter Walkthrough Activity", shortcut: "⌘F", keywords: ["find", "search", "walkthrough", "activity"]) { [weak self] in self?.findInWalkthrough() }) }
-        return actions
-    }
-    @objc func toggleAgentDefer() {
-        let method = swarmDeferred ? "task.resume" : "task.defer"
-        client.request(method, params: [:]) { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                switch result {
-                case .success(let payload):
-                    self.swarmDeferred = method == "task.defer"
-                    let boundary = payload["boundary"] as? String == "before_turn" ? "before the next turn" : "at a safe boundary"
-                    self.showNotice(self.swarmDeferred ? "Agent work is deferred \(boundary)." : "Agent work resumed.")
-                    self.updateStatus()
-                case .failure(let error): self.showNotice(error.localizedDescription)
-                }
-            }
-        }
-    }
-    @objc func requestCriticalReview() {
-        let text = "[AGENT_SWARM_CRITICAL_REVIEW] Perform one bounded, evidence-based critical completion review of the latest completed work in this conversation. Check original requirements, architecture and constraints, verification quality, and concrete failure modes. Distinguish demonstrated defects, unverified assumptions, and optional improvements. Do not invent defects or start an unlimited task chain. End with exactly one decision: ACCEPT, REMEDIATE, ESCALATE, or ACCEPT WITH DISCLOSED LIMITATIONS, with concise evidence. This is one review pass only."
-        client.request("task.submit", params: ["text": text, "attachments": []]) { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                if case .success = result { self.showNotice("Critical review queued.") }
-                else if case .failure(let error) = result { self.showNotice(error.localizedDescription) }
-            }
-        }
-    }
-    @objc func engageSpecialists() {
-        let alert = NSAlert(); alert.messageText = "Engage Specialist Team"; alert.informativeText = "Describe the objective for independent specialist agents. Their reports return to this coordinator."
-        alert.addButton(withTitle: "Engage"); alert.addButton(withTitle: "Cancel")
-        let objective = NSTextField(string: ""); objective.placeholderString = "Objective"
-        objective.frame = NSRect(x: 0, y: 0, width: 360, height: 28); alert.accessoryView = objective
-        guard alert.runModal() == .alertFirstButtonReturn, !objective.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        let task = objective.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        client.request("agentSwarm.classify", params: ["objective": task]) { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                switch result {
-                case .success(let plan): self.confirmSpecialistPlan(task, plan: plan)
-                case .failure(let error): self.showNotice(error.localizedDescription)
-                }
-            }
-        }
-    }
-    private func confirmSpecialistPlan(_ objective: String, plan: [String: Any]) {
-        guard let assignments = plan["assignments"] as? [[String: Any]], !assignments.isEmpty else { showNotice("The task classifier returned no specialist assignments."); return }
-        let scores = plan["scores"] as? [[String: Any]] ?? []
-        let purposes: [String: String] = [
-            "Architect": "Plans the approach and how the pieces fit together.",
-            "Researcher": "Investigates relevant files and documentation.",
-            "Implementer": "Makes the requested changes.",
-            "UX Specialist": "Reviews the experience, navigation, and accessibility.",
-            "Hardener": "Checks safety, edge cases, and failure handling.",
-            "Data Steward": "Checks how information is stored and updated.",
-            "Verifier": "Checks the result against the request."
-        ]
-        let roleByID = assignments.reduce(into: [String: String]()) { roles, assignment in
-            guard let id = assignment["id"] as? String, let role = assignment["role"] as? String else { return }
-            roles[id] = role
-        }
-        let filesByRole = scores.reduce(into: [String: [String]]()) { files, score in
-            guard let role = score["role"] as? String else { return }
-            files[role] = Array((score["assignedFiles"] as? [String] ?? []).prefix(3))
-        }
-        let steps = assignments.enumerated().map { index, assignment in
-            let role = assignment["role"] as? String ?? "Specialist"
-            let dependencies = (assignment["dependsOn"] as? [String] ?? []).compactMap { roleByID[$0] }
-            let focus = filesByRole[role] ?? []
-            var lines = ["\(index + 1). \(role) — \(purposes[role] ?? "Works on the assigned part of the request.")"]
-            if !focus.isEmpty { lines.append("   Focus: \(focus.joined(separator: ", "))") }
-            if !dependencies.isEmpty { lines.append("   Starts after: \(dependencies.joined(separator: ", "))") }
-            return lines.joined(separator: "\n")
-        }.joined(separator: "\n")
-        let strategyNames: [String: String] = [
-            "adaptive": "Adaptive team",
-            "tactical_strike": "Focused team",
-            "balanced_squad": "Balanced team",
-            "full_legion": "Full specialist team",
-            "verification_heavy": "Verification-focused team"
-        ]
-        let intentNames: [String: String] = [
-            "CREATE": "Create something new", "FIX": "Fix an issue", "REFACTOR": "Improve existing work",
-            "INVESTIGATE": "Investigate a question", "TEST": "Verify a result", "CONFIGURE": "Change settings",
-            "DELETE": "Remove something", "GENERAL": "General request"
-        ]
-        let confirm = NSAlert(); confirm.messageText = "Review Specialist Plan"
-        confirm.informativeText = "Your request\n\(objective.prefix(700))\n\n\(intentNames[plan["intent"] as? String ?? ""] ?? "General request") · \(strategyNames[plan["strategy"] as? String ?? ""] ?? "Adaptive team") · \(assignments.count) specialists\n\nTeam plan\n\(steps)\n\nStarting gives specialists access to workspace tools. They may edit files or run commands. Review their activity and reports, then inspect the workspace changes."
-        confirm.addButton(withTitle: "Start Team"); confirm.addButton(withTitle: "Cancel")
-        guard confirm.runModal() == .alertFirstButtonReturn else { return }
-        client.request("agentSwarm.form", params: ["objective": objective, "assignments": assignments]) { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                switch result {
-                case .success(let report):
-                    let deferred = report["status"] as? String == "deferred"
-                    let failed = report["status"] as? String == "partial_failure"
-                    self.showNotice("Specialist formation \(deferred ? "deferred with its remaining assignments recorded" : failed ? "finished with blockers" : "finished").\n\n\(self.formationRoadmapText(report))")
-                case .failure(let error): self.showNotice(error.localizedDescription)
-                }
-            }
-        }
-    }
-    static func mergeFormationAssignments(savedAssignments: [[String: Any]], roadmapAssignments: [[String: Any]]) -> [[String: Any]] {
-        guard !savedAssignments.isEmpty else { return roadmapAssignments }
-        let statesById = Dictionary(roadmapAssignments.compactMap { state -> (String, [String: Any])? in
-            guard let id = state["id"] as? String, !id.isEmpty else { return nil }
-            return (id, state)
-        }, uniquingKeysWith: { _, latest in latest })
-        var seenIds = Set<String>()
-        var merged = savedAssignments.map { saved -> [String: Any] in
-            guard let id = saved["id"] as? String, !id.isEmpty else { return saved }
-            seenIds.insert(id)
-            guard let state = statesById[id] else { return saved }
-            var combined = saved.merging(state) { _, roadmapValue in roadmapValue }
-            combined["id"] = id
-            if let role = saved["role"] as? String, !role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                combined["role"] = role
-            }
-            if let objective = saved["objective"] as? String, !objective.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                combined["objective"] = objective
-            }
-            if let dependsOn = saved["dependsOn"] as? [String], !dependsOn.isEmpty {
-                combined["dependsOn"] = dependsOn
-            }
-            return combined
-        }
-        for state in roadmapAssignments {
-            if let id = state["id"] as? String, !id.isEmpty, !seenIds.contains(id) {
-                merged.append(state)
-            }
-        }
-        return merged
-    }
-
-    struct FormationHistoryReviewModel {
-        let status: String
-        let formationId: String?
-        let automatic: Bool
-        let assignments: [[String: Any]]
-        let canRecover: Bool
-        let canResume: Bool
-        let canInspect: Bool
-        let buttonTitles: [String]
-
-        init(entry: [String: Any]) {
-            let status = entry["status"] as? String ?? "unknown"
-            let formationId = entry["id"] as? String
-            let automatic = entry["automatic"] as? Bool == true && entry["parentRunQueued"] as? Bool != false
-            let savedAssignments = entry["assignments"] as? [[String: Any]] ?? []
-            let roadmapAssignments = (entry["roadmap"] as? [String: Any])?["assignments"] as? [[String: Any]]
-                ?? (entry["result"] as? [String: Any])?["reports"] as? [[String: Any]]
-                ?? entry["reports"] as? [[String: Any]]
-                ?? []
-            let assignments = WorkspaceWindow.mergeFormationAssignments(savedAssignments: savedAssignments, roadmapAssignments: roadmapAssignments)
-            let canRecover = status == "needs_reconciliation" && formationId != nil && !assignments.isEmpty
-            let canResume = status == "deferred" && formationId != nil
-            let canInspect = status != "none" && status != "missing" && formationId != nil && !assignments.isEmpty
-            var titles = [String]()
-            if canRecover {
-                titles.append("Review Recovery…")
-            } else if canResume {
-                titles.append(automatic ? "Resume Run" : "Resume Formation")
-            }
-            if canInspect {
-                titles.append("Inspect Saved Stream…")
-            }
-            titles.append("Close")
-            self.status = status
-            self.formationId = formationId
-            self.automatic = automatic
-            self.assignments = assignments
-            self.canRecover = canRecover
-            self.canResume = canResume
-            self.canInspect = canInspect
-            self.buttonTitles = titles
-        }
-    }
-
-    static func inspectableSpecialists(from status: [String: Any]) -> [[String: Any]] {
-        let savedAssignments = status["assignments"] as? [[String: Any]] ?? []
-        let roadmapAssignments = (status["roadmap"] as? [String: Any])?["assignments"] as? [[String: Any]]
-            ?? (status["result"] as? [String: Any])?["reports"] as? [[String: Any]]
-            ?? status["reports"] as? [[String: Any]]
-            ?? []
-        let merged = mergeFormationAssignments(savedAssignments: savedAssignments, roadmapAssignments: roadmapAssignments)
-        let activeOrSavedStatuses: Set<String> = ["completed", "deferred", "failed", "running", "needs_reconciliation", "reconciling", "partial_failure"]
-        let withActivity = merged.filter { assignment in
-            guard let id = assignment["id"] as? String, !id.isEmpty else { return false }
-            if let childSession = assignment["childSessionId"] as? String, !childSession.isEmpty { return true }
-            if let state = assignment["status"] as? String, activeOrSavedStatuses.contains(state) { return true }
-            if let summary = assignment["summary"] as? String, !summary.isEmpty { return true }
-            if let response = assignment["response"] as? String, !response.isEmpty { return true }
-            if let reason = assignment["reason"] as? String, !reason.isEmpty { return true }
-            return false
-        }
-        if !withActivity.isEmpty { return withActivity }
-        return merged.filter { assignment in
-            guard let id = assignment["id"] as? String, !id.isEmpty else { return false }
-            let state = assignment["status"] as? String ?? ""
-            return state != "pending" && state != "skipped"
-        }
-    }
-
-    @objc func showFormationStatus() {
-        client.request("agentSwarm.formStatus", params: [:]) { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                let alert = NSAlert(); alert.messageText = "Specialist Formation Status"
-                var formationId: String?
-                var isAutomaticFormation = false
-                var canResume = false
-                var canInspect = false
-                var canReconcile = false
-                var streamAssignments = [[String: Any]]()
-                switch result {
-                case .success(let status):
-                    alert.informativeText = self.formationRoadmapText(status)
-                    formationId = status["id"] as? String
-                    isAutomaticFormation = status["automatic"] as? Bool == true && status["parentRunQueued"] as? Bool != false
-                    canResume = status["status"] as? String == "deferred" && formationId != nil
-                    canReconcile = status["status"] as? String == "needs_reconciliation" && formationId != nil
-                    let savedAssignments = status["assignments"] as? [[String: Any]] ?? []
-                    let roadmapAssignments = (status["roadmap"] as? [String: Any])?["assignments"] as? [[String: Any]]
-                        ?? (status["result"] as? [String: Any])?["reports"] as? [[String: Any]]
-                        ?? status["reports"] as? [[String: Any]]
-                        ?? []
-                    streamAssignments = Self.mergeFormationAssignments(savedAssignments: savedAssignments, roadmapAssignments: roadmapAssignments)
-                    let currentStatus = status["status"] as? String ?? "none"
-                    canInspect = currentStatus != "none" && currentStatus != "missing" && formationId != nil && !streamAssignments.isEmpty
-                case .failure(let error): alert.informativeText = error.localizedDescription
-                }
-                if canReconcile {
-                    alert.addButton(withTitle: "Reconcile Interrupted Work…")
-                } else if canResume {
-                    alert.addButton(withTitle: isAutomaticFormation ? "Resume Run" : "Resume Formation")
-                }
-                if canInspect { alert.addButton(withTitle: "Inspect Saved Stream…") }
-                alert.addButton(withTitle: "Close")
-                let response = alert.runModal()
-                guard let formationId else { return }
-                let hasPrimaryAction = canReconcile || canResume
-                if response == .alertFirstButtonReturn {
-                    if canReconcile {
-                        self.beginFormationReconciliation(formationId: formationId, assignments: streamAssignments)
-                    } else if canResume {
-                        self.resumeFormation(formationId, automatic: isAutomaticFormation)
-                    } else if canInspect {
-                        self.chooseInterruptedFormationStream(formationId: formationId, assignments: streamAssignments)
-                    }
-                } else if response == .alertSecondButtonReturn, hasPrimaryAction, canInspect {
-                    self.chooseInterruptedFormationStream(formationId: formationId, assignments: streamAssignments)
-                }
-            }
-        }
-    }
-
-    @objc func showCommandRecovery() {
-        client.request("command.actionsList", params: [:]) { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                guard case .success(let response) = result else {
-                    if case .failure(let error) = result { self.showNotice(error.localizedDescription) }
-                    return
-                }
-                let actions = response["actions"] as? [[String: Any]] ?? []
-                guard !actions.isEmpty else {
-                    self.showNotice("No unresolved command actions. Completed command receipts stay available for replay protection; this view only lists actions that still need an outcome.")
-                    return
-                }
-                let truncated = response["truncated"] as? Bool == true
-                let choices = actions.enumerated().map { index, action -> String in
-                    let state = (action["status"] as? String ?? "unknown").capitalized
-                    let fingerprint = String((action["commandFingerprint"] as? String ?? "").prefix(12))
-                    let active = action["ownerActive"] as? Bool == true ? " · active here" : " · prior process"
-                    return "\(index + 1). \(state) · command \(fingerprint)\(active)"
-                }
-                let picker = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 390, height: 26))
-                picker.addItems(withTitles: choices)
-                picker.setAccessibilityLabel("Unresolved command action")
-                let review = NSAlert()
-                review.messageText = "Unresolved Command Actions"
-                review.informativeText = "Review the original terminal before recording an outcome. These receipts store a command fingerprint, not the command text. An action still owned by this process stays fenced.\(truncated ? " Showing the 100 most recent of \(response["total"] as? Int ?? actions.count) receipts." : "")"
-                review.accessoryView = picker
-                review.addButton(withTitle: "Review Selected…")
-                review.addButton(withTitle: "Close")
-                guard review.runModal() == .alertFirstButtonReturn else { return }
-                let action = actions[min(max(picker.indexOfSelectedItem, 0), actions.count - 1)]
-                guard let actionId = action["actionId"] as? String else { self.showNotice("This receipt is incomplete and cannot be reconciled safely."); return }
-                if action["ownerActive"] as? Bool == true {
-                    self.showNotice("This action is still owned by the current process and remains fenced. Wait for that process to settle, or reopen the workspace after it exits, then inspect the terminal before reconciling.")
-                    return
-                }
-                self.confirmCommandActionOutcome(action: action, actionId: actionId)
-            }
-        }
-    }
-
-    private func confirmCommandActionOutcome(action: [String: Any], actionId: String) {
-        let status = action["status"] as? String ?? "unknown"
-        let fingerprint = action["commandFingerprint"] as? String ?? "unavailable"
-        let date = (action["updatedAt"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue / 1000) }
-        let updated = date.map { DateFormatter.localizedString(from: $0, dateStyle: .medium, timeStyle: .short) } ?? "unknown"
-        let confirmation = NSTextField(frame: NSRect(x: 0, y: 0, width: 410, height: 24))
-        confirmation.placeholderString = "Terminal evidence checked; do not include secrets (12+ characters)"
-        confirmation.setAccessibilityLabel("Terminal evidence for command outcome")
-        let stopped = NSButton(checkboxWithTitle: "I confirmed the original command process is no longer running.", target: nil, action: nil)
-        stopped.setAccessibilityLabel("Confirm original command process has stopped")
-        let outcome = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 410, height: 26))
-        outcome.addItems(withTitles: ["Completed successfully", "Failed or stopped"])
-        outcome.setAccessibilityLabel("Verified command outcome")
-        let stack = NSStackView(views: [stopped, outcome, confirmation])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 8
-        stack.frame = NSRect(x: 0, y: 0, width: 420, height: 86)
-        let alert = NSAlert()
-        alert.messageText = "Record Verified Command Outcome"
-        alert.informativeText = "Status: \(status) · Updated: \(updated)\nFingerprint: \(String(fingerprint.prefix(24)))…\n\nA stopped worker does not prove its command process exited. Inspect the original terminal and workspace, then confirm the command process has stopped. Recording an outcome removes the retry fence; it never replays the command."
-        alert.accessoryView = stack
-        alert.addButton(withTitle: "Record Outcome")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let note = confirmation.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard stopped.state == .on, note.count >= 12 else {
-            showNotice("Outcome was not recorded. Confirm the command has stopped and add at least 12 characters describing the terminal evidence you checked.")
-            return
-        }
-        let resultName = outcome.indexOfSelectedItem == 0 ? "completed" : "failed"
-        client.request("command.actionReconcile", params: ["actionId": actionId, "outcome": resultName, "confirmation": note, "confirmedStopped": true]) { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                switch result {
-                case .success: self.showNotice("Command outcome recorded as \(resultName). No command was dispatched.")
-                case .failure(let error): self.showNotice(error.localizedDescription)
-                }
-            }
-        }
-    }
-
-    private func beginFormationReconciliation(formationId: String, assignments: [[String: Any]]) {
-        let uncertain = assignments.filter { assignment in
-            !["completed", "pending", "skipped"].contains(assignment["status"] as? String ?? "unknown")
-        }
-        guard !uncertain.isEmpty else {
-            showNotice("No specialist has an unresolved roadmap state. Refresh Formation Status and inspect its saved record.")
-            return
-        }
-        collectFormationReconciliationDecision(formationId: formationId, assignments: uncertain, index: 0, decisions: []) { [weak self] decisions in
-            guard let self else { return }
-            let confirmation = NSTextField(frame: NSRect(x: 0, y: 0, width: 420, height: 24))
-            confirmation.placeholderString = "Briefly describe what you inspected (at least 20 characters)"
-            confirmation.setAccessibilityLabel("Workspace and terminal review notes")
-            let stopped = NSButton(checkboxWithTitle: "I confirmed prior specialist activity is stopped and reviewed its workspace and terminal effects.", target: nil, action: nil)
-            stopped.setAccessibilityLabel("Confirm prior specialist activity is stopped and reviewed")
-            let stack = NSStackView(views: [stopped, confirmation])
-            stack.orientation = .vertical
-            stack.alignment = .leading
-            stack.spacing = 10
-            stack.frame = NSRect(x: 0, y: 0, width: 440, height: 66)
-            let final = NSAlert()
-            final.messageText = "Confirm Formation Reconciliation"
-            final.informativeText = "This records your decisions and prepares the formation for an explicit resume. It does not start specialists. Verify previous activity has stopped and review its effects before confirming."
-            final.accessoryView = stack
-            final.addButton(withTitle: "Reconcile and Prepare Resume")
-            final.addButton(withTitle: "Cancel")
-            guard final.runModal() == .alertFirstButtonReturn else { return }
-            let note = confirmation.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard stopped.state == .on, note.count >= 20 else {
-                self.showNotice("Reconciliation was not submitted. Confirm the stopped and reviewed checkbox and add at least 20 characters describing your review.")
-                return
-            }
-            self.client.request("agentSwarm.formReconcile", params: ["formationId": formationId, "confirmation": note, "confirmedStopped": true, "decisions": decisions]) { result in
-                DispatchQueue.main.async {
-                    switch result {
-                    case .success(let receipt):
-                        let isAutomatic = receipt["automatic"] as? Bool == true
-                        let parentQueued = receipt["parentRunQueued"] as? Bool == true
-                        if parentQueued { self.swarmDeferred = true; self.updateStatus() }
-                        let nextStep = isAutomatic
-                            ? (parentQueued ? "\n\nChoose Resume Run to continue the original task from its reviewed specialist reports." : "\n\nThe original task is not queued. Resume the formation here, then start a new continuation if needed.")
-                            : ""
-                        self.showNotice("Interrupted work reconciled. The formation is now deferred and has not been started. Use Formation Status to choose the next step.\n\n\(self.formationRoadmapText(receipt))\(nextStep)")
-                    case .failure(let error): self.showNotice(error.localizedDescription)
-                    }
-                }
-            }
-        }
-    }
-
-    private func collectFormationReconciliationDecision(formationId: String, assignments: [[String: Any]], index: Int, decisions: [[String: Any]], completion: @escaping ([[String: Any]]) -> Void) {
-        guard index < assignments.count else { completion(decisions); return }
-        let assignment = assignments[index]
-        guard let specialistId = assignment["id"] as? String else {
-            showNotice("A saved specialist entry is missing its ID. Reconciliation cannot continue safely.")
-            return
-        }
-        let state = assignment["status"] as? String ?? "unknown"
-        let choices: [(String, String)] = [("retry", "Retry in a fresh specialist session"), ("completed", "Mark completed with a saved stream and summary")] + (state == "deferred" ? [("resume", "Resume from the saved checkpoint")] : [])
-        let picker = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 390, height: 26))
-        picker.addItems(withTitles: choices.map(\.1))
-        picker.setAccessibilityLabel("Recovery decision for \(assignment["role"] as? String ?? specialistId)")
-        let summary = NSTextField(frame: NSRect(x: 0, y: 0, width: 390, height: 48))
-        summary.placeholderString = "Evidence summary (required for completed work)"
-        summary.setAccessibilityLabel("Completed specialist evidence summary")
-        let stack = NSStackView(views: [picker, summary])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 8
-        stack.frame = NSRect(x: 0, y: 0, width: 400, height: 82)
-        let prompt = NSAlert()
-        prompt.messageText = "Reconcile \(assignment["role"] as? String ?? specialistId)"
-        prompt.informativeText = "Saved state: \(state). Retry starts only after you later resume. Mark completed only after reviewing a saved stream. Resume is available only for a saved deferred checkpoint."
-        prompt.accessoryView = stack
-        prompt.addButton(withTitle: "Save Decision")
-        prompt.addButton(withTitle: "Cancel")
-        guard prompt.runModal() == .alertFirstButtonReturn else { return }
-        let choice = choices[min(max(picker.indexOfSelectedItem, 0), choices.count - 1)].0
-        let evidence = summary.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        if choice == "completed" && evidence.count < 12 {
-            showNotice("Add an evidence summary of at least 12 characters before marking this specialist completed.")
-            return
-        }
-        if choice == "completed" {
-            client.request("agentSwarm.formStream", params: ["formationId": formationId, "specialistId": specialistId]) { [weak self] result in
-                DispatchQueue.main.async {
-                    guard let self else { return }
-                    guard case .success(let stream) = result else {
-                        if case .failure(let error) = result { self.showNotice("A saved stream is required to mark this specialist completed.\n\n\(error.localizedDescription)") }
-                        return
-                    }
-                    let detail = NSAlert()
-                    detail.messageText = "Review Saved Stream · \(assignment["role"] as? String ?? specialistId)"
-                    let excerpt = (stream["excerpt"] as? String ?? "No transcript excerpt was saved.").prefix(12_000)
-                    detail.informativeText = "\(stream["messageCount"] as? Int ?? 0) saved messages. This excerpt may not include work after the last checkpoint. Compare it with current workspace and terminal effects before marking the work complete.\n\n\(excerpt)"
-                    detail.addButton(withTitle: "I Reviewed This Stream")
-                    detail.addButton(withTitle: "Cancel")
-                    guard detail.runModal() == .alertFirstButtonReturn else { return }
-                    self.collectFormationReconciliationDecision(formationId: formationId, assignments: assignments, index: index + 1, decisions: decisions + [["specialistId": specialistId, "outcome": choice, "summary": evidence]], completion: completion)
-                }
-            }
-        } else {
-            collectFormationReconciliationDecision(formationId: formationId, assignments: assignments, index: index + 1, decisions: decisions + [["specialistId": specialistId, "outcome": choice]], completion: completion)
-        }
-    }
-
-    private func chooseInterruptedFormationStream(formationId: String, assignments: [[String: Any]]) {
-        let choices = assignments.compactMap { assignment -> (id: String, title: String)? in
-            guard let id = assignment["id"] as? String, !id.isEmpty else { return nil }
-            let role = assignment["role"] as? String ?? id
-            let state = assignment["status"] as? String ?? "unknown"
-            return (id, "\(role) · \(state.replacingOccurrences(of: "_", with: " ").capitalized)")
-        }
-        guard !choices.isEmpty else {
-            showNotice("This formation has no saved specialist stream records. Inspect the workspace and terminal before deciding how to continue.")
-            return
-        }
-
-        let alert = NSAlert()
-        alert.messageText = "Inspect Saved Specialist Stream"
-        alert.informativeText = "Choose a saved stream to review. The excerpt is limited evidence; inspecting it does not resume or replay any specialist work. Verify workspace and terminal effects before deciding what to do next."
-        alert.addButton(withTitle: "Inspect Stream")
-        alert.addButton(withTitle: "Cancel")
-        let picker = NSPopUpButton()
-        picker.addItems(withTitles: choices.map { $0.title })
-        picker.setAccessibilityLabel("Saved specialist stream to inspect")
-        picker.frame = NSRect(x: 0, y: 0, width: 380, height: 26)
-        alert.accessoryView = picker
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let choice = choices[min(max(picker.indexOfSelectedItem, 0), choices.count - 1)]
-        client.request("agentSwarm.formStream", params: ["formationId": formationId, "specialistId": choice.id]) { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                switch result {
-                case .success(let stream):
-                    let excerpt = stream["excerpt"] as? String ?? "No transcript excerpt was saved."
-                    let count = stream["messageCount"] as? Int ?? 0
-                    let childSession = stream["childSessionId"] as? String ?? "unknown"
-                    let detail = NSAlert()
-                    detail.messageText = "Saved Stream · \(choice.title)"
-                    detail.informativeText = "Session: \(childSession) · \(count) saved messages\n\n\(excerpt)\n\nThis saved excerpt may not include work performed after its last checkpoint. Inspect the current workspace and terminal before retrying or continuing."
-                    detail.addButton(withTitle: "Close")
-                    detail.runModal()
-                case .failure(let error):
-                    self.showNotice("No saved checkpoint is available for this specialist. Inspect the workspace and terminal directly before deciding how to continue.\n\n\(error.localizedDescription)")
-                }
-            }
-        }
-    }
-    private func resumeFormation(_ formationId: String, automatic: Bool) {
-        client.request("agentSwarm.settings", params: ["action": "get"]) { [weak self] settingsResult in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                guard case .success(let settings) = settingsResult else {
-                    if case .failure(let error) = settingsResult { self.showNotice(error.localizedDescription) }
-                    return
-                }
-                let resumeFormationWork = {
-                    self.client.request("agentSwarm.formResume", params: ["formationId": formationId]) { result in
-                        DispatchQueue.main.async {
-                            switch result {
-                            case .success(let report): self.showNotice("Formation resumed.\n\n\(self.formationRoadmapText(report))")
-                            case .failure(let error): self.showNotice(error.localizedDescription)
-                            }
-                        }
-                    }
-                }
-                if automatic || self.swarmDeferred || settings["enabled"] as? Bool == true || settings["hierarchicalDefer"] as? Bool == true {
-                    self.client.request("task.resume", params: [:]) { resumed in
-                        DispatchQueue.main.async {
-                            guard case .success = resumed else {
-                                if case .failure(let error) = resumed { self.showNotice(error.localizedDescription) }
-                                return
-                            }
-                            self.swarmDeferred = false
-                            self.updateStatus()
-                            if automatic { self.showNotice("Hierarchy resumed. The parent run will continue from its saved specialist reports.") }
-                            else { resumeFormationWork() }
-                        }
-                    }
-                } else { resumeFormationWork() }
-            }
-        }
-    }
-    @objc func showFormationHistory() {
-        client.request("agentSwarm.formHistory", params: ["limit": 20]) { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                switch result {
-                case .success(let history):
-                    let entries = history["formations"] as? [[String: Any]] ?? []
-                    guard !entries.isEmpty else {
-                        self.showNotice("No specialist work has been recorded yet.")
-                        return
-                    }
-                    let titleFor: ([String: Any]) -> String = { entry in
-                        let status = self.formationStatusLabel(entry["status"] as? String ?? "unknown")
-                        let objective = (entry["objective"] as? String ?? "Specialist work").replacingOccurrences(of: "\n", with: " ")
-                        let shortObjective = String(objective.prefix(72)) + (objective.count > 72 ? "…" : "")
-                        return "\(status) · \(shortObjective)"
-                    }
-                    let picker = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 420, height: 26))
-                    picker.addItems(withTitles: entries.map(titleFor))
-                    picker.setAccessibilityLabel("Specialist work to review")
-                    let alert = NSAlert()
-                    alert.messageText = "Specialist Work"
-                    alert.informativeText = "Choose a saved formation to review its progress and available next step."
-                    alert.accessoryView = picker
-                    alert.addButton(withTitle: "Review Selection…")
-                    alert.addButton(withTitle: "Close")
-                    guard alert.runModal() == .alertFirstButtonReturn else { return }
-                    let entry = entries[min(max(picker.indexOfSelectedItem, 0), entries.count - 1)]
-                    self.reviewFormationHistoryEntry(entry)
-                case .failure(let error): self.showNotice(error.localizedDescription)
-                }
-            }
-        }
-    }
-
-    private func reviewFormationHistoryEntry(_ entry: [String: Any]) {
-        let model = FormationHistoryReviewModel(entry: entry)
-        let detail = NSAlert()
-        detail.messageText = "Specialist Work · \(formationStatusLabel(model.status))"
-        detail.informativeText = formationRoadmapText(entry)
-        for title in model.buttonTitles {
-            detail.addButton(withTitle: title)
-        }
-        let response = detail.runModal()
-        guard let formationId = model.formationId else { return }
-        let hasPrimaryAction = model.canRecover || model.canResume
-        if response == .alertFirstButtonReturn {
-            if model.canRecover {
-                beginFormationReconciliation(formationId: formationId, assignments: model.assignments)
-            } else if model.canResume {
-                resumeFormation(formationId, automatic: model.automatic)
-            } else if model.canInspect {
-                chooseInterruptedFormationStream(formationId: formationId, assignments: model.assignments)
-            }
-        } else if response == .alertSecondButtonReturn, hasPrimaryAction, model.canInspect {
-            chooseInterruptedFormationStream(formationId: formationId, assignments: model.assignments)
-        }
-    }
-    @objc func showLatestSpecialistStream() {
-        client.request("agentSwarm.formStatus", params: [:]) { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                guard case .success(let status) = result else { self.showNotice("Could not load specialist formation status."); return }
-                let currentStatus = status["status"] as? String ?? "none"
-                let formationId = status["id"] as? String
-                let inspectable = Self.inspectableSpecialists(from: status)
-                guard currentStatus != "none", currentStatus != "missing", let formationId, !inspectable.isEmpty else {
-                    self.showNotice("The latest formation has no saved specialist stream to inspect.")
-                    return
-                }
-                if inspectable.count > 1 {
-                    self.chooseInterruptedFormationStream(formationId: formationId, assignments: inspectable)
-                    return
-                }
-                guard let specialist = inspectable.last, let specialistId = specialist["id"] as? String else {
-                    self.showNotice("The latest formation has no saved specialist stream to inspect.")
-                    return
-                }
-                self.client.request("agentSwarm.formStream", params: ["formationId": formationId, "specialistId": specialistId]) { streamResult in
-                    DispatchQueue.main.async {
-                        switch streamResult {
-                        case .success(let stream):
-                            let excerpt = stream["excerpt"] as? String ?? "No transcript excerpt was saved."
-                            let count = stream["messageCount"] as? Int ?? 0
-                            let alert = NSAlert(); alert.messageText = "Specialist Stream · \(specialist["role"] as? String ?? specialistId)"
-                            alert.informativeText = "Showing the latest excerpt from \(count) saved messages.\n\n\(excerpt)"
-                            alert.addButton(withTitle: "OK"); alert.runModal()
-                        case .failure(let error): self.showNotice(error.localizedDescription)
-                        }
-                    }
-                }
-            }
-        }
-    }
-    private func formationRoadmapText(_ value: Any) -> String {
-        guard let record = value as? [String: Any] else { return String(describing: value).prefix(6000).description }
-        var lines: [String] = []
-        let status = record["status"] as? String ?? "unknown"
-        lines.append("Status: \(formationStatusLabel(status))")
-        if let objective = record["objective"] as? String, !objective.isEmpty { lines.append("Objective: \(objective)") }
-        if let reason = record["reason"] as? String, !reason.isEmpty { lines.append("Recovery: \(reason)") }
-        if let error = record["error"] as? String, !error.isEmpty { lines.append("Error: \(error)") }
-        if let roadmap = record["roadmap"] as? [String: Any] {
-            if let sync = roadmap["synchronizationStatus"] as? String { lines.append("Synchronization: \(sync.replacingOccurrences(of: "_", with: " "))") }
-            if let completed = roadmap["completedWork"] as? [String], !completed.isEmpty { lines.append("Completed: \(completed.joined(separator: ", "))") }
-            if let outstanding = roadmap["outstandingWork"] as? [String], !outstanding.isEmpty { lines.append("Outstanding: \(outstanding.joined(separator: ", "))") }
-            if let assignments = roadmap["assignments"] as? [[String: Any]], !assignments.isEmpty {
-                lines.append("\nSpecialists")
-                for assignment in assignments {
-                    let id = assignment["id"] as? String ?? "specialist"
-                    let role = assignment["role"] as? String ?? id
-                    let state = assignment["status"] as? String ?? "pending"
-                    let dependencies = assignment["dependsOn"] as? [String] ?? []
-                    lines.append("• \(role) · \(formationStatusLabel(state))\(dependencies.isEmpty ? "" : " · after \(dependencies.joined(separator: ", "))")")
-                    if let replacement = assignment["replacementRole"] as? String { lines.append("  Rerouted to: \(replacement) · \(assignment["attempts"] as? Int ?? 2) attempts") }
-                    if let session = assignment["childSessionId"] as? String { lines.append("  Stream: \(session)") }
-                    if let reason = assignment["reason"] as? String, !reason.isEmpty { lines.append("  Blocker: \(reason)") }
-                    if let summary = assignment["summary"] as? String, !summary.isEmpty { lines.append("  Report: \(summary)") }
-                }
-            }
-            if let blockers = roadmap["blockers"] as? [String], !blockers.isEmpty { lines.append("\nBlockers\n" + blockers.map { "• \($0)" }.joined(separator: "\n")) }
-            if let actions = roadmap["nextActions"] as? [String], !actions.isEmpty { lines.append("\nNext actions\n" + actions.map { "• \($0)" }.joined(separator: "\n")) }
-        } else if let result = record["result"] as? [String: Any], let reports = result["reports"] as? [[String: Any]], !reports.isEmpty {
-            lines.append("\nSpecialist reports")
-            for report in reports {
-                let role = report["role"] as? String ?? report["id"] as? String ?? "Specialist"
-                let state = report["status"] as? String ?? "unknown"
-                lines.append("• \(role) · \(state.capitalized)")
-                if let reason = report["reason"] as? String { lines.append("  Blocker: \(reason)") }
-                if let response = report["response"] as? String, !response.isEmpty { lines.append("  Report: \(response)") }
-            }
-        }
-        if status == "needs_reconciliation" { lines.append("\nInspect child streams and workspace effects before retrying. Uncertain operations are not replayed automatically.") }
-        return lines.joined(separator: "\n").prefix(6000).description
-    }
-
-    private func formationStatusLabel(_ status: String) -> String {
-        switch status {
-        case "completed": return "Finished"
-        case "deferred": return "Paused"
-        case "partial_failure": return "Finished with issues"
-        case "needs_reconciliation": return "Needs review"
-        case "reconciling": return "Recovery in progress"
-        case "running": return "In progress"
-        case "pending": return "Waiting"
-        case "failed": return "Needs attention"
-        case "skipped": return "Skipped"
-        default: return status.replacingOccurrences(of: "_", with: " ").capitalized
-        }
-    }
-    @objc func showAgentSwarmSettings() {
-        client.request("agentSwarm.settings", params: ["action": "get"]) { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                guard case .success(let values) = result else { self.showNotice("Could not load Agent Swarm settings."); return }
-                let alert = NSAlert()
-                alert.messageText = "Agent Swarm Settings"
-                alert.informativeText = "Turning on the master switch enables all features without changing your individual preferences. Turn the master switch off to customize individual features right here. Choose whether a pause waits for the current turn or stops after the current tool batch. Automatic review pausing requires both Critical completion review and Hierarchical defer. These settings are shared by CLI and the native app on this machine."
-                alert.addButton(withTitle: "Save")
-                alert.addButton(withTitle: "Cancel")
-                final class MasterToggleController: NSObject {
-                    let update: () -> Void
-                    init(update: @escaping () -> Void) { self.update = update }
-                    @objc func masterDidToggle(_ sender: NSButton) { update() }
-                }
-                let master = NSButton(checkboxWithTitle: "Enable Agent Swarm", target: nil, action: nil)
-                let review = NSButton(checkboxWithTitle: "Critical completion review", target: nil, action: nil)
-                let autoDeferReview = NSButton(checkboxWithTitle: "Pause specialist work during review", target: nil, action: nil)
-                let initialReviewLimit = NSPopUpButton(); initialReviewLimit.addItems(withTitles: (1...5).map(String.init)); initialReviewLimit.selectItem(withTitle: String(values["maxInitialReviews"] as? Int ?? 1))
-                let correctivePassLimit = NSPopUpButton(); correctivePassLimit.addItems(withTitles: (1...5).map(String.init)); correctivePassLimit.selectItem(withTitle: String(values["maxCorrectivePasses"] as? Int ?? 1))
-                let deferToggle = NSButton(checkboxWithTitle: "Hierarchical defer and resume", target: nil, action: nil)
-                let legion = NSButton(checkboxWithTitle: "Legion specialist delegation", target: nil, action: nil)
-                let specialistCap = NSPopUpButton()
-                specialistCap.addItems(withTitles: (1...8).map(String.init))
-                specialistCap.selectItem(withTitle: String(values["maxSpecialists"] as? Int ?? 4))
-                let boundary = NSPopUpButton()
-                let boundaryOptions = [("safe_boundary", "Finish the current tool batch"), ("before_turn", "Finish the current turn")]
-                boundary.addItems(withTitles: boundaryOptions.map { $0.1 })
-                boundary.selectItem(withTitle: boundaryOptions.first(where: { $0.0 == (values["deferBoundary"] as? String ?? "safe_boundary") })?.1 ?? boundaryOptions[0].1)
-                let strategy = NSPopUpButton()
-                let strategyOptions = [
-                    ("adaptive", "Adaptive (recommended)"),
-                    ("tactical_strike", "Tactical strike"),
-                    ("balanced_squad", "Balanced squad"),
-                    ("full_legion", "Full Legion"),
-                    ("verification_heavy", "Verification heavy"),
-                ]
-                strategy.addItems(withTitles: strategyOptions.map { $0.1 })
-                strategy.selectItem(withTitle: strategyOptions.first(where: { $0.0 == (values["strategy"] as? String ?? "adaptive") })?.1 ?? strategyOptions[0].1)
-                let masterEnabled = values["enabled"] as? Bool == true
-                let environmentOverrides = Set(values["environmentOverrides"] as? [String] ?? [])
-                if !environmentOverrides.isEmpty {
-                    let settingNames = [
-                        "enabled": "Agent Swarm",
-                        "criticalCompletionReview": "Critical completion review",
-                        "maxInitialReviews": "Initial review limit",
-                        "maxCorrectivePasses": "Corrective review limit",
-                        "autoDeferOnCompletionReview": "Pause during completion review",
-                        "hierarchicalDefer": "Defer and resume",
-                        "legion": "Specialist delegation",
-                        "deferBoundary": "Pause timing",
-                        "strategy": "Delegation strategy",
-                        "maxSpecialists": "Maximum specialists",
-                    ]
-                    let lockedNames = environmentOverrides.compactMap { settingNames[$0] }.sorted().joined(separator: ", ")
-                    alert.informativeText += "\n\nManaged by environment settings and read-only here: \(lockedNames)."
-                }
-                let savedReviewState: NSControl.StateValue = values["criticalCompletionReview"] as? Bool == true ? .on : .off
-                let savedDeferState: NSControl.StateValue = values["hierarchicalDefer"] as? Bool == true ? .on : .off
-                let savedLegionState: NSControl.StateValue = values["legion"] as? Bool == true ? .on : .off
-                master.state = masterEnabled ? .on : .off
-                review.state = !environmentOverrides.contains("criticalCompletionReview") && masterEnabled ? .on : savedReviewState
-                autoDeferReview.state = values["autoDeferOnCompletionReview"] as? Bool != false ? .on : .off
-                deferToggle.state = !environmentOverrides.contains("hierarchicalDefer") && masterEnabled ? .on : savedDeferState
-                legion.state = !environmentOverrides.contains("legion") && masterEnabled ? .on : savedLegionState
-                let capLabel = NSTextField(labelWithString: "Maximum specialists")
-                let capRow = NSStackView(views: [capLabel, specialistCap]); capRow.orientation = .horizontal; capRow.alignment = .centerY; capRow.spacing = 10
-                let initialReviewRow = NSStackView(views: [NSTextField(labelWithString: "Initial reviews per completion"), initialReviewLimit]); initialReviewRow.orientation = .horizontal; initialReviewRow.alignment = .centerY; initialReviewRow.spacing = 10
-                let correctivePassRow = NSStackView(views: [NSTextField(labelWithString: "Corrective verification passes"), correctivePassLimit]); correctivePassRow.orientation = .horizontal; correctivePassRow.alignment = .centerY; correctivePassRow.spacing = 10
-                let boundaryLabel = NSTextField(labelWithString: "Pause after")
-                let boundaryRow = NSStackView(views: [boundaryLabel, boundary]); boundaryRow.orientation = .horizontal; boundaryRow.alignment = .centerY; boundaryRow.spacing = 10
-                let strategyLabel = NSTextField(labelWithString: "Delegation strategy")
-                let strategyRow = NSStackView(views: [strategyLabel, strategy]); strategyRow.orientation = .horizontal; strategyRow.alignment = .centerY; strategyRow.spacing = 10
-                let stack = NSStackView(views: [master, review, initialReviewRow, correctivePassRow, autoDeferReview, deferToggle, boundaryRow, legion, strategyRow, capRow])
-                stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 8
-                for (control, label) in [(boundary, "Choose when a defer request pauses active work"), (strategy, "Choose how specialist assignments are selected"), (specialistCap, "Limit the number of specialists in a formation"), (initialReviewLimit, "Set the maximum initial reviews for one completion"), (correctivePassLimit, "Set the maximum corrective verification reviews")] {
-                    control.setAccessibilityLabel(label)
-                }
-                var previousMasterState = master.state == .on
-                let syncToggleEnabledStates = {
-                    let isMasterOn = master.state == .on
-                    if isMasterOn && !previousMasterState {
-                        if !environmentOverrides.contains("criticalCompletionReview") { review.state = .on }
-                        if !environmentOverrides.contains("hierarchicalDefer") { deferToggle.state = .on }
-                        if !environmentOverrides.contains("legion") { legion.state = .on }
-                    } else if !isMasterOn && previousMasterState && !masterEnabled {
-                        if !environmentOverrides.contains("criticalCompletionReview") { review.state = savedReviewState }
-                        if !environmentOverrides.contains("hierarchicalDefer") { deferToggle.state = savedDeferState }
-                        if !environmentOverrides.contains("legion") { legion.state = savedLegionState }
-                    }
-                    previousMasterState = isMasterOn
-                    review.isEnabled = !environmentOverrides.contains("criticalCompletionReview") && !isMasterOn
-                    deferToggle.isEnabled = !environmentOverrides.contains("hierarchicalDefer") && !isMasterOn
-                    legion.isEnabled = !environmentOverrides.contains("legion") && !isMasterOn
-                }
-                let toggleController = MasterToggleController(update: syncToggleEnabledStates)
-                master.target = toggleController
-                master.action = #selector(MasterToggleController.masterDidToggle(_:))
-                master.isEnabled = !environmentOverrides.contains("enabled")
-                syncToggleEnabledStates()
-                initialReviewLimit.isEnabled = !environmentOverrides.contains("maxInitialReviews")
-                correctivePassLimit.isEnabled = !environmentOverrides.contains("maxCorrectivePasses")
-                autoDeferReview.isEnabled = !environmentOverrides.contains("autoDeferOnCompletionReview")
-                boundary.isEnabled = !environmentOverrides.contains("deferBoundary")
-                strategy.isEnabled = !environmentOverrides.contains("strategy")
-                specialistCap.isEnabled = !environmentOverrides.contains("maxSpecialists")
-                alert.accessoryView = stack
-                let modalResult = withExtendedLifetime(toggleController) { alert.runModal() }
-                guard modalResult == .alertFirstButtonReturn else { return }
-                let selectedBoundary = boundaryOptions.first(where: { $0.1 == boundary.titleOfSelectedItem })?.0 ?? "safe_boundary"
-                let selectedStrategy = strategyOptions.first(where: { $0.1 == strategy.titleOfSelectedItem })?.0 ?? "adaptive"
-                let isSavingWithMasterOn = master.state == .on
-                let persistedReview = isSavingWithMasterOn ? (savedReviewState == .on) : (review.state == .on)
-                let persistedDefer = isSavingWithMasterOn ? (savedDeferState == .on) : (deferToggle.state == .on)
-                let persistedLegion = isSavingWithMasterOn ? (savedLegionState == .on) : (legion.state == .on)
-                self.client.request("agentSwarm.settings", params: ["action": "set", "enabled": isSavingWithMasterOn, "criticalCompletionReview": persistedReview, "maxInitialReviews": Int(initialReviewLimit.titleOfSelectedItem ?? "1") ?? 1, "maxCorrectivePasses": Int(correctivePassLimit.titleOfSelectedItem ?? "1") ?? 1, "autoDeferOnCompletionReview": autoDeferReview.state == .on, "hierarchicalDefer": persistedDefer, "legion": persistedLegion, "deferBoundary": selectedBoundary, "strategy": selectedStrategy, "maxSpecialists": Int(specialistCap.titleOfSelectedItem ?? "4") ?? 4]) { [weak self] saved in
-                    DispatchQueue.main.async {
-                        guard let self else { return }
-                        if case .success(let settings) = saved {
-                            let master = settings["enabled"] as? Bool == true
-                            self.criticalReviewEnabled = master || settings["criticalCompletionReview"] as? Bool == true
-                            self.legionEnabled = master || settings["legion"] as? Bool == true
-                            self.swarmDeferEnabled = master || settings["hierarchicalDefer"] as? Bool == true
-                            self.maxSpecialists = settings["maxSpecialists"] as? Int ?? 4
-                            if !self.swarmDeferEnabled { self.swarmDeferred = false }
-                            self.updateStatus()
-                            self.showNotice("Agent Swarm settings saved for this machine. CLI and the native app will use them.")
-                        }
-                        else { self.showNotice("Could not save Agent Swarm settings.") }
-                    }
-                }
-            }
-        }
-    }
-    @objc func showActions() {
-        guard let window, window.attachedSheet == nil else { return }
-        palette?.cancelOperation(nil)
-        let actions = buildActions()
-        palette = ActionPalette(actions: actions); palette?.present(for: window)
-    }
-    @objc func showQuickOpen() {
-        guard canOpenFile, let window else { return }
-        if let quickOpen, quickOpen.window?.isVisible == true { quickOpen.window?.makeKeyAndOrderFront(nil); return }
-        let picker = QuickOpenWindow(folder: folder, search: { [weak self] query, refresh, completion in
-            guard let self else { return }
-            self.client.request("files.search", params: ["query": query, "refresh": refresh], completion: completion)
-        }, actions: buildActions(), symbols: { [weak self] in
-            guard let self else { return [] }
-            let text = self.inspection.string as NSString
-            return self.declarations.enumerated().map { index, decl in
-                let safeLocation = min(decl.range.location, text.length)
-                let prefix = text.substring(to: safeLocation)
-                let line = prefix.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
-                let parts = decl.title.split(separator: " ").map(String.init)
-                let kind = parts.dropLast().joined(separator: " ").isEmpty ? "Declaration" : parts.dropLast().joined(separator: " ")
-                let name = parts.last ?? decl.title
-                return (name: name, kind: kind, line: line, index: index)
-            }
-        }, checkpoints: { [weak self] in
-            guard let self else { return [] }
-            var seen = Set<String>()
-            var result = [OmnibarCheckpointItem]()
-            for run in self.runs.reversed() {
-                let text = String((run["text"] as? String ?? "Instruction").replacingOccurrences(of: "\n", with: " ").prefix(60))
-                if let after = run["checkpointAfter"] as? String, !after.isEmpty, seen.insert(after).inserted {
-                    result.append(OmnibarCheckpointItem(id: after, title: "After: \(text)", detail: "Checkpoint \(String(after.prefix(8)))"))
-                }
-                if let before = run["checkpointBefore"] as? String, !before.isEmpty, seen.insert(before).inserted {
-                    result.append(OmnibarCheckpointItem(id: before, title: "Before: \(text)", detail: "Checkpoint \(String(before.prefix(8)))"))
-                }
-            }
-            return result
-        }, open: { [weak self] path in self?.readFile(path) })
-        picker.onSelectSymbol = { [weak self] index in
-            guard let self, self.declarations.indices.contains(index) else { return }
-            self.contextTabs.selectedSegment = 2; self.showingInspector = true; self.surfaces.selectedSegment = 1; self.adapt()
-            let range = self.declarations[index].range
-            self.inspection.setSelectedRange(range); self.inspection.scrollRangeToVisible(range)
-            self.window?.makeFirstResponder(self.inspection)
-        }
-        picker.onSelectCheckpoint = { [weak self] checkpoint in self?.openCheckpoints(selected: checkpoint) }
-        quickOpen = picker
-        quickOpen?.present(for: window, mode: .files)
-    }
-    var canShowMemory: Bool { client.isReady && client.capabilities.contains("conversation-memory-v1") && !switchingConversation && !closing }
-    var canShowContext: Bool { client.isReady && client.capabilities.contains("conversation-context-v1") && !switchingConversation && !closing }
-    var canCheckCode: Bool {
-        guard client.isReady, client.capabilities.contains("spider-check-v1"), !switchingConversation, !closing, let file = inspectedFile else { return false }
-        return ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"].contains((file as NSString).pathExtension.lowercased())
-    }
-    @objc func showCodeCheck() { if canCheckCode, let file = inspectedFile { inspect(.spider(file)) } }
-    @objc private func draftCodeReview() {
-        guard client.isReady, !switchingConversation, !closing, let details = spiderDetails, case .spider = inspectionHistory.current else { return }
-        guard let draft = details.appendingReview(to: composer.string, limit: client.instructionLimit) else { showNotice("Your draft is too long to add this review. Shorten it or copy the findings first."); return }
-        composer.string = draft; saveDraft(); focusComposer()
-        showNotice("Review request added to your draft. Edit it, then choose Send when ready.")
-    }
-    @objc func showContext() { if canShowContext, let conversation = currentConversation { inspect(.context(conversation)) } }
-    var canShowSavedState: Bool { client.isReady && client.capabilities.contains("runtime-state-v1") && currentConversation != nil && !switchingConversation && !closing }
-    @objc func showSavedState() { if canShowSavedState, let conversation = currentConversation { inspect(.savedState(conversation)) } }
-    var isMemoryKeyWindow: Bool { memoryWindow?.isKeyWindow == true }
-    var canFindMemory: Bool { memoryWindow?.canFocusSearch == true }
-    func findMemory() { memoryWindow?.focusSearch() }
-    @objc func showMemory() {
-        guard canShowMemory, let conversation = currentConversation, let window else { return }
-        if let memoryWindow, memoryWindow.window?.isVisible == true {
-            if memoryWindow.state.conversation == conversation || memoryWindow.state.dirty || memoryWindow.state.uncertain || memoryWindow.state.saving {
-                memoryWindow.present(for: window); return
-            }
-            memoryWindow.dismiss()
-        }
-        memoryWindow = ConversationMemoryWindow(folder: folder, conversation: conversation, title: chatTitle.stringValue,
-            request: { [weak self] method, params, completion in
-                guard let self else { completion(.failure(BridgeError.message("Workspace closed."))); return }
-                self.client.request(method, params: params) { [weak self] result in
-                    if case .failure(let error) = result, error.localizedDescription.contains("MEMORY_SAVE_UNCERTAIN") { self?.client.closeInput() }
-                    completion(result)
-                }
-            }, available: { [weak self] in self?.canShowMemory == true && self?.currentConversation == conversation },
-            writable: { [weak self] in self?.canShowMemory == true && self?.currentConversation == conversation && self?.canRequestRecovery == true })
-        memoryWindow?.present(for: window)
-    }
-    @objc func focusComposer() {
-        palette?.cancelOperation(nil)
-        quickOpen?.dismiss(restoreFocus: false)
-        modelPicker?.dismiss(restoreFocus: false)
-        checkpointWindow?.close()
-        surfaces.selectedSegment = 0; adapt()
-        window?.makeKeyAndOrderFront(nil); window?.makeFirstResponder(composer)
-    }
-    func textDidChange(_ notification: Notification) {
-        draftTimer?.invalidate()
-        draftTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { [weak self] _ in self?.saveDraft() }
-        updateStatus()
-    }
-    private func restoreDraft() {
-        do {
-            guard let draft = try draftStore.load() else { return }
-            composer.string = draft.text; savedDraftText = draft.text
-            currentConversation = draft.conversation; draftByConversation = draft.conversations ?? [:]
-            recoverySubmission = draft.submission; savedSubmission = draft.submission
-            attachmentBar.clear()
-            if let attachments = draft.attachments {
-                for path in attachments {
-                    attachmentBar.add(url: URL(fileURLWithPath: path))
-                }
-            }
-            savedDraftAttachments = attachmentBar.urls.map(\.path)
-            if let submission = draft.submission {
-                uncertainSubmission = submission
-                showNotice("Draft restored. Checking whether LUMI recorded the previous instruction before you can send again.")
-            } else { showNotice("Draft restored. Review it when you’re ready to send.") }
-        } catch { showNotice("Could not restore the saved draft: \(error.localizedDescription) The saved file is retained at \(draftStore.file.path).") }
-    }
-    @discardableResult private func saveDraft() -> Bool {
-        draftTimer?.invalidate(); draftTimer = nil
-        let currentAttachments = attachmentBar.urls.map(\.path)
-        guard composer.string != savedDraftText || recoverySubmission != savedSubmission || currentAttachments != savedDraftAttachments || draftSaveFailed else { return true }
-        do {
-            if let currentConversation { draftByConversation[currentConversation] = composer.string }
-            try draftStore.save(text: composer.string, submission: recoverySubmission, conversation: currentConversation, conversations: draftByConversation, attachments: currentAttachments)
-            savedDraftText = composer.string; savedDraftAttachments = currentAttachments; savedSubmission = recoverySubmission; draftSaveFailed = false
-            updateStatus(); return true
-        } catch {
-            draftSaveFailed = true
-            showNotice("Draft could not be saved. \(error.localizedDescription) Keep this window open and copy your text before quitting.")
-            updateStatus(); return false
-        }
-    }
-    /// Native update restarts wait for every workspace and its draft checkpoint.
-    func prepareForUpdateRestart() -> Bool {
-        guard !hasWork, !closing, !switchingConversation, pendingRequest == nil,
-              uncertainSubmission == nil, sideQuestionPending == nil, !projectRun.running, !composer.hasMarkedText(),
-              window?.attachedSheet == nil else { return false }
-        return prepareToClose()
-    }
-    /// Flush every workspace before Quit starts stopping workers.
-    @discardableResult func prepareToClose() -> Bool {
-        if let memoryWindow, memoryWindow.state.dirty || memoryWindow.state.uncertain || memoryWindow.state.saving {
-            showNotice("Save or discard your memory draft before closing this workspace. You can copy it first.")
-            if let window { memoryWindow.present(for: window) }; return false
-        }
-        return saveDraft()
-    }
-    @objc func submit() {
-        guard !composer.hasMarkedText() else { return }
-        let text = composer.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        if text == "/compact" { compactContext(); return }
-        if let question = Self.sideQuestion(from: text) { askSideQuestion(question, original: text); return }
-        submitInstruction(text)
-    }
-    private static func sideQuestion(from text: String) -> String? {
-        guard text == "/btw" || (text.hasPrefix("/btw") && text.dropFirst(4).first?.isWhitespace == true) else { return nil }
-        return text.dropFirst(4).trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-    private func askSideQuestion(_ question: String, original: String) {
-        guard !question.isEmpty else { showNotice("Add a question after /btw. Your draft is preserved."); return }
-        guard client.isReady, client.capabilities.contains("side-query-v1"), let conversation = currentConversation, !switchingConversation, !closing else {
-            showNotice("Isolated side questions are unavailable. Your draft is preserved."); return
-        }
-        guard sideQuestionPending == nil else { showNotice("Wait for the current side question to finish. Your draft is preserved."); return }
-        guard attachmentBar.urls.isEmpty else { showNotice("Remove attachments before asking a side question. Your draft is preserved."); return }
-        guard question.utf16.count <= client.instructionLimit else { showNotice("The side question is too long. Your draft is preserved."); return }
-        let id = UUID().uuidString, source = client
-        sideQuestionPending = id
-        sideQuestions.append(SideQuestion(id: id, conversation: conversation, question: question))
-        sideQuestions = Array(sideQuestions.suffix(12))
-        rebuildRows()
-        var starting = true
-        var immediateFailure: Error?
-        source.request("side.query", params: ["conversation": conversation, "question": question], id: id) { [weak self, weak source] result in
-            guard let self, let source, self.client === source else { return }
-            if starting, case .failure(let error) = result { immediateFailure = error; return }
-            self.sideQuestionPending = nil
-            guard let index = self.sideQuestions.firstIndex(where: { $0.id == id }) else { self.updateStatus(); return }
-            switch result {
-            case .success(let data):
-                if data["conversation"] as? String == conversation {
-                    self.sideQuestions[index].answer = data["response"] as? String
-                    self.sideQuestions[index].contextLimited = data["contextLimited"] as? Bool == true
-                } else { self.sideQuestions[index].answer = "The answer belonged to a different conversation and was not shown."; self.sideQuestions[index].failed = true }
-            case .failure(let error): self.sideQuestions[index].answer = error.localizedDescription; self.sideQuestions[index].failed = true
-            }
-            self.rebuildRows()
-        }
-        starting = false
-        if let immediateFailure {
-            sideQuestionPending = nil; sideQuestions.removeAll { $0.id == id }; rebuildRows(); showNotice(immediateFailure.localizedDescription); return
-        }
-        if composer.string.trimmingCharacters(in: .whitespacesAndNewlines) == original { composer.string = "" }
-        saveDraft(); updateStatus()
-    }
-    private func compactContext() {
-        guard client.capabilities.contains("context-compact-v1"), let conversation = currentConversation else {
-            showNotice("Context compaction is unavailable in this runtime. Your draft is preserved."); return
-        }
-        guard canRequestRecovery, pendingRequest == nil else {
-            showNotice("Finish or stop current work before compacting context. Your draft is preserved."); return
-        }
-        guard attachmentBar.urls.isEmpty else { showNotice("Remove attachments before compacting context. Your draft is preserved."); return }
-        let id = UUID().uuidString
-        pendingRequest = id; updateStatus()
-        client.request("context.compact", params: ["conversation": conversation], id: id) { [weak self] result in
-            guard let self else { return }
-            self.pendingRequest = nil
-            switch result {
-            case .success(let report):
-                if self.currentConversation == conversation && self.composer.string.trimmingCharacters(in: .whitespacesAndNewlines) == "/compact" { self.composer.string = "" }
-                let before = report["before"] as? Int ?? 0, after = report["after"] as? Int ?? 0
-                self.showNotice(report["compacted"] as? Bool == true ? "Context compacted: \(before) to \(after) active messages. Recorded conversation remains available." : "Context is already minimal. Recorded conversation remains available.")
-            case .failure(let error): self.showNotice(error.localizedDescription)
-            }
-            self.saveDraft(); self.updateStatus()
-        }
-    }
-    private var canRequestRecovery: Bool { client.isReady && !hasWork && !switchingConversation && uncertainSubmission == nil && !closing && !cancelRequested }
-    private var canContinueWork: Bool { canRequestRecovery && client.capabilities.contains("task-continuation-v1") }
-    private func continueWork(_ continuation: WorkspaceContinuation) {
-        guard canContinueWork, WorkspaceContinuation.latest(in: runs) == continuation else { return }
-        submitInstruction(continuation.instruction, continuation: continuation)
-    }
-    private func repairProject(_ launch: String) {
-        guard canRequestRecovery, client.capabilities.contains("project-repair-v1"), UUID(uuidString: launch) != nil else { return }
-        submitInstruction("Investigate and fix why the app stopped. Use its recorded failure, preserve existing work, and run the project checks. Tell me what is ready and whether app startup has been confirmed.", repairLaunch: launch)
-    }
-    private func showProjectRepair(_ id: String) {
-        guard client.isReady, !switchingConversation, !closing else { return }
-        if runs.contains(where: { $0["id"] as? String == id }) { showWalkthrough(); walkthrough.selectRecordedRun(id); return }
-        let conversation = currentConversation
-        client.request("history.read", params: ["run": id]) { [weak self] result in
-            guard let self, self.currentConversation == conversation, !self.switchingConversation else { return }
-            switch result {
-            case .success(let data):
-                if let run = data["run"] as? [String: Any] { self.mergeRun(run); self.rebuildRows(); self.showWalkthrough(); self.walkthrough.selectRecordedRun(id) }
-            case .failure(let error): self.showNotice(error.localizedDescription)
-            }
-        }
-    }
-    private func submitInstruction(_ text: String, continuation: WorkspaceContinuation? = nil, repairLaunch: String? = nil) {
-        guard !reasoningPicker.pending else { showNotice("Wait for the reasoning setting to finish saving. Your draft is preserved."); return }
-        guard !text.isEmpty, pendingRequest == nil, !switchingConversation else { return }
-        guard text.utf16.count <= client.instructionLimit else { showNotice("Keep this instruction under \(client.instructionLimit.formatted()) characters; your draft is preserved."); return }
-        guard client.isReady, uncertainSubmission == nil, !closing else { showNotice("Reconnect to check the last confirmed state before sending. Your draft is preserved."); return }
-        guard !cancelRequested else { showNotice("LUMI is still cancelling. Wait for its confirmed stopping boundary."); return }
-        guard runs.filter({ $0["state"] as? String == "queued" }).count < client.queueLimit else { showNotice("The queue is full. Your draft is preserved until a slot opens. Review waiting instructions in Up Next."); return }
-        let repairID = repairLaunch.map { launch in "repair-" + SHA256.hash(data: Data("\(currentConversation ?? ""):\(launch)".utf8)).map { String(format: "%02x", $0) }.joined() }
-        let id = repairID ?? continuation.map { "continue-\($0.run)-\($0.revision)" } ?? UUID().uuidString
-        let submission = WorkspaceDraft.Submission(id: id, text: text, preservesDraft: continuation != nil || repairLaunch != nil)
-        recoverySubmission = submission
-        guard saveDraft() else { recoverySubmission = nil; return }
-        pendingRequest = id; updateStatus()
-        var parameters: [String: Any] = ["text": text, "attachments": attachmentBar.urls.map(\.path)]
-        if client.capabilities.contains("conversations"), let currentConversation { parameters["conversation"] = currentConversation }
-        if let continuation { parameters["continueFrom"] = ["run": continuation.run, "revision": continuation.revision] }
-        if let repairLaunch { parameters["repairProject"] = ["launch": repairLaunch] }
-        client.request("task.submit", params: parameters, id: id) { [weak self] result in
-            guard let self else { return }; self.pendingRequest = nil
-            switch result {
-            case .success(let data):
-                self.recoverySubmission = nil
-                if let run = data["run"] as? [String: Any] { self.mergeRun(run) }
-                if self.cancelRequested, !self.client.capabilities.contains("workspace-stop"), let run = data["run"] as? [String: Any], let runID = run["id"] as? String {
-                    self.client.request("task.cancel", params: ["run": runID]) { [weak self] result in
-                        if case .failure(let error) = result { self?.showNotice(error.localizedDescription) }
-                    }
-                }
-                if submission.preservesDraft != true, self.composer.string.trimmingCharacters(in: .whitespacesAndNewlines) == text {
-                    self.composer.string = ""
-                    self.attachmentBar.clear()
-                }
-                self.rebuildRows()
-                self.walkthrough.followCurrentInstruction()
-                if repairLaunch != nil, let run = data["run"] as? [String: Any], let id = run["id"] as? String { self.showProjectRepair(id) }
-            case .failure(let error):
-                if (error as? RuntimeFailure)?.acceptanceUnknown == true {
-                    self.uncertainSubmission = submission
-                    self.showNotice("Acceptance is unknown. Reconnect to check whether LUMI recorded this instruction. Your draft is preserved.")
-                } else { self.recoverySubmission = nil; self.showNotice(error.localizedDescription) }
-            }
-            self.saveDraft()
-            self.updateStatus()
-        }
-    }
-    private func reconcileSubmission() {
-        guard client.isReady, !closing, !checkingSubmission, let uncertain = uncertainSubmission else { return }
-        checkingSubmission = true; updateStatus()
-        client.request("task.lookup", params: ["request": uncertain.id]) { [weak self] result in
-            guard let self, self.uncertainSubmission?.id == uncertain.id else { return }
-            self.checkingSubmission = false
-            switch result {
-            case .success(let data):
-                self.uncertainSubmission = nil
-                self.recoverySubmission = nil
-                if data["found"] as? Bool == true, let run = data["run"] as? [String: Any] {
-                    self.mergeRun(run)
-                    if uncertain.preservesDraft != true, self.composer.string.trimmingCharacters(in: .whitespacesAndNewlines) == uncertain.text {
-                        self.composer.string = ""
-                        self.attachmentBar.clear()
-                    }
-                    self.showNotice("LUMI recorded the instruction. Its recovered state is shown below; it was not resubmitted.")
-                    self.rebuildRows()
-                    self.walkthrough.followCurrentInstruction()
-                } else { self.showNotice("LUMI has no acceptance record for that instruction. Review your draft and send it when ready.") }
-                self.saveDraft()
-            case .failure(let error): self.showNotice(self.client.isReady ? "Could not confirm the instruction yet. Choose Check Status to retry. Your draft is preserved and nothing will be resubmitted." : error.localizedDescription)
-            }
-            self.updateStatus()
-        }
-    }
-    @objc func reconnect() {
-        if client.isReady, uncertainSubmission != nil { reconcileSubmission(); return }
-        guard client.process?.isRunning != true, !closing else { return }
-        client = RuntimeClient(); podContextID = UUID(); decidingApproval = nil; approvalFailure = nil
-        stopped = false; sequence = 0; cancelRequested = false; stopAcknowledged = true; cancellationToken = nil; forceAvailable = false; recovering = true
-        configureClient(); reconnectButton.isHidden = true; client.start(folder: folder)
-    }
-    func submitProbe(_ instruction: String) { composer.string = instruction; submit() }
-    /// Development-only entry points selected by the opt-in integration harness.
-    /// They drive the same controls and real read-only bridge as the application.
-    func navigateProbe(_ step: String) {
-        if step == "memory" { showMemory(); return }
-        if step.hasPrefix("memory:") { memoryWindow?.navigateProbe(String(step.dropFirst(7))); return }
-        if step.hasPrefix("related:") {
-            let kind = String(step.dropFirst("related:".count))
-            if let index = evidenceLinks.firstIndex(where: { $0.kind.rawValue == kind }) {
-                relatedEvidence.selectItem(at: index + 1); openRelatedEvidence()
-            }
-            return
-        }
-        if step.hasPrefix("reasoning:") { reasoningPicker.select(String(step.dropFirst("reasoning:".count))); return }
-        if step.hasPrefix("model-draft:") { modelPicker?.editProbe(String(step.dropFirst("model-draft:".count))); return }
-        if step.hasPrefix("model-search:") { modelPicker?.searchProbe(String(step.dropFirst("model-search:".count))); return }
-        if step.hasPrefix("model-select:") { modelPicker?.selectProbe(String(step.dropFirst("model-select:".count))); return }
-        if step.hasPrefix("palette-search:") { palette?.searchProbe(String(step.dropFirst("palette-search:".count))); return }
-        if step.hasPrefix("quick-open:") { showQuickOpen(); quickOpen?.searchProbe(String(step.dropFirst("quick-open:".count))); return }
-        if step.hasPrefix("walkthrough-") {
-            let action = String(step.dropFirst("walkthrough-".count))
-            if action == "queue" { submitProbe("Queued fixture instruction: explain the changes.") }
-            else if action == "deny" { deny() }
-            else if action == "reconnect" { reconnect() }
-            else { showWalkthrough(); walkthrough.navigateProbe(action) }
-            return
-        }
-        switch step {
-        case "context", "context-empty": showContext()
-        case "spider-file": showFiles(); readFile("entry.ts")
-        case "saved-state", "saved-state-empty": showSavedState()
-        case "saved-state-open": relatedEvidence.selectItem(at: 1); openRelatedEvidence()
-        case "saved-state-reload": refreshInspection()
-        case "spider": showCodeCheck()
-        case "spider-reload": refreshInspection()
-        case "spider-review": composer.string = "Keep this existing draft."; draftCodeReview()
-        case "spider-open": relatedEvidence.selectItem(at: 1); openRelatedEvidence()
-        case "context-reload": refreshInspection()
-        case "context-files": showFiles()
-        case "context-history":
-            if let index = contextLinks.firstIndex(of: .history) { relatedEvidence.selectItem(at: index + 1); openRelatedEvidence() }
-        case "context-history-back": inspectBack()
-        case "context-history-find": findInInspection()
-        case "context-history-next": loadNextPage()
-        case "context-history-previous": loadPreviousPage()
-        case "context-history-reload": refreshInspection()
-        case "context-history-empty": if let conversation = currentConversation { inspect(.contextHistory(conversation)) }
-        case "context-memory":
-            if let index = contextLinks.firstIndex(of: .memory) { relatedEvidence.selectItem(at: index + 1); openRelatedEvidence() }
-        case "context-saved-state":
-            if let index = contextLinks.firstIndex(of: .savedState) { relatedEvidence.selectItem(at: index + 1); openRelatedEvidence() }
-        case "context-close-memory": memoryWindow?.dismiss(); memoryWindow = nil
-        case "files": showFiles(); readFile("fixture.txt")
-        case "code", "compact-code": showFiles(); readFile("WorkspaceExample.swift")
-        case "walkthrough": showWalkthrough()
-        case "checkpoints": showCheckpoints()
-        case "checkpoints-compact", "checkpoints-after-restore": showCheckpoints()
-        case "checkpoint-review", "checkpoint-review-compact": checkpointWindow?.navigateProbe("review")
-        case "checkpoint-flag": checkpointWindow?.navigateProbe("flag")
-        case "checkpoint-safety": checkpointWindow?.navigateProbe("safety")
-        case "checkpoint-flagged": checkpointWindow?.navigateProbe("flagged")
-        case "checkpoint-search": checkpointWindow?.navigateProbe("search:Make my app")
-        case "checkpoint-search-empty": checkpointWindow?.navigateProbe("search:no-such-message")
-        case "checkpoint-all": checkpointWindow?.navigateProbe("search:"); checkpointWindow?.navigateProbe("all")
-        case "checkpoint-restore": checkpointWindow?.navigateProbe("restore")
-        case "checkpoint-close": checkpointWindow?.navigateProbe("close"); focusComposer()
-        case "checkpoint-link-before": if let id = runs.last?["checkpointBefore"] as? String { openCheckpoints(selected: id) }
-        case "checkpoint-link-after": if let id = runs.last?["checkpointAfter"] as? String { openCheckpoints(selected: id) }
-        case "project": showProjectRun()
-        case "project-start": projectRun.navigateProbe("start")
-        case "project-stop": projectRun.navigateProbe("stop")
-        case "project-automatic": projectRun.navigateProbe("automatic")
-        case "project-repair", "project-view-repair": projectRun.navigateProbe("repair")
-        case "project-details": projectRun.navigateProbe("details")
-        case "project-configure": projectRun.navigateProbe("configure")
-        case "project-draft": projectRun.navigateProbe("draft")
-        case "project-refresh": projectRun.navigateProbe("refresh")
-        case "project-configure-scroll": projectRun.navigateProbe("configuration-end")
-        case "project-configure-save": projectRun.navigateProbe("save")
-        case "quick-open": showQuickOpen()
-        case "quick-open-select", "quick-open-select-compact": quickOpen?.openSelectedProbe()
-        case "quick-open-close": quickOpen?.dismiss()
-        case "quick-open-focus": focusComposer()
-        case "conversation": focusComposer()
-        case "conversation-new": newConversation()
-        case "conversation-sidebar": toggleNavigation()
-        case "task-context": surfaces.selectedSegment = 1; switchSurface()
-        case "conversation-delete-sheet", "conversation-delete-sheet-compact": if let id = currentConversation { confirmDeleteConversation(id) }
-        case "conversation-delete-cancel", "conversation-delete-cancel-compact": if let sheet = window?.attachedSheet { window?.endSheet(sheet, returnCode: NSApplication.ModalResponse.alertFirstButtonReturn) }
-        case "conversation-delete-confirm": if let sheet = window?.attachedSheet { window?.endSheet(sheet, returnCode: NSApplication.ModalResponse.alertSecondButtonReturn) }
-        case "new-conversation": newConversation()
-        case "previous-conversation": if let id = conversationList.last?.id { selectConversation(id) }
-        case "models": showModels()
-        case "models-close": modelPicker?.dismiss()
-        case "models-reopen": showModels()
-        case "models-refresh", "models-refresh-retry": modelPicker?.refreshProbe()
-        case "models-claude": modelPicker?.providerProbe("claude-subscription-directsdk-experimental")
-        case "models-openrouter": modelPicker?.providerProbe("openrouter")
-        case "models-cline", "models-cline-pass": modelPicker?.providerProbe("cline-pass")
-        case "models-nous", "models-nous-research": modelPicker?.providerProbe("nous")
-        case "models-opencode": modelPicker?.providerProbe("opencode")
-        case "models-apple-playground", "models-local", "models-playground": modelPicker?.providerProbe("apple-playground")
-        case "models-openai": modelPicker?.providerProbe("openai-codex")
-        case "models-disconnect": client.closeInput()
-        case "models-reconnect": reconnect()
-        case "palette-close": palette?.cancelOperation(nil)
-        case "draft", "draft-light": composer.string = "Keep the conversation in focus as you refine the sidebar."; updateStatus()
-        case "clear-draft", "clear-draft-light": composer.string = ""; updateStatus()
-        case "expanded", "expanded-light":
-            if let activity = rows.first(where: { $0.activity }) { expandedActions.insert(activity.id); rebuildRows() }
-        case "collapsed", "collapsed-light": expandedActions.removeAll(); rebuildRows()
-        case "wide":
-            if let window, let screen = window.screen ?? NSScreen.main {
-                let available = screen.visibleFrame
-                let size = NSSize(width: min(1440, available.width), height: min(880, available.height))
-                window.setFrame(NSRect(x: available.midX - size.width / 2, y: available.maxY - size.height, width: size.width, height: size.height), display: true)
-            }
-            surfaces.selectedSegment = 1; adapt()
-        case "changes": showChanges(); diffScope.selectedSegment = 0; readDiff("fixture.txt")
-        case "sessions":
-            showSessions()
-            if let id = runs.first(where: { $0["state"] as? String == "cancelled" })?["id"] as? String { inspect(.run(id)) }
-        case "run-output":
-            if let id = runs.first(where: { $0["state"] as? String == "completed" })?["id"] as? String { inspect(.run(id)) }
-        case "output": openRecordedOutput()
-        case "back": inspectBack()
-        case "forward": inspectForward()
-        case "find": findInInspection()
-        case "missing-file": readFile("missing.txt")
-        case "narrow":
-            if let window { window.setFrame(NSRect(origin: window.frame.origin, size: NSSize(width: 720, height: 480)), display: true) }
-            compactSidebarRevealed = false; adapt()
-        case "dark": window?.appearance = NSAppearance(named: .darkAqua)
-        case "light": window?.appearance = NSAppearance(named: .aqua)
-        case "palette": showActions()
-        case "queue": showQueue()
-        case "approval", "approval-wide", "approval-light", "approval-dark": showApprovalReview()
-        case "approval-close": approvalReview?.cancelOperation(nil)
-        case "queue-edit":
-            if let run = runs.first(where: { $0["state"] as? String == "queued" }), let id = run["id"] as? String {
-                editQueued(QueuedInstruction(id: id, text: run["text"] as? String ?? "", revision: run["revision"] as? Int ?? 0))
-            }
-        default: break
-        }
-        modelPicker?.syncPresentation()
-    }
-    var probeLayout: [String: Any] {
-        let bounds = NSRect(origin: .zero, size: window?.frame.size ?? .zero)
-        var controls = [String: Any]()
-        for (name, view) in [("transcript", transcriptScroll as NSView), ("jumpLatest", jumpButton), ("model", modelButton), ("reasoning", reasoningPicker), ("composer", composer.enclosingScrollView! as NSView), ("send", sendButton), ("queue", queueButton), ("stop", stopButton), ("reviewApproval", reviewApprovalButton), ("deny", denyButton), ("inspection", inspectionScroll), ("inspectionBack", inspectionBack), ("inspectionForward", inspectionForward), ("inspectionFind", inspectionFind), ("recordedOutput", recordedOutput), ("relatedEvidence", relatedEvidence)] {
-            if !view.isHiddenOrHasHiddenAncestor {
-                let frame = view.convert(view.bounds, to: nil as NSView?)
-                controls[name] = ["visibleWithinWindow": bounds.contains(frame), "x": frame.minX, "y": frame.minY, "width": frame.width, "height": frame.height]
-            }
-        }
-        return ["messageLayoutIssues": (0..<rows.count).compactMap { (transcript.view(atColumn: 0, row: $0, makeIfNecessary: false) as? TranscriptMessageCell)?.layoutIssue }, "messageContentFits": (0..<rows.count).compactMap { transcript.view(atColumn: 0, row: $0, makeIfNecessary: false) as? TranscriptMessageCell }.allSatisfy { $0.contentFits }, "selectedSurface": surfaces.selectedSegment, "contextVisible": !contextPanel.isHidden, "conversationSidebarVisible": !conversations.isHidden, "conversationCount": conversationList.count, "deleteSheetVisible": window?.attachedSheet != nil, "projectRun": projectRun.diagnostics, "memory": memoryWindow?.diagnostics ?? [:], "checkpoints": checkpointWindow?.diagnostics ?? [:], "messageRoles": rows.map { $0.user ? "user" : $0.activity ? "activity" : "agent" }, "quickOpen": quickOpen?.diagnostics ?? [:], "modelPicker": modelPicker?.diagnostics ?? [:], "reasoningPicker": reasoningPicker.diagnostics, "actionPalette": palette?.diagnostics ?? [:], "workspaceKey": window?.isKeyWindow == true, "composerFocused": window?.firstResponder === composer, "conversation": currentConversation ?? "", "switchingConversation": switchingConversation, "walkthrough": walkthrough.diagnostics, "windowFrameWidth": bounds.width, "windowFrameHeight": bounds.height, "controls": controls, "destination": navigation.destination.title, "navigationVisible": !navigation.isHidden, "inspectionPreview": String(inspection.string.prefix(240)), "inspectionTitle": inspectorTitle.stringValue, "inspectionPage": pageLabel.stringValue, "canInspectBack": canInspectBack, "canInspectForward": canInspectForward, "recordedOutputAvailable": !recordedOutput.isHidden, "relatedEvidence": evidenceLinks.map { ["kind": $0.kind.rawValue, "id": $0.id, "label": $0.label] }, "findBarVisible": inspectionScroll.isFindBarVisible, "appearance": window?.effectiveAppearance.name.rawValue ?? "system", "forceStopAvailable": forceAvailable, "composerUTF16Count": composer.string.utf16.count, "draftSaveFailed": draftSaveFailed, "submissionNeedsReconciliation": uncertainSubmission != nil]
-    }
-    private func mergeRun(_ run: [String: Any]) {
-        guard let id = run["id"] as? String else { return }
-        if let index = runs.firstIndex(where: { $0["id"] as? String == id }) {
-            if let incoming = run["revision"] as? Int, let current = runs[index]["revision"] as? Int, incoming < current { return }
-            runs[index] = WalkthroughProjection.merged(runs[index], run)
-        } else { runs.append(WalkthroughProjection.bounded(run)) }
-        trimRecordedRuns()
-    }
-    private func trimRecordedRuns() {
-        let retained = Set(runs.filter { terminalStates.contains($0["state"] as? String ?? "") }.suffix(12).compactMap { $0["id"] as? String })
-        runs.removeAll { terminalStates.contains($0["state"] as? String ?? "") && !retained.contains($0["id"] as? String ?? "") }
-    }
-    private func receive(_ event: [String: Any]) {
-        guard let payload = event["payload"] as? [String: Any] else { return }
-        if event["kind"] as? String == "snapshot" {
-            if switchingConversation && (expectedConversation == nil || payload["conversation"] as? String != expectedConversation) { return }
-            guard (payload["seq"] as? Int ?? 0) >= sequence else { return }
-            if let conversation = payload["conversation"] as? String { adoptConversation(conversation) }
-            if let data = payload["modelSelection"] as? [String: Any], let selection = WorkspaceModelSelection(data) { updateModel(selection); modelPicker?.receive(data) }
-            sequence = payload["seq"] as? Int ?? 0
-            let incoming = payload["runs"] as? [[String: Any]] ?? []
-            let previous = Dictionary(runs.compactMap { run in (run["id"] as? String).map { ($0, run) } }, uniquingKeysWith: { _, newest in newest })
-            runs = incoming.map { run in previous[run["id"] as? String ?? ""].map { WalkthroughProjection.merged($0, run) } ?? WalkthroughProjection.bounded(run) }
-            trimRecordedRuns()
-            walkthroughLoaded = nil; rebuildRows()
-            renderConversations()
-            finishStopAndSend()
-            if probe?.instruction == nil, let state = runs.last?["state"] as? String, terminalStates.contains(state) { probe?.outcome(self, state: state) }
-            return
-        }
-        if let seq = event["seq"] as? Int {
-            if seq <= sequence { return }
-            if seq != sequence + 1 { client.requestSnapshot(); return }
-            sequence = seq
-        }
-        if event["type"] as? String == "models.changed", let selection = WorkspaceModelSelection(payload) { updateModel(selection); modelPicker?.receive(payload); return }
-        if event["type"] as? String == "project.state" { projectRun.receiveProjectState(payload); return }
-        if event["type"] as? String == "project.tasks_updated", let revision = payload["revision"] as? Int {
-            if revision > projectTaskRevision {
-                projectTaskRevision = revision; projectTaskOffset = 0; projectTaskPreviousOffsets = []; refreshProjectTasks()
-            }
-            return
-        }
-        if ["activity", "activity.batch"].contains(event["type"] as? String ?? ""), let runID = event["run"] as? String, let index = runs.firstIndex(where: { $0["id"] as? String == runID }) {
-            let values = event["type"] as? String == "activity.batch" ? payload["activities"] as? [[String: Any]] ?? [] : [payload]
-            let previousSequence = runs[index]["activitySequence"] as? Int ?? 0
-            guard WalkthroughProjection.apply(values, to: &runs[index]) else { return }
-            if values.contains(where: { activity in
-                let metadata = activity["metadata"] as? [String: Any]
-                return (activity["sequence"] as? Int ?? 0) > previousSequence && ["completed", "failed"].contains(activity["status"] as? String ?? "")
-                    && (activity["phase"] as? String == "writing" || metadata?["itemType"] as? String == "run_command")
-            }) { scheduleWorkspaceRefresh() }
-            if let count = payload["activityCount"] as? Int { runs[index]["activityCount"] = max(count, runs[index]["activityCount"] as? Int ?? 0) }
-            needsRebuild = true
-            if window?.isMiniaturized == true || window?.occlusionState.contains(.visible) != true { return }
-            if layoutTimer == nil { layoutTimer = Timer.scheduledTimer(withTimeInterval: window?.isKeyWindow == true ? 0.1 : 1, repeats: false) { [weak self] _ in self?.layoutTimer = nil; self?.rebuildRows() } }
-        } else if RuntimeClient.runEvents.contains(event["type"] as? String ?? ""), payload["id"] is String {
-            if let conversation = payload["conversation"] as? String, conversation != currentConversation { return }
-            mergeRun(payload); rebuildRows(); finishStopAndSend()
-            if event["type"] as? String == "run.accepted" { walkthrough.followCurrentInstruction(); loadConversations() }
-            if let state = payload["state"] as? String, terminalStates.contains(state) { scheduleWorkspaceRefresh(); probe?.outcome(self, state: state) }
-        } else if event["type"] as? String == "runtime.error" { showNotice(payload["message"] as? String ?? "Runtime state is unknown") }
-    }
-    private func rebuildRows() {
-        needsRebuild = false
-        let following = transcriptScroll.documentVisibleRect.maxY >= transcript.bounds.height - 35
-        let origin = transcriptScroll.contentView.bounds.origin
-        var next = [TranscriptRow]()
-        active = nil; currentApproval = nil
-        for run in runs {
-            guard let id = run["id"] as? String else { continue }
-            let state = run["state"] as? String ?? "unknown"
-            let automatic = run["origin"] as? String == "automatic_repair"
-            next.append(TranscriptRow(id: "\(id)-user", title: automatic ? "LUMI · Automatic repair" : state == "queued" ? "You · Queued" : "You", text: run["text"] as? String ?? "", activity: false, user: !automatic, checkpoint: run["checkpointBefore"] as? String, automatic: automatic, runID: id))
-            let activities = run["activities"] as? [[String: Any]] ?? []
-            let parsedActivities = WalkthroughProjection.activities(run)
-            let visibleActivities = activities.filter { ($0["metadata"] as? [String: Any])?["scope"] as? String != "turn" }
-            let runIsLive = ["running", "cancelling", "awaiting_approval"].contains(state)
-            let summaryID = "\(id)-activity"
-            if !activities.isEmpty {
-                let swarmWorkers = visibleActivities.filter {
-                    let meta = $0["metadata"] as? [String: Any]
-                    let kind = $0["kind"] as? String ?? ""
-                    let msg = $0["message"] as? String ?? ""
-                    return kind.contains("swarm") || kind.contains("worker") || meta?["swarm"] != nil || meta?["worker"] != nil || msg.hasPrefix("Worker ") || msg.hasPrefix("Subagent ")
-                }
-                let latestRaw = activities.max(by: { ($0["sequence"] as? Int ?? 0) < ($1["sequence"] as? Int ?? 0) })
-                let latestParsed = parsedActivities.filter { $0.isActive && $0.scope != "turn" }.max { $0.sequence < $1.sequence } ?? parsedActivities.max { $0.sequence < $1.sequence }
-                let latest = latestParsed?.displayTitle ?? (latestRaw?["message"] as? String ?? "Recorded activity")
-                let count = visibleActivities.count
-                let coverage = (run["activityCount"] as? Int ?? activities.count) > activities.count ? "loaded" : "recorded"
-                let swarmBadge = swarmWorkers.isEmpty ? "" : " [Swarm: \(swarmWorkers.count) updates]"
-                let progress = WalkthroughProjection.progressSummary(parsedActivities, live: runIsLive)
-                let latestTurnDetail = parsedActivities.filter { $0.scope == "turn" && !$0.detail.isEmpty }.max { $0.sequence < $1.sequence }?.detail
-                let activeIdleNote = (runIsLive ? latestParsed : nil).flatMap { item -> String? in
-                    guard item.isActive else { return nil }
-                    var parts = [String]()
-                    if let attempt = item.attempt, attempt > 1 { parts.append("Attempt \(attempt)") }
-                    if let idle = item.outputIdleMs, idle >= 5000 { parts.append("Quiet \(idle / 1000)s") }
-                    return parts.isEmpty ? nil : parts.joined(separator: " · ")
-                }
-                let summaryEvidence = [progress, latestTurnDetail ?? "", activeIdleNote ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
-                let summaryTitle = count == 0 && runIsLive ? "Activity · \(latestParsed?.stage ?? "Starting") · \(latest)" : "Activity · \(count) \(coverage)\(swarmBadge) · \(latest)"
-                next.append(TranscriptRow(id: summaryID, title: summaryTitle, text: expandedActions.contains(summaryID) ? "Details below · code, commands and results are in Walkthrough" : "", activity: true, evidence: summaryEvidence.isEmpty ? nil : summaryEvidence, runID: id, actionTitle: expandedActions.contains(summaryID) ? "Open in Walkthrough" : nil))
-            }
-            for activity in expandedActions.contains(summaryID) ? visibleActivities : [] {
-                let rawID = activity["activityId"] as? String ?? ""
-                let aid = "\(id)-\(rawID)"
-                let parsed = WalkthroughActivity(activity)
-                let phase = (activity["status"] as? String ?? "").replacingOccurrences(of: "_", with: " ")
-                let elapsed = (activity["elapsedMs"] as? Double).map { String(format: " · %.1fs", $0 / 1000) } ?? ""
-                let meta = activity["metadata"] as? [String: Any]
-                let workerTag = (meta?["worker"] as? String).map { "[\($0)] " } ?? ""
-                let captionSuffix: String
-                if let parsed {
-                    var extras = [String]()
-                    if let attempt = parsed.attempt, attempt > 1 { extras.append("Attempt \(attempt)") }
-                    if let code = parsed.exitCode { extras.append("Exit \(code)") }
-                    if let bytes = parsed.outputBytes { extras.append("\(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)) received") }
-                    if let lines = parsed.outputLines, lines > 0 { extras.append("\(lines) \(lines == 1 ? "line" : "lines")") }
-                    if parsed.isActive, runIsLive, let idle = parsed.outputIdleMs, idle >= 5000 { extras.append("Quiet \(idle / 1000)s") }
-                    captionSuffix = extras.isEmpty ? "" : " · " + extras.joined(separator: " · ")
-                } else { captionSuffix = "" }
-                let rowEvidence = parsed.flatMap { $0.files.isEmpty ? nil : $0.files.joined(separator: " · ") }
-                var expandedText = ""
-                if expandedActions.contains(aid) {
-                    if let parsed {
-                        expandedText = parsed.presentedDetail(live: runIsLive, connected: client.isReady, paused: state == "awaiting_approval")
-                    } else {
-                        expandedText = activity["detail"] as? String ?? "No additional display detail. Recorded output is available in Sessions after the run."
-                    }
-                }
-                let childTitle = parsed?.displayTitle ?? (activity["message"] as? String ?? "Activity")
-                next.append(TranscriptRow(id: aid, title: "\(workerTag)\(childTitle) · \(phase)\(elapsed)\(captionSuffix)", text: expandedText, activity: true, evidence: expandedActions.contains(aid) ? rowEvidence : nil, runID: id, activityID: rawID.isEmpty ? nil : rawID, actionTitle: expandedActions.contains(aid) ? "Open in Walkthrough" : nil))
-            }
-            if let response = run["response"] as? String {
-                let route = run["modelSelection"] as? [String: Any]
-                let model = route?["model"] as? String
-                let reviewDecision = run["criticalReviewDecision"] as? String
-                let reviewEvidence: String
-                if run["review"] as? String == "unavailable" { reviewEvidence = "Critical review unavailable" }
-                else if let reviewDecision { reviewEvidence = "Critical review · \(reviewDecision)" }
-                else { reviewEvidence = "Not reviewed" }
-                let evidence = WorkspaceVerificationPresentation.label(run) + (model.map { " · Model: " + $0 } ?? "") + (run["executionAuthority"] as? String == "autonomous" ? " · Autonomous" : "") + " · \(reviewEvidence)"
-                var resultText = response
-                if run["reviewOf"] == nil, run["review"] as? String == "completed", let report = run["criticalReviewReport"] as? String,
-                   !(response.contains("Critical completion review requires action")) {
-                    resultText += "\n\nCritical completion review · \(reviewDecision ?? "Decision unavailable")\n\(report)"
-                }
-                if run["reviewOf"] == nil, let tasks = run["criticalReviewCorrectiveTasks"] as? [[String: Any]], !tasks.isEmpty {
-                    let lines = tasks.prefix(8).map { task in
-                        let priority = task["priority"] as? String ?? "medium"
-                        let title = task["title"] as? String ?? "Corrective task"
-                        let specialist = task["recommendedSpecialist"] as? String ?? "legion_implementer"
-                        let description = task["description"] as? String ?? ""
-                        return "• [\(priority.capitalized)] \(title) · \(specialist)\n  \(description)"
-                    }
-                    resultText += "\n\nCorrective tasks\n" + lines.joined(separator: "\n")
-                }
-                if run["reviewOf"] == nil,
-                   let roadmap = run["criticalReviewRoadmap"] as? [String: Any],
-                   let formation = roadmap["remedialFormation"] as? [String: Any] {
-                    let status = formation["status"] as? String ?? "recorded"
-                    let outstanding = (formation["undispatchedTaskIds"] as? [String] ?? []).count
-                    resultText += "\n\nRemedial specialist formation · \(status.replacingOccurrences(of: "_", with: " "))"
-                    if outstanding > 0 { resultText += " · \(outstanding) task(s) remain in the roadmap" }
-                }
-                next.append(TranscriptRow(id: "\(id)-result", title: "LUMI · \(state.capitalized)", text: resultText, activity: false, checkpoint: run["checkpointAfter"] as? String, evidence: evidence))
-            }
-            if let error = run["checkpointError"] as? String { next.append(TranscriptRow(id: "\(id)-checkpoint-error", title: "Checkpoint unavailable", text: error, activity: false)) }
-            if !terminalStates.contains(state), state != "queued" { active = id }
-            if state == "awaiting_approval", let a = run["approval"] as? [String: Any], a["decision"] == nil, let operation = a["operation"] as? String {
-                currentApproval = ApprovalRequest(run: id, operation: operation, tool: a["tool"] as? String ?? "Operation", scope: a["scope"] as? String ?? folder.path, reason: a["reason"] as? String ?? "", arguments: a["args"] as? String ?? "")
-            }
-        }
-        for query in sideQuestions where query.conversation == currentConversation {
-            next.append(TranscriptRow(id: "\(query.id)-side-user", title: "You · Side question", text: query.question, activity: false, user: true))
-            let title = query.answer == nil ? "LUMI · Answering" : query.failed ? "Side question failed" : "LUMI · Side answer"
-            let detail = query.answer == nil ? "Answering without tools. You can continue the conversation." : query.answer ?? ""
-            let evidence = query.contextLimited ? "Temporary · recent context only · no tools" : "Temporary · not added to conversation context · no tools"
-            next.append(TranscriptRow(id: "\(query.id)-side-answer", title: title, text: detail, activity: false, evidence: evidence))
-        }
-        next = Array(next.suffix(200))
-        var bytes = next.reduce(0) { $0 + $1.text.utf8.count + $1.title.utf8.count }
-        while bytes > 8 * 1024 * 1024, !next.isEmpty { let removed = next.removeFirst(); bytes -= removed.text.utf8.count + removed.title.utf8.count }
-        expandedActions.formIntersection(Set(next.map(\.id)))
-        if next.isEmpty { next = [welcomeRow] }
-        if !next.isEmpty {
-            let old = rows; rows = next
-            if old.map(\.id) == next.map(\.id) {
-                let changed = IndexSet(next.indices.filter { next[$0] != old[$0] })
-                if !changed.isEmpty { transcript.reloadData(forRowIndexes: changed, columnIndexes: IndexSet(integer: 0)); transcript.noteHeightOfRows(withIndexesChanged: changed) }
-            } else if next.count > old.count, Array(next.prefix(old.count)) == old {
-                transcript.insertRows(at: IndexSet(integersIn: old.count..<next.count), withAnimation: [])
-            } else { transcript.reloadData() }
-            if following { jumpLatest() }
-            else { transcriptScroll.contentView.scroll(to: origin); transcriptScroll.reflectScrolledClipView(transcriptScroll.contentView); jumpButton.isHidden = runs.isEmpty }
-        }
-        var turnItems = [TurnScrubberRail.TurnItem]()
-        var turnCounter = 0
-        let runsByID = Dictionary(runs.compactMap { r in (r["id"] as? String).map { ($0, r) } }, uniquingKeysWith: { _, latest in latest })
-        for (idx, row) in rows.enumerated() where row.user || row.id == "welcome" {
-            let run = row.runID.flatMap { runsByID[$0] }
-            let state = run?["state"] as? String ?? ""
-            let isActive = row.runID != nil && row.runID == active
-            let isWaitingReview = state == "awaiting_approval"
-            let parsed = run.map(WalkthroughProjection.activities) ?? []
-            let isError = ["failed", "interrupted", "timed_out"].contains(state) || parsed.contains(where: \.isIssue)
-            let stateBadge = state.isEmpty ? "" : " · \(state == "awaiting_approval" ? "Needs review" : state.replacingOccurrences(of: "_", with: " ").capitalized)"
-            let preview = "Turn \(turnCounter + 1)\(stateBadge): \(String(row.text.prefix(80)))"
-            turnItems.append(TurnScrubberRail.TurnItem(index: turnCounter, rowIndex: idx, preview: preview, isActive: isActive, isError: isError, isWaitingReview: isWaitingReview))
-            turnCounter += 1
-        }
-        turnScrubber.turns = turnItems
-        updateWalkthrough(); updateStatus()
-    }
-    private func updateApproval() {
-        if let decidingApproval, decidingApproval.request != currentApproval || decidingApproval.context != podContextID { self.decidingApproval = nil; approvalFailure = nil }
-        if let failure = approvalFailureAttempt, failure.request != currentApproval || failure.context != podContextID { approvalFailure = nil; approvalFailureAttempt = nil }
-        approval.isHidden = currentApproval == nil
-        reviewApprovalButton.isEnabled = canReviewApproval
-        denyButton.isEnabled = canDecideApproval
-        allowButton.isEnabled = canDecideApproval
-        let summary = currentApproval.map { "\($0.tool)\n\($0.scope)" } ?? ""
-        if approvalText.string != summary { approvalText.string = summary }
-        if let review = approvalReview {
-            review.update(isCurrent: currentApproval == review.request && approvalReviewContext == podContextID, connected: client.isReady, submitting: decidingApproval?.request == review.request, stopping: cancelRequested || closing || switchingConversation, error: approvalFailure)
-        }
-    }
-    private func updateStatus() {
-        memoryWindow?.syncAvailability()
-        reasoningPicker.refresh(supported: client.isReady && client.capabilities.contains("reasoning-selection-v1"))
-        modelButton.isEnabled = canChooseModels
-        modelButton.toolTip = client.capabilities.contains("model-selection-v1") ? modelButton.toolTip : "This runtime does not support model switching. Rebuild the app and runtime together."
-        modelPicker?.refreshAvailability()
-        checkpointsButton.isEnabled = client.isReady && client.capabilities.contains("checkpoints-v1") && !switchingConversation
-        checkpointWindow?.refreshAvailability()
-        composer.needsDisplay = true
-        composer.isEditable = !switchingConversation
-        openFileButton.isEnabled = canOpenFile
-        updateApproval()
-        if !hasWork && !closing && stopAcknowledged { forceAvailable = false; cancelRequested = false; cancellationToken = nil; stopButton.title = "Stop" }
-        let queued = runs.filter { $0["state"] as? String == "queued" }.count
-        let needsLookup = client.isReady && uncertainSubmission != nil
-        reconnectButton.title = needsLookup ? (checkingSubmission ? "Checking…" : "Check Status") : "Reconnect"
-        reconnectButton.isEnabled = !checkingSubmission && !closing
-        reconnectButton.isHidden = closing || (!needsLookup && (client.isReady || client.process?.isRunning == true))
-        let draft = composer.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        let side = Self.sideQuestion(from: draft)
-        sendButton.isEnabled = side != nil ? (client.isReady && !switchingConversation && !closing && sideQuestionPending == nil && draft.utf16.count <= client.instructionLimit) : (!reasoningPicker.pending && client.isReady && !switchingConversation && pendingRequest == nil && uncertainSubmission == nil && !closing && !cancelRequested && !draft.isEmpty && draft.utf16.count <= client.instructionLimit && queued < client.queueLimit)
-        stopButton.isEnabled = forceAvailable || (!cancelRequested && hasWork) || (closing && !stopped)
-        let run = runs.first(where: { $0["id"] as? String == active })
-        let state = run?["state"] as? String
-        let startAnchor = (run?["startedAt"] as? Double) ?? (state == "running" ? run?["createdAt"] as? Double : nil)
-        let elapsedSeconds = startAnchor.map { Int(max(0, Date().timeIntervalSince1970 - $0 / 1000)) }
-        let elapsed = elapsedSeconds.map { " · \($0)s" } ?? ""
-        let condition = client.isReady ? "Connected" : connection == "Connecting to LUMI…" ? "Connecting…" : connection == "Preparing" ? "Preparing…" : "Disconnected"
-        let activeParsed = run.map(WalkthroughProjection.activities) ?? []
-        let activeCurrent = activeParsed.filter { $0.isActive && $0.scope != "turn" }.max { $0.sequence < $1.sequence } ?? activeParsed.max { $0.sequence < $1.sequence }
-        let liveStage = state == "running" ? (activeCurrent?.stage ?? "Starting") : nil
-        let batchSummary = state == "running" ? WalkthroughProjection.progressSummary(activeParsed, live: true) : ""
-        let latestTurnDetail = state == "running" ? activeParsed.filter { $0.scope == "turn" && !$0.detail.isEmpty }.max { $0.sequence < $1.sequence }?.detail : nil
-        let waitingDetail: String? = state == "running" ? (latestTurnDetail ?? (activeParsed.isEmpty && (elapsedSeconds ?? 0) >= 3 ? "Waiting \(elapsedSeconds ?? 0)s for the first activity event…" : nil)) : nil
-        let activity = decidingApproval != nil ? "Saving decision…" : state == "awaiting_approval" ? "Waiting for your review" : liveStage.map { "Running · \($0)" } ?? state?.replacingOccurrences(of: "_", with: " ").capitalized
-        let deferBadge = (client.isReady && swarmDeferred) ? " · Deferred" : ""
-        status.stringValue = pendingRequest != nil ? "Submitting…" : "\(condition)\(cancelRequested ? " · Cancelling" : activity.map { " · " + $0 } ?? (sideQuestionPending != nil ? " · Answering side question…" : ""))\(deferBadge)\(elapsed)\(queued > 0 ? " · \(queued) queued" : "")"
-        status.toolTip = status.stringValue
-        let chatActivity = activity.map { $0 + elapsed + (batchSummary.isEmpty ? "" : " · " + batchSummary) + (waitingDetail.map { " · " + $0 } ?? "") }
-        chatState.stringValue = switchingConversation ? "Opening conversation…" : pendingRequest != nil ? "Submitting instruction…" : chatActivity ?? (sideQuestionPending != nil ? "Answering side question…" : runs.isEmpty ? "Tell LUMI what you want to build." : "Recorded conversation · send a follow-up to continue")
-        chatState.toolTip = chatState.stringValue
-        conversations.setCanSwitch(canSwitchConversation)
-        sendButton.title = side != nil ? "Ask" : hasWork ? "Queue" : "Send"
-        stopSendButton.isHidden = side != nil || !hasWork || draft.isEmpty
-        stopSendButton.isEnabled = client.isReady && pendingRequest == nil && uncertainSubmission == nil && !cancelRequested && stopThenSend == nil && draft.utf16.count <= client.instructionLimit
-        hint.stringValue = draftSaveFailed ? "Draft not saved · keep this window open" : draft.utf16.count > client.instructionLimit ? "Instruction too long · draft preserved" : side != nil ? "Side question · temporary · no tools" : queued >= client.queueLimit ? "Queue full · draft preserved" : uncertainSubmission != nil ? (client.isReady ? "Acceptance unknown · Check Status before sending" : "Acceptance unknown · reconnect to reconcile") : client.capabilities.contains("autonomous-execution-v1") ? "Autonomous · Enter to send · Stop anytime" : "Enter to send · Shift–Enter for a new line"
-        hint.toolTip = side != nil ? "Side questions use a copy of recent context, run no tools, and do not stop the active instruction." : hint.stringValue + "\nEnter to send · Shift–Enter for a new line. Use Stop to interrupt."
-        queueButton.title = queued > 0 ? "Up Next (\(queued))" : "Up Next"
-        queueButton.setAccessibilityLabel("Up Next, \(queued) queued instructions")
-        updateQueue()
-        updateElapsedTimer()
-        walkthrough.tick()
-        walkthrough.setRecoveryAvailability(supported: client.capabilities.contains("task-continuation-v1"), enabled: canContinueWork,
-            hint: !client.isReady ? "Reconnect to continue the saved work." : hasWork ? "Finish or stop current work before continuing." : uncertainSubmission != nil ? "Reconnect to confirm the previous submission first." : "Continue from the saved changes and run fresh project checks. Your draft is preserved.")
-        projectRun.setRepairAvailability(supported: client.capabilities.contains("project-repair-v1"), enabled: canRequestRecovery,
-            canOpen: client.isReady && !switchingConversation && !closing, conversation: currentConversation,
-            hint: !client.isReady ? "Reconnect to repair the app." : hasWork ? "Finish or stop current work before starting a repair." : uncertainSubmission != nil ? "Reconnect to confirm the previous submission first." : "LUMI will investigate the saved failure and check the project. Your draft is preserved.", automaticSupported: client.capabilities.contains("project-self-healing-v1"))
-        updateWalkthroughVisibility()
-    }
-    private func updateElapsedTimer() {
-        let needed = (active != nil || pendingRequest != nil || sideQuestionPending != nil) && client.isReady && window?.occlusionState.contains(.visible) == true && window?.isMiniaturized != true
-        if needed && elapsedTimer == nil { elapsedTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.updateStatus() } }
-        else if !needed { elapsedTimer?.invalidate(); elapsedTimer = nil }
-    }
-    private func showNotice(_ text: String) { notice.stringValue = text; noticeBar.isHidden = false }
-    @objc private func dismissNotice() { if client.isReady && uncertainSubmission == nil { noticeBar.isHidden = true } }
-    @objc func stop() {
-        if forceAvailable { stopThenSend = nil; client.forceStop(); showNotice("Force Stop interrupted LUMI. Existing edits remain; remote effects may be unknown."); return }
-        guard !cancelRequested else { return }
-        let source = client
-        let token = UUID(); cancellationToken = token; cancelRequested = true
-        stopAcknowledged = !client.capabilities.contains("workspace-stop"); updateStatus()
-        if client.capabilities.contains("workspace-stop") {
-            client.request("task.cancelAll", params: [:]) { [weak self] result in
-                guard let self, self.client === source, self.cancellationToken == token else { return }
-                switch result {
-                case .success:
-                    self.stopAcknowledged = true
-                    // Shutdown owns the final receipt and process exit. A view
-                    // refresh against its closed scheduler can disconnect the
-                    // transport before that durable receipt arrives.
-                    if self.closing { self.updateStatus(); return }
-                    source.requestSnapshot(afterPending: true) { [weak self] in
-                        guard let self, self.client === source, self.cancellationToken == token else { return }
-                        self.updateStatus(); self.finishStopAndSend()
-                    }
-                case .failure(let error):
-                    self.showNotice(error.localizedDescription); self.stopThenSend = nil
-                    if source.isReady {
-                        self.cancelRequested = false; self.cancellationToken = nil; self.stopAcknowledged = true
-                        self.forceAvailable = false; self.stopButton.title = "Stop"
-                    }
-                    self.updateStatus()
-                }
-            }
-        } else {
-            for run in runs where !terminalStates.contains(run["state"] as? String ?? "") {
-                if let id = run["id"] as? String { client.request("task.cancel", params: ["run": id]) { [weak self] result in
-                    guard let self, self.client === source, self.cancellationToken == token else { return }
-                    if case .failure(let error) = result { self.showNotice(error.localizedDescription); self.stopThenSend = nil }
-                } }
-            }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
-            guard let self, self.client === source, self.cancellationToken == token, self.cancelRequested, self.hasWork || (self.closing && !self.stopped) else { return }
-            self.forceAvailable = true; self.stopButton.title = "Force Stop"; self.stopButton.isEnabled = true
-        }
-    }
-    @objc private func stopAndSend() {
-        let text = composer.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, text.utf16.count <= client.instructionLimit, !composer.hasMarkedText(), pendingRequest == nil, client.isReady, stopThenSend == nil else { return }
-        let ids = Set(runs.filter { !terminalStates.contains($0["state"] as? String ?? "") }.compactMap { $0["id"] as? String })
-        guard !ids.isEmpty else { submit(); return }
-        stopThenSend = (text, ids); stop()
-    }
-    private func finishStopAndSend() {
-        guard let pending = stopThenSend, stopAcknowledged else { return }
-        let targets = runs.filter { pending.runs.contains($0["id"] as? String ?? "") }
-        if targets.contains(where: { $0["state"] as? String == "interrupted" }) {
-            stopThenSend = nil; showNotice("The stopping boundary is unknown. Review the interrupted run before sending your preserved draft."); return
-        }
-        guard targets.count == pending.runs.count, targets.allSatisfy({ terminalStates.contains($0["state"] as? String ?? "") }), !hasWork else { return }
-        stopThenSend = nil; cancelRequested = false; cancellationToken = nil; submitInstruction(pending.text)
-    }
-    private func updateQueue() {
-        if let editing = editingQueued, queueEditor?.window?.sheetParent != nil {
-            let run = runs.first { $0["id"] as? String == editing.id }
-            let reason: String?
-            if !client.isReady { reason = "LUMI is disconnected. Your edit is preserved; use Copy Edit to keep it while reconnecting." }
-            else if cancelRequested || closing { reason = "Work is stopping. Your edit is preserved; use Copy Edit to keep it for a follow-up." }
-            else if run?["state"] as? String != "queued" { reason = "This instruction is no longer waiting. Your edit is preserved; use Copy Edit to keep it for a follow-up." }
-            else if run?["revision"] as? Int != editing.revision { reason = "This instruction changed while you were editing. Use Copy Edit, then close and reopen it to review the latest version." }
-            else { reason = nil }
-            queueEditor?.setUnavailable(reason)
-        }
-        let entries = runs.filter { $0["state"] as? String == "queued" }.sorted {
-            ($0["queueOrder"] as? Double ?? $0["createdAt"] as? Double ?? 0) < ($1["queueOrder"] as? Double ?? $1["createdAt"] as? Double ?? 0)
-        }.compactMap { run -> QueuedInstruction? in
-            guard let id = run["id"] as? String, let text = run["text"] as? String else { return nil }
-            return QueuedInstruction(id: id, text: text, revision: run["revision"] as? Int ?? 0)
-        }
-        queueContent.update(entries, enabled: client.isReady && !cancelRequested && !closing, editing: client.capabilities.contains("queue-edit"), removing: client.capabilities.contains("queue-remove"), busy: removingQueued)
-        if queuePopover.isShown { queuePopover.contentSize = queueContent.preferredContentSize }
-    }
-    @objc func showQueue() {
-        guard window?.attachedSheet == nil else { return }
-        updateQueue()
-        if queuePopover.isShown { queuePopover.close() }
-        else { queuePopover.show(relativeTo: queueButton.bounds, of: queueButton, preferredEdge: .maxY) }
-    }
-    private func removeQueued(_ entry: QueuedInstruction) {
-        guard client.isReady, !cancelRequested, !closing, !removingQueued.contains(entry.id) else { return }
-        removingQueued.insert(entry.id); updateQueue()
-        client.request("task.cancel", params: ["run": entry.id, "ifQueued": true]) { [weak self] result in
-            guard let self else { return }
-            self.removingQueued.remove(entry.id)
-            if case .failure(let error) = result { self.showNotice(error.localizedDescription) }
-            self.updateQueue(); self.client.requestSnapshot()
-        }
-    }
-    private func editQueued(_ entry: QueuedInstruction) {
-        guard client.isReady, !cancelRequested, !closing, window?.attachedSheet == nil else { return }
-        queuePopover.close()
-        client.request("history.read", params: ["run": entry.id]) { [weak self] result in
-            guard let self, let window = self.window, window.attachedSheet == nil else { return }
-            switch result {
-            case .failure(let error): self.showNotice(error.localizedDescription)
-            case .success(let data):
-                guard let run = data["run"] as? [String: Any], run["state"] as? String == "queued", let text = run["text"] as? String, let revision = run["revision"] as? Int else {
-                    self.showNotice("This instruction has already left the queue. Follow its progress in the transcript."); self.client.requestSnapshot(); return
-                }
-                self.mergeRun(run)
-                self.editingQueued = QueuedInstruction(id: entry.id, text: text, revision: revision)
-                self.queueEditor = QueuedInstructionEditor(text: text, limit: self.client.instructionLimit) { [weak self] text, complete in
-                    guard let self, self.client.isReady, !self.cancelRequested, !self.closing else { complete(.failure(BridgeError.message("Connect to LUMI and wait for cancellation to finish before saving."))); return }
-                    self.client.request("task.edit", params: ["run": entry.id, "text": text, "revision": revision]) { [weak self] result in
-                        switch result {
-                        case .failure(let error): complete(.failure(error)); self?.client.requestSnapshot()
-                        case .success(let data):
-                            if let run = data["run"] as? [String: Any] { self?.mergeRun(run); self?.rebuildRows() }
-                            complete(.success(()))
-                        }
-                    }
-                }
-                self.queueEditor?.present(for: window)
-                self.updateQueue()
-            }
-        }
-    }
-    @objc func showApprovalReview() {
-        guard canReviewApproval, let request = currentApproval, let window else { return }
-        let context = podContextID; approvalReviewContext = context
-        approvalReview = ApprovalReview(request: request, decide: { [weak self] request, decision in
-            guard let self, self.podContextID == context else { return }
-            self.resolveApproval(request, decision: decision)
-        }, didClose: { [weak self] in self?.approvalReview = nil; self?.updateApproval() })
-        approvalReview?.present(for: window); updateApproval()
-    }
-    @objc func allowOnce() { if let request = currentApproval { resolveApproval(request, decision: "allow") } }
-    @objc func deny() { if let request = currentApproval { resolveApproval(request, decision: "deny") } }
-    var canDecideApproval: Bool { currentApproval != nil && client.isReady && decidingApproval == nil && !cancelRequested && !closing && !switchingConversation }
-    @discardableResult func resolveApproval(_ approval: ApprovalRequest, decision: String) -> Bool {
-        guard ["allow", "deny"].contains(decision), currentApproval == approval, client.isReady, decidingApproval == nil, !cancelRequested, !closing, !switchingConversation else { return false }
-        let source = client, attempt = ApprovalDecision(request: approval, context: podContextID)
-        decidingApproval = attempt; approvalFailure = nil; approvalFailureAttempt = nil; updateStatus()
-        source.request("approval.resolve", params: ["operation": approval.operation, "run": approval.run, "decision": decision]) { [weak self] result in
-            guard let self, self.client === source, self.podContextID == attempt.context, self.decidingApproval == attempt else { return }
-            if case .failure(let error) = result {
-                self.approvalFailureAttempt = attempt
-                // An explicit rejection can be retried. A lost connection cannot
-                // establish whether the decision reached the worker.
-                if source.isReady { self.decidingApproval = nil; self.approvalFailure = error.localizedDescription }
-                else { self.approvalFailure = "Decision outcome unknown. Reconnect to recover recorded state before deciding again." }
-                self.showNotice(self.approvalFailure ?? error.localizedDescription)
-            }
-            if source.isReady { source.requestSnapshot(afterPending: true) }
-            self.updateStatus()
-        }
-        return decidingApproval == attempt
-    }
-    @objc private func jumpLatest() { if !rows.isEmpty { transcript.scrollRowToVisible(rows.count - 1) }; jumpButton.isHidden = true }
-    @objc func toggleNavigation() {
-        if (window?.frame.width ?? 1280) < 1000 {
-            compactSidebarRevealed.toggle()
-            if compactSidebarRevealed { surfaces.selectedSegment = 0 }
-        } else { sidebarPreferred.toggle() }
-        adapt()
-    }
-    @objc func showChats() {
-        navigatorTabs.selectedSegment = 0
-        sidebarPreferred = true
-        compactSidebarRevealed = true
-        switchNavigatorTab()
-    }
-    @objc func showFiles() {
-        navigatorTabs.selectedSegment = 1
-        sidebarPreferred = true
-        compactSidebarRevealed = true
-        navigate(.files)
-    }
-    @objc func showChanges() {
-        navigatorTabs.selectedSegment = 2
-        sidebarPreferred = true
-        compactSidebarRevealed = true
-        navigate(.changes)
-    }
-    @objc func showSessions() { loadConversations(); navigation.select(.sessions) }
-    @objc private func switchNavigatorTab() {
-        switch navigatorTabs.selectedSegment {
-        case 0:
-            conversations.isHidden = false
-            navigation.isHidden = true
-        case 1:
-            conversations.isHidden = true
-            navigation.isHidden = false
-            navigation.select(.files)
-        case 2:
-            conversations.isHidden = true
-            navigation.isHidden = false
-            navigation.select(.changes)
-        default:
-            break
-        }
-        adapt()
-    }
-    private func navigate(_ destination: WorkspaceDestination) {
-        navigationGeneration += 1; navigationQuery = ""; navigationOffset = 0; nextNavigationPage = nil; previousNavigationPage = nil; navigationData = []
-        showingContextSummary = false
-        showingInspector = true; surfaces.selectedSegment = 1
-        browsingCompact = true
-        if destination == .files {
-            navigatorTabs.selectedSegment = 1
-            conversations.isHidden = true
-            navigation.isHidden = false
-            contextTabs.selectedSegment = 2
-        } else if destination == .changes {
-            navigatorTabs.selectedSegment = 2
-            conversations.isHidden = true
-            navigation.isHidden = false
-            contextTabs.selectedSegment = 1
-        } else {
-            navigatorTabs.selectedSegment = 1
-            conversations.isHidden = true
-            navigation.isHidden = false
-            contextTabs.selectedSegment = 2
-        }
-        compactSidebarRevealed = false
-        adapt(); refreshNavigation()
-    }
-    private func refreshNavigation() {
-        guard !switchingConversation else { return }
-        guard client.isReady else { navigation.loading("Connect to LUMI to browse this workspace."); return }
-        switch navigation.destination {
-        case .files: loadDirectory(directory, offset: navigationOffset)
-        case .changes: loadChanges()
-        case .sessions: loadSessions()
-        }
-    }
-    private func scheduleWorkspaceRefresh() {
-        guard workspaceRefreshTimer == nil else { return }
-        workspaceRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: false) { [weak self] _ in
-            guard let self else { return }; self.workspaceRefreshTimer = nil
-            guard self.client.isReady else { return }
-            if !self.navigation.isHiddenOrHasHiddenAncestor, self.navigation.destination != .sessions { self.refreshNavigation() }
-            if self.inspectedFile != nil { self.pageLabel.stringValue = "Workspace activity recorded · Reload to update preview" }
-            self.checkViewportBranch()
-        }
-    }
-    private func loadDirectory(_ path: String, offset: Int = 0) {
-        if path != directory { navigationQuery = ""; navigation.resetFilter() }
-        directory = path; navigationOffset = offset; navigationGeneration += 1
-        nextNavigationPage = nil; previousNavigationPage = nil; navigationData = []
-        let generation = navigationGeneration
-        navigation.loading("Loading folder…")
-        client.request("files.list", params: ["path": path, "offset": offset, "query": navigationQuery]) { [weak self] result in
-            guard let self, self.navigationGeneration == generation, self.navigation.destination == .files else { return }
-            switch result {
-            case .success(let data):
-                self.navigationData = (data["entries"] as? [[String: Any]] ?? []).map { entry in
-                    SidebarEntry(id: entry["path"] as? String ?? "", title: entry["name"] as? String ?? "File", detail: entry["symlink"] as? Bool == true ? "Symbolic link" : "", symbol: entry["directory"] as? Bool == true ? "folder" : "doc", value: entry)
-                }
-                self.nextNavigationPage = data["more"] as? Bool == true ? { [weak self] in self?.loadDirectory(path, offset: data["nextOffset"] as? Int ?? 0) } : nil
-                self.previousNavigationPage = offset > 0 ? { [weak self] in self?.loadDirectory(path, offset: max(0, offset - 100)) } : nil
-                let count = self.navigationData.count
-                let message = data["scanLimited"] as? Bool == true ? "Folder scan limited to 20,000 entries. Open a subfolder to narrow the list." : count == 0 ? (self.navigationQuery.isEmpty ? "This folder is empty." : "No matching files in this folder.") : "\(offset + 1)–\(offset + count) of \(data["matched"] as? Int ?? count)"
-                self.navigation.show(self.navigationData, location: path == "." ? self.folder.lastPathComponent : path, message: message, canGoBack: path != ".", more: self.nextNavigationPage != nil, hasPrevious: offset > 0)
-            case .failure(let error): self.navigation.show([], location: path, message: error.localizedDescription, canGoBack: path != ".")
-            }
-        }
-    }
-    @objc private func parentFolder() {
-        let parent = (directory as NSString).deletingLastPathComponent
-        loadDirectory(parent.isEmpty ? "." : parent)
-    }
-    private func loadChanges() {
-        navigationGeneration += 1; let generation = navigationGeneration; navigation.loading("Reading Git changes…")
-        nextNavigationPage = nil; previousNavigationPage = nil; navigationData = []
-        client.request("changes.list") { [weak self] result in
-            guard let self, self.navigationGeneration == generation, self.navigation.destination == .changes else { return }
-            switch result {
-            case .success(let data):
-                self.navigationData = (data["entries"] as? [[String: Any]] ?? []).map { entry in
-                    let status = entry["untracked"] as? Bool == true ? "Untracked" : entry["staged"] as? Bool == true ? (entry["unstaged"] as? Bool == true ? "Staged + working tree" : "Staged") : "Working tree"
-                    return SidebarEntry(id: entry["path"] as? String ?? "", title: entry["name"] as? String ?? "File", detail: "\(entry["status"] as? String ?? "") · \(status)", symbol: "doc.text", value: entry)
-                }
-                if let branch = data["branch"] as? String { self.window?.subtitle = "\(branch) · \(self.folder.path)" }
-                self.nextNavigationPage = nil; self.previousNavigationPage = nil; self.renderNavigation()
-                if data["limited"] as? Bool == true { self.showNotice("Showing the first 500 changed paths. Use Git in an external terminal to inspect the complete list.") }
-            case .failure(let error): self.navigation.show([], location: "Changes", message: "Changes require a Git workspace. \(error.localizedDescription)")
-            }
-        }
-    }
-    private func loadSessions(cursor: [String: Any]? = nil, trail: [[String: Any]] = []) {
-        navigationGeneration += 1; let generation = navigationGeneration; navigation.loading("Loading recorded runs…")
-        nextNavigationPage = nil; previousNavigationPage = nil; navigationData = []
-        client.request("history.list", params: cursor.map { ["cursor": $0] } ?? [:]) { [weak self] result in
-            guard let self, self.navigationGeneration == generation, self.navigation.destination == .sessions else { return }
-            switch result {
-            case .success(let data):
-                self.navigationData = (data["runs"] as? [[String: Any]] ?? []).reversed().map { run in
-                    let date = Date(timeIntervalSince1970: (run["createdAt"] as? Double ?? 0) / 1000).formatted(date: .abbreviated, time: .shortened)
-                    return SidebarEntry(id: run["id"] as? String ?? "", title: run["text"] as? String ?? "Run", detail: "\(run["state"] as? String ?? "Unknown") · \(date)", symbol: "text.bubble", value: run)
-                }
-                self.nextNavigationPage = (data["nextCursor"] as? [String: Any]).map { next in { [weak self] in self?.loadSessions(cursor: next, trail: Array((trail + [cursor ?? [:]]).suffix(128))) } }
-                self.previousNavigationPage = trail.last.map { previous in { [weak self] in self?.loadSessions(cursor: previous.isEmpty ? nil : previous, trail: Array(trail.dropLast())) } }
-                self.renderNavigation()
-            case .failure(let error): self.navigation.show([], location: "Sessions", message: error.localizedDescription)
-            }
-        }
-    }
-    private func renderNavigation() {
-        let filtered = navigationData.filter { navigationQuery.isEmpty || $0.title.localizedCaseInsensitiveContains(navigationQuery) || $0.detail.localizedCaseInsensitiveContains(navigationQuery) }
-        let empty = navigation.destination == .changes ? "No changes in the working tree or index." : "No recorded runs on this page."
-        navigation.show(filtered, location: navigation.destination.title, message: filtered.isEmpty ? (navigationQuery.isEmpty ? empty : "No matches on this page.") : navigation.destination == .changes ? "Includes pre-existing and external edits." : "Recorded runs · no automatic resume", more: nextNavigationPage != nil, hasPrevious: previousNavigationPage != nil)
-    }
-    private func openEntry(_ entry: SidebarEntry) {
-        switch navigation.destination {
-        case .files:
-            if entry.value["directory"] as? Bool == true { loadDirectory(entry.id) } else { readFile(entry.id) }
-        case .changes:
-            if entry.value["untracked"] as? Bool == true { readFile(entry.id) }
-            else { diffScope.selectedSegment = entry.value["unstaged"] as? Bool == true ? 0 : 1; readDiff(entry.id) }
-        case .sessions: inspect(.run(entry.id))
-        }
-    }
-    private func readFile(_ path: String) { inspect(.file(path)) }
-    private func readDiff(_ path: String) { inspect(.diff(path, staged: diffScope.selectedSegment == 1)) }
-    func inspect(_ destination: InspectionDestination, addToHistory: Bool = true) {
-        guard !switchingConversation else { return }
-        saveViewport()
-        currentViewport = nil; viewportBranch = nil; viewportBranchGeneration += 1
-        if case .diff = destination { contextTabs.selectedSegment = 1 }
-        else { contextTabs.selectedSegment = 2 }
-        if addToHistory { inspectionHistory.visit(destination) }
-        inspectionBack.isEnabled = inspectionHistory.canGoBack; inspectionForward.isEnabled = inspectionHistory.canGoForward
-        toolbarHistory.setEnabled(inspectionHistory.canGoBack, forSegment: 0)
-        toolbarHistory.setEnabled(inspectionHistory.canGoForward, forSegment: 1)
-        updateJumpBar()
-        reloadInspection = { [weak self] in self?.inspect(destination, addToHistory: false) }
-        switch destination {
-        case .savedState(let conversation):
-            prepareInspection(title: "Saved State", file: nil, contextSummary: true)
-            guard canShowSavedState, currentConversation == conversation else {
-                inspectionFailed(BridgeError.message("Saved state is unavailable. Reconnect to a supported runtime."), initial: true); return
-            }
-            let generation = inspectionGeneration
-            client.request("state.inspect", params: ["conversation": conversation]) { [weak self] result in
-                guard let self, self.inspectionGeneration == generation, self.currentConversation == conversation else { return }
-                switch result {
-                case .success(let data):
-                    guard let details = SavedStateDetails(data, conversation: conversation) else {
-                        self.inspectionFailed(BridgeError.message("Saved state could not be read. Use Reload to try again."), initial: true); return
-                    }
-                    self.savedStateDetails = details
-                    self.inspection.textStorage?.setAttributedString(details.attributedText); self.inspection.scrollToBeginningOfDocument(nil)
-                    self.pageLabel.stringValue = details.observed; self.pageLabel.toolTip = details.observed
-                    self.relatedEvidence.removeAllItems(); self.relatedEvidence.addItems(withTitles: ["Open Instruction…"] + details.report.runs.map { String($0.title.prefix(60)) })
-                    self.relatedEvidence.setAccessibilityLabel("Open a saved instruction")
-                    self.relatedEvidence.toolTip = "Review the selected instruction’s saved result and related evidence"
-                    self.relatedEvidence.isHidden = details.report.runs.isEmpty
-                case .failure(let error): self.inspectionFailed(error, initial: true)
-                }
-            }
-        case .spider(let file):
-            prepareInspection(title: "Code Check", file: nil, contextSummary: true)
-            inspection.font = .systemFont(ofSize: 14)
-            guard client.isReady, client.capabilities.contains("spider-check-v1") else {
-                inspectionFailed(BridgeError.message("Code checks are unavailable. Reconnect to a supported runtime."), initial: true); return
-            }
-            let generation = inspectionGeneration
-            client.request("spider.check", params: ["paths": [file]]) { [weak self] result in
-                guard let self, self.inspectionGeneration == generation else { return }
-                switch result {
-                case .success(let data):
-                    guard let details = SpiderCheckDetails(data, file: file) else {
-                        self.inspectionFailed(BridgeError.message("The code-check report could not be verified. Use Reload to try again."), initial: true); return
-                    }
-                    self.spiderDetails = details; self.inspection.textStorage?.setAttributedString(details.attributedText)
-                    self.inspection.scrollToBeginningOfDocument(nil)
-                    self.pageLabel.stringValue = details.observed; self.pageLabel.toolTip = details.observedDetail
-                    self.relatedEvidence.removeAllItems(); self.relatedEvidence.addItems(withTitles: ["Open File…"] + details.files)
-                    self.relatedEvidence.setAccessibilityLabel("Open a code-check file")
-                    self.relatedEvidence.toolTip = "Inspect a file named in this report"
-                    self.relatedEvidence.isHidden = details.files.isEmpty
-                    self.prepareCodeReview.isHidden = false
-                case .failure(let error): self.inspectionFailed(error, initial: true)
-                }
-            }
-        case .file(let path):
-            let parent = (path as NSString).deletingLastPathComponent
-            let folder = parent.isEmpty ? "." : parent
-            if navigation.destination != .files || directory != folder { navigation.select(.files, notify: false); loadDirectory(folder) }
-            prepareInspection(title: path, file: path)
-            openFileWithViewport(path)
-        case .diff(let path, let staged):
-            diffScope.selectedSegment = staged ? 1 : 0
-            prepareInspection(title: path, file: path, diff: true)
-            showPage("changes.read", params: ["path": path, "staged": staged], offset: 0, trail: [], revision: nil)
-        case .output(let run):
-            prepareInspection(title: "Recorded Output", file: nil)
-            showPage("artifact.read", params: ["run": run], offset: 0, trail: [], revision: nil)
-        case .contextHistory(let conversation):
-            prepareInspection(title: "Retained History", file: nil, contextSummary: true)
-            guard client.isReady, client.capabilities.contains("context-history-v1"), currentConversation == conversation else {
-                inspectionFailed(BridgeError.message("History is unavailable for this conversation. Reopen Conversation Context."), initial: true); return
-            }
-            showPage("context.history", params: ["conversation": conversation], offset: 0, trail: [], revision: nil)
-        case .context(let conversation):
-            prepareInspection(title: "Context", file: nil, contextSummary: true)
-            inspectorTitle.toolTip = "Conversation Context"
-            inspection.font = .systemFont(ofSize: 14)
-            guard canShowContext, currentConversation == conversation else {
-                inspectionFailed(BridgeError.message("Context is unavailable for this conversation. Reopen it from Workspace Actions."), initial: true); return
-            }
-            let generation = inspectionGeneration
-            client.request("context.inspect", params: ["conversation": conversation]) { [weak self] result in
-                guard let self, self.inspectionGeneration == generation, self.currentConversation == conversation else { return }
-                switch result {
-                case .success(let data):
-                    guard let details = ConversationContextDetails(data, conversation: conversation) else {
-                        self.inspectionFailed(BridgeError.message("The context snapshot could not be verified. Use Reload to try again."), initial: true); return
-                    }
-                    let text = NSMutableAttributedString(string: details.text, attributes: [.font: NSFont.systemFont(ofSize: 14), .foregroundColor: NSColor.labelColor])
-                    for heading in ConversationContextDetails.headings {
-                        let range = (details.text as NSString).range(of: heading + "\n")
-                        if range.location != NSNotFound { text.addAttribute(.font, value: NSFont.systemFont(ofSize: 14, weight: .semibold), range: range) }
-                    }
-                    self.inspection.textStorage?.setAttributedString(text); self.inspection.scrollToBeginningOfDocument(nil)
-                    self.pageLabel.stringValue = details.observed; self.pageLabel.toolTip = details.observed
-                    self.contextLinks = ConversationContextLink.allCases.filter {
-                        switch $0 {
-                        case .history: return self.client.capabilities.contains("context-history-v1")
-                        case .memory: return self.canShowMemory
-                        case .savedState: return self.canShowSavedState
-                        case .runs: return true
-                        case .checkpoints: return self.client.capabilities.contains("checkpoints-v1")
-                        }
-                    }
-                    self.relatedEvidence.removeAllItems(); self.relatedEvidence.addItems(withTitles: ["Open…"] + self.contextLinks.map(\.title))
-                    self.relatedEvidence.setAccessibilityLabel("Open conversation context controls")
-                    self.relatedEvidence.toolTip = "Open retained history, conversation memory, saved state, recorded runs, or checkpoints"
-                    self.relatedEvidence.isHidden = self.contextLinks.isEmpty
-                case .failure(let error): self.inspectionFailed(error, initial: true)
-                }
-            }
-        case .run(let run):
-            prepareInspection(title: "Run Details", file: nil)
-            guard client.capabilities.contains("run-details") else {
-                showPage("artifact.read", params: ["run": run], offset: 0, trail: [], revision: nil); return
-            }
-            inspection.font = .systemFont(ofSize: 14)
-            let generation = inspectionGeneration
-            client.request("history.read", params: ["run": run]) { [weak self] result in
-                guard let self, self.inspectionGeneration == generation else { return }
-                switch result {
-                case .success(let data):
-                    let details = RunDetails(data)
-                    self.inspection.string = details.text; self.inspection.scrollToBeginningOfDocument(nil)
-                    self.recordedOutput.isHidden = !details.outputAvailable
-                    self.evidenceLinks = details.related.filter { link in
-                        switch link.kind {
-                        case .activity: return self.client.capabilities.contains("walkthrough-v1")
-                        case .checkpoint: return self.client.capabilities.contains("checkpoints-v1")
-                        case .run: return true
-                        }
-                    }
-                    self.relatedEvidence.removeAllItems()
-                    self.relatedEvidence.addItems(withTitles: ["Related…"] + self.evidenceLinks.map(\.label))
-                    self.relatedEvidence.isHidden = self.evidenceLinks.isEmpty
-                    self.pageLabel.stringValue = "Last recorded state · Reload to update"
-                    self.pageLabel.toolTip = self.pageLabel.stringValue
-                case .failure(let error): self.inspectionFailed(error, initial: true)
-                }
-            }
-        }
-    }
-    private func prepareInspection(title: String, file: String?, diff: Bool = false, contextSummary: Bool = false) {
-        inspectionGeneration += 1
-        binaryDocumentLoader?.cancel(); binaryDocumentLoader = nil
-        documentView.isHidden = true; inspectionScroll.isHidden = false
-        inspectionFind.isEnabled = true
-        showingContextSummary = contextSummary
-        let hideFind = NSMenuItem(); hideFind.tag = NSTextFinder.Action.hideFindInterface.rawValue
-        inspection.performTextFinderAction(hideFind)
-        inspectedFile = file; inspectedDiff = diff ? file : nil
-        browsingCompact = false
-        inspectorTitle.stringValue = title; inspectorTitle.toolTip = title
-        inspection.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        inspection.textColor = .labelColor
-        inspection.typingAttributes = [.font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular), .foregroundColor: NSColor.labelColor]
-        inspection.string = "Loading…"; pageLabel.stringValue = "Loading…"; pageLabel.toolTip = nil
-        recordedOutput.isHidden = true
-        spiderDetails = nil; prepareCodeReview.isHidden = true; checkCode.isHidden = !canCheckCode
-        savedStateDetails = nil
-        relatedEvidence.isHidden = true; evidenceLinks = []; contextLinks = []
-        relatedEvidence.setAccessibilityLabel("Related evidence for this instruction")
-        relatedEvidence.toolTip = "Open activity, the previous instruction, or a recorded checkpoint"
-        outline.isHidden = true; declarations = []
-        showingInspector = true; surfaces.selectedSegment = 1
-        breadcrumb.isHidden = file == nil
-        if let file {
-            breadcrumb.url = folder.appendingPathComponent(file)
-            breadcrumb.pathItems = breadcrumb.pathItems.filter { item in
-                guard let path = item.url?.path else { return false }
-                return path == folder.path || path.hasPrefix(folder.path + "/")
-            }
-        }
-        diffScope.isHidden = !diff; revealButton.isHidden = file == nil
-        moreButton.isHidden = true; previousButton.isHidden = true; previousButton.isEnabled = false; nextChunk = nil; previousChunk = nil
-        adapt()
-    }
-    private func openFileWithViewport(_ path: String) {
-        guard client.isReady, client.capabilities.contains("workspace-branch-v1") else {
-            openInspectedFile(path, saved: nil); return
-        }
-        let generation = inspectionGeneration
-        let source = client
-        source.request("workspace.branch") { [weak self, weak source] result in
-            guard let self, let source, self.client === source, self.inspectionGeneration == generation, self.inspectedFile == path else { return }
-            switch result {
-            case .success(let data):
-                guard let branch = data["branch"] as? String else { return }
-                self.viewportBranch = branch
-                let kind = self.viewportKind(path)
-                do {
-                    let saved = try self.viewportStore.load().first { $0.branch == branch && $0.path == path && $0.kind == kind }
-                    self.openInspectedFile(path, saved: saved)
-                } catch {
-                    self.showNotice("Could not restore the saved file position. \(error.localizedDescription)")
-                    self.openInspectedFile(path, saved: nil)
-                }
-            case .failure(let error):
-                self.showNotice("Could not identify the current branch; file position will not be saved. \(error.localizedDescription)")
-                self.openInspectedFile(path, saved: nil)
-            }
-        }
-    }
-    private func viewportKind(_ path: String) -> WorkspaceViewport.Kind {
-        let ext = (path as NSString).pathExtension.lowercased()
-        if ext == "pdf" { return .pdf }
-        if ["png", "jpg", "jpeg", "gif", "tif", "tiff", "heic", "webp", "bmp"].contains(ext) { return .image }
-        return ext == "csv" ? .csv : .code
-    }
-    private func openInspectedFile(_ path: String, saved: WorkspaceViewport?) {
-        let kind = viewportKind(path)
-        guard [.pdf, .image].contains(kind), client.isReady, client.capabilities.contains("binary-inspection-v1") else {
-            showPage("files.read", params: ["path": path], offset: saved?.pageOffset ?? 0, trail: saved?.pageTrail ?? [], revision: nil, restore: saved); return
-        }
-        inspectionGeneration += 1; let generation = inspectionGeneration, source = client
-        let loader = BinaryDocumentLoader(path: path) { [weak source] params, completion in
-            guard let source else { completion(.failure(BridgeError.message("The workspace disconnected."))); return }
-            source.request("files.readBinary", params: params, completion: completion)
-        }
-        binaryDocumentLoader = loader
-        loader.onProgress = { [weak self] count, total in
-            guard let self, self.inspectionGeneration == generation else { return }
-            self.pageLabel.stringValue = "Loading \(count.formatted()) / \(total.formatted()) bytes…"
-        }
-        loader.onComplete = { [weak self, weak loader] result in
-            guard let self, let loader, self.binaryDocumentLoader === loader, self.inspectionGeneration == generation else { return }
-            self.binaryDocumentLoader = nil
-            switch result {
-            case .failure(let error): self.inspectionFailed(error, initial: true)
-            case .success(let data):
-                if let branch = self.viewportBranch {
-                    source.request("workspace.branch") { [weak self, weak source] result in
-                        guard let self, let source, self.client === source, self.inspectionGeneration == generation else { return }
-                        switch result {
-                        case .success(let identity) where identity["branch"] as? String == branch:
-                            self.presentDocument(data, path: path, kind: kind, saved: saved)
-                        case .success: self.inspectionFailed(BridgeError.message("The branch changed while loading this document. Use Reload to open the current version."), initial: true)
-                        case .failure(let error): self.inspectionFailed(error, initial: true)
-                        }
-                    }
-                } else { self.presentDocument(data, path: path, kind: kind, saved: saved) }
-            }
-        }
-        loader.start()
-    }
-    private func presentDocument(_ data: Data, path: String, kind: WorkspaceViewport.Kind, saved: WorkspaceViewport?) {
-        do {
-            try documentView.open(data, kind: kind)
-            inspectionScroll.isHidden = true; documentView.isHidden = false; inspectionFind.isEnabled = false
-            window?.contentView?.layoutSubtreeIfNeeded()
-            documentView.restore(saved)
-            if let branch = viewportBranch { currentViewport = WorkspaceViewport(branch: branch, path: path, kind: kind) }
-            pageLabel.stringValue = "\(data.count.formatted()) bytes · Read only"
-        } catch { inspectionFailed(error, initial: true) }
-    }
-    private func restoreTextViewport(_ state: WorkspaceViewport) {
-        viewportRestoring = true
-        defer { viewportRestoring = false }
-        let length = (inspection.string as NSString).length
-        let location = min(state.selectionLocation, length)
-        inspection.setSelectedRange(NSRange(location: location, length: min(state.selectionLength, length - location)))
-        if let container = inspection.textContainer { inspection.layoutManager?.ensureLayout(for: container) }
-        window?.contentView?.layoutSubtreeIfNeeded()
-        let clip = inspectionScroll.contentView
-        let desired = NSRect(origin: NSPoint(x: state.scrollX, y: state.scrollY), size: clip.bounds.size)
-        clip.scroll(to: clip.constrainBoundsRect(desired).origin); inspectionScroll.reflectScrolledClipView(clip)
-    }
-    private func scheduleViewportSave() {
-        guard currentViewport != nil, !viewportRestoring else { return }
-        viewportSaveTimer?.invalidate()
-        viewportSaveTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { [weak self] _ in self?.saveViewport() }
-    }
-    private func saveViewport() {
-        viewportSaveTimer?.invalidate(); viewportSaveTimer = nil
-        guard var state = currentViewport, !viewportRestoring else { return }
-        if [.pdf, .image].contains(state.kind) { documentView.capture(into: &state) }
-        else {
-            let selected = inspection.selectedRange()
-            state.selectionLocation = selected.location; state.selectionLength = selected.length
-            state.scrollX = max(0, inspectionScroll.contentView.bounds.origin.x)
-            state.scrollY = max(0, inspectionScroll.contentView.bounds.origin.y)
-        }
-        state.updatedAt = Date().timeIntervalSince1970
-        do { try viewportStore.save(state); currentViewport = state; viewportSaveFailed = false }
-        catch {
-            if !viewportSaveFailed { showNotice("Could not save the file position. \(error.localizedDescription)") }
-            viewportSaveFailed = true
-        }
-    }
-    private func checkViewportBranch() {
-        guard !viewportBranchCheckPending, let state = currentViewport, client.isReady, client.capabilities.contains("workspace-branch-v1") else { return }
-        viewportBranchCheckPending = true
-        viewportBranchGeneration += 1; let generation = viewportBranchGeneration, source = client
-        source.request("workspace.branch") { [weak self, weak source] result in
-            guard let self, let source, self.client === source else { return }
-            self.viewportBranchCheckPending = false
-            guard self.viewportBranchGeneration == generation,
-                  self.currentViewport?.path == state.path, self.currentViewport?.branch == state.branch else { return }
-            switch result {
-            case .success(let data):
-                self.viewportBranchCheckFailureShown = false
-                if let branch = data["branch"] as? String, branch != state.branch {
-                    self.saveViewport(); self.inspect(.file(state.path), addToHistory: false)
-                }
-            case .failure(let error):
-                if !self.viewportBranchCheckFailureShown { self.showNotice("Could not check the current branch. \(error.localizedDescription)") }
-                self.viewportBranchCheckFailureShown = true
-            }
-        }
-    }
-    func textViewDidChangeSelection(_ notification: Notification) {
-        if notification.object as? NSTextView === inspection { scheduleViewportSave() }
-    }
-    private func showPage(_ method: String, params: [String: Any], offset: Int, trail: [Int], revision: String?, restore: WorkspaceViewport? = nil) {
-        if method == "files.read" { saveViewport(); currentViewport = nil }
-        inspectionGeneration += 1; let generation = inspectionGeneration
-        var request = params; request["offset"] = offset; if let revision { request["revision"] = revision }
-        if method == "files.read", let branch = viewportBranch { request["branch"] = branch }
-        moreButton.isEnabled = false; previousButton.isEnabled = false
-        client.request(method, params: request) { [weak self] result in
-            guard let self, self.inspectionGeneration == generation else { return }
-            switch result {
-            case .success(let data):
-                if method == "files.read", restore != nil, offset > 0, data["binary"] as? Bool == true {
-                    self.showNotice("The saved position no longer matches this file. Showing its first page.")
-                    self.showPage(method, params: params, offset: 0, trail: [], revision: nil); return
-                }
-                if method == "context.history" {
-                    guard let conversation = params["conversation"] as? String, self.currentConversation == conversation else { return }
-                    guard ContextHistoryPage.isValid(data, conversation: conversation, offset: offset, revision: revision) else {
-                        self.inspectionFailed(BridgeError.message("The retained-history page could not be verified."), initial: revision == nil); return
-                    }
-                }
-                let body = data["text"] as? String ?? ""
-                let baseline = data["baseline"] as? String
-                if method == "artifact.read" || method == "context.history" { self.inspection.font = .systemFont(ofSize: 14); self.inspection.textColor = .labelColor }
-                self.inspection.string = (baseline.map { $0 + "\n\n" } ?? "") + (body.isEmpty && method == "changes.read" ? "No changes in this comparison." : body)
-                if method == "files.read" || method == "changes.read" {
-                    self.inspection.textStorage?.setAttributedString(CodeOutline.highlight(self.inspection.string, diff: method == "changes.read"))
-                    self.declarations = method == "files.read" ? CodeOutline.declarations(in: body, path: params["path"] as? String ?? "") : []
-                    self.outline.removeAllItems(); self.outline.addItem(withTitle: "Outline · declarations on this page")
-                    self.outline.addItems(withTitles: self.declarations.map(\.title)); self.outline.isHidden = self.declarations.isEmpty
-                }
-                if method == "files.read", restore == nil { self.inspection.setSelectedRange(NSRange(location: 0, length: 0)) }
-                self.inspection.scrollToBeginningOfDocument(nil)
-                if method == "files.read", data["binary"] as? Bool == false,
-                   let branch = self.viewportBranch, let path = params["path"] as? String {
-                    let kind: WorkspaceViewport.Kind = (path as NSString).pathExtension.lowercased() == "csv" ? .csv : .code
-                    self.currentViewport = WorkspaceViewport(branch: branch, path: path, kind: kind, pageOffset: offset, pageTrail: trail)
-                    if let restore { self.restoreTextViewport(restore) }
-                }
-                let end = data["nextOffset"] as? Int ?? offset
-                let size = data["size"] as? Int ?? end
-                self.pageLabel.stringValue = "\(offset)–\(end) / \(size) bytes · Read only\(data["truncated"] as? Bool == true ? " · Limited" : "")"
-                self.pageLabel.toolTip = self.pageLabel.stringValue
-                if method == "context.history", let timestamp = data["observedAt"] as? Double {
-                    let observed = DateFormatter.localizedString(from: Date(timeIntervalSince1970: timestamp / 1000), dateStyle: .short, timeStyle: .short)
-                    self.pageLabel.toolTip = self.pageLabel.stringValue + " · Observed " + observed + " · Find searches this page"
-                    self.pageLabel.stringValue = size == 0 ? "No messages · Read only" : "\(Int(ceil(Double(end) / 1024))) / \(Int(ceil(Double(size) / 1024))) KiB"
-                }
-                let token = data["revision"] as? String
-                self.moreButton.isHidden = data["more"] as? Bool != true; self.moreButton.isEnabled = true
-                self.nextChunk = data["more"] as? Bool == true ? { [weak self] in self?.showPage(method, params: params, offset: end, trail: Array((trail + [offset]).suffix(128)), revision: token) } : nil
-                self.previousButton.isEnabled = !trail.isEmpty
-                self.previousButton.isHidden = trail.isEmpty && data["more"] as? Bool != true
-                self.previousChunk = trail.last.map { previous in { [weak self] in self?.showPage(method, params: params, offset: previous, trail: Array(trail.dropLast()), revision: token) } }
-                if data["truncated"] as? Bool == true {
-                    if method == "artifact.read" { self.showNotice("Recorded output reached its storage limit. This evidence is incomplete; review the instruction and its activity before continuing.") }
-                    else if method == "changes.read" { self.showNotice("This diff exceeds the 1 MiB preview limit. The preview is incomplete; inspect the full diff with Git before reviewing it.") }
-                }
-            case .failure(let error):
-                if method == "files.read", restore != nil, offset > 0 {
-                    self.showNotice("The saved position could not be restored. Showing the first page. \(error.localizedDescription)")
-                    self.showPage(method, params: params, offset: 0, trail: [], revision: nil)
-                } else { self.inspectionFailed(error, initial: revision == nil) }
-            }
-        }
-    }
-    private func inspectionFailed(_ error: Error, initial: Bool) {
-        if initial {
-            inspection.font = .systemFont(ofSize: 14)
-            inspection.string = "Could not load this content.\n\n\(error.localizedDescription)\n\nUse Reload to try again, or go Back to your previous view."
-            inspection.scrollToBeginningOfDocument(nil)
-        }
-        else { showNotice("Could not load the requested page. The last loaded page is still visible. \(error.localizedDescription)") }
-        pageLabel.stringValue = initial ? "Could not load · use Reload" : "Page unchanged · use Reload"
-        pageLabel.toolTip = pageLabel.stringValue
-        moreButton.isHidden = true; previousButton.isEnabled = false; nextChunk = nil; previousChunk = nil
-    }
-    @objc func inspectBack() { if canInspectBack, let destination = inspectionHistory.back() { inspect(destination, addToHistory: false) } }
-    @objc func inspectForward() { if canInspectForward, let destination = inspectionHistory.forward() { inspect(destination, addToHistory: false) } }
-    @objc func findInWalkthrough() {
-        guard canFindInWalkthrough else { return }
-        walkthrough.focusSearch()
-    }
-    @objc func findInInspection() {
-        if canFindInInspection {
-            window?.makeFirstResponder(inspection)
-            let find = NSMenuItem(); find.tag = NSTextFinder.Action.showFindInterface.rawValue
-            inspection.performTextFinderAction(find)
-        } else if canFindInWalkthrough {
-            walkthrough.focusSearch()
-        }
-    }
-    @objc private func openRecordedOutput() {
-        if case .run(let run) = inspectionHistory.current, !recordedOutput.isHidden { inspect(.output(run)) }
-    }
-    @objc private func openRelatedEvidence() {
-        let index = relatedEvidence.indexOfSelectedItem - 1
-        if case .savedState(let conversation) = inspectionHistory.current {
-            guard canShowSavedState, currentConversation == conversation, let details = savedStateDetails, details.report.runs.indices.contains(index) else { return }
-            inspect(.run(details.report.runs[index].id)); return
-        }
-        if case .spider = inspectionHistory.current {
-            guard client.isReady, !switchingConversation, let details = spiderDetails, details.files.indices.contains(index) else { return }
-            readFile(details.files[index]); return
-        }
-        if case .context(let conversation) = inspectionHistory.current {
-            guard canShowContext, currentConversation == conversation, contextLinks.indices.contains(index) else { return }
-            relatedEvidence.selectItem(at: 0)
-            switch contextLinks[index] {
-            case .history: inspect(.contextHistory(conversation))
-            case .memory: showMemory()
-            case .savedState: showSavedState()
-            case .runs: showSessions()
-            case .checkpoints: showCheckpoints()
-            }
-            return
-        }
-        guard client.isReady, !switchingConversation, evidenceLinks.indices.contains(index),
-              case .run = inspectionHistory.current else { return }
-        let link = evidenceLinks[index]
-        relatedEvidence.selectItem(at: 0)
-        switch link.kind {
-        case .activity: showProjectRepair(link.id)
-        case .run: inspect(.run(link.id))
-        case .checkpoint: openCheckpoints(selected: link.id)
-        }
-    }
-    @objc private func refreshInspection() { reloadInspection?() }
-    @objc private func loadNextPage() { nextChunk?() }
-    @objc private func loadPreviousPage() { previousChunk?() }
-    @objc private func changeDiffScope() { if let path = inspectedDiff { readDiff(path) } }
-    @objc private func revealFile() { if let path = inspectedFile { NSWorkspace.shared.activateFileViewerSelecting([folder.appendingPathComponent(path)]) } }
-    @objc private func openBreadcrumb() {
-        guard let url = breadcrumb.clickedPathItem?.url else { return }
-        let relative = url.path == folder.path ? "." : String(url.path.dropFirst(folder.path.count + 1))
-        guard url.path == folder.path || url.path.hasPrefix(folder.path + "/"), url != breadcrumb.url else { return }
-        navigation.select(.files, notify: false); navigate(.files); loadDirectory(relative)
-    }
-    @objc private func switchSurface() {
+    @objc func switchSurface() {
         if surfaces.selectedSegment == 1, (window?.frame.width ?? 1280) < 1000 {
             compactSidebarRevealed = false; showingInspector = true
         }
         adapt()
     }
-    private func adapt() {
+
+    func adapt() {
         let narrow = (window?.frame.width ?? 1280) < 1000
         let short = (window?.frame.height ?? 800) < 640
         navigation.previewsSelection = !short
@@ -3704,7 +714,8 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         if transcriptScroll.isHidden || runs.isEmpty { jumpButton.isHidden = true }
         transcript.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<rows.count))
     }
-    private func restoreTranscriptAfterResize() {
+
+    func restoreTranscriptAfterResize() {
         guard let anchor = resizeAnchor else { return }
         window?.contentView?.layoutSubtreeIfNeeded()
         transcript.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<rows.count))
@@ -3717,9 +728,11 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         }
         resizeAnchor = nil
     }
+
     func windowDidResize(_ notification: Notification) { adapt(); modelPicker?.syncPresentation(recenter: true) }
     func windowDidBecomeKey(_ notification: Notification) { if needsRebuild { rebuildRows() }; if client.isReady && !closing { client.requestSnapshot(); checkViewportBranch() } }
     func windowDidChangeOcclusionState(_ notification: Notification) { if needsRebuild && window?.occlusionState.contains(.visible) == true { rebuildRows() }; updateElapsedTimer(); updateWalkthroughVisibility() }
+
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard prepareToClose() else { return false }
         if stopped || client.process == nil { return true }
@@ -3732,23 +745,29 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         }
         stopAndClose(); return false
     }
+
     func stopAndClose() {
         guard !closing else { return }
         guard prepareToClose() else { return }
         if stopped || client.process == nil { window?.close(); return }
         closing = true; composer.isEditable = false; stopThenSend = nil; status.stringValue = "Stopping and flushing workspace…"; stop(); client.shutdown()
     }
+
     func windowWillClose(_ notification: Notification) {
-        viewportBranchTimer?.invalidate(); viewportBranchTimer = nil
-        saveViewport(); if let viewportObserver { NotificationCenter.default.removeObserver(viewportObserver); self.viewportObserver = nil }
-        binaryDocumentLoader?.cancel(); binaryDocumentLoader = nil
-        memoryWindow?.dismiss(); memoryWindow = nil
-        palette?.cancelOperation(nil); palette = nil; modelPicker?.dismiss(restoreFocus: false); modelPicker = nil; saveDraft(); layoutTimer?.invalidate(); elapsedTimer?.invalidate(); client.closeInput(); onClosed?() }
+        dispose()
+        saveViewport()
+        saveDraft()
+        client.closeInput()
+        onClosed?()
+    }
+
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
+
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
         guard rows.indices.contains(row) else { return 40 }
         return TranscriptMessageLayout(rows[row], availableWidth: tableView.frameOfCell(atColumn: 0, row: row).width).height
     }
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let value = rows[row]
         return TranscriptMessageCell(value, expanded: expandedActions.contains(value.id), toggle: { [weak self] in

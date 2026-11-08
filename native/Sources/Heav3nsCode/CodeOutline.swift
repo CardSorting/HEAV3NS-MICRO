@@ -27,7 +27,7 @@ enum CodeOutline {
         let result = NSMutableAttributedString(string: text, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular), .foregroundColor: NSColor.labelColor])
         if !diff {
             let rules: [(String, NSColor)] = [
-                (#"\b(?:import|from|class|struct|enum|protocol|func|function|async|await|return|let|var|const|if|else|guard|private|public|export|type|interface|def|self|nil|true|false)\b"#, .systemPurple),
+                (#"\b(?:import|from|use|crate|mod|pub|fn|impl|trait|match|mut|where|for|in|loop|while|class|struct|enum|protocol|func|function|async|await|return|let|var|const|if|else|guard|private|public|export|type|interface|def|self|Self|nil|true|false|Some|None|Ok|Err)\b"#, .systemPurple),
                 (#"\"(?:[^\"\\]|\\.)*\""#, .systemRed),
                 (#"(?m)//[^\n]*"#, .secondaryLabelColor)
             ]

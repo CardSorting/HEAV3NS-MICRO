@@ -113,15 +113,15 @@ impl AgentEngine {
         &self.provider
     }
 
-    pub(crate) fn compactor(&self) -> &SessionCompactor {
+    pub fn compactor(&self) -> &SessionCompactor {
         &self.compactor
     }
 
-    pub(crate) fn config_snapshot(&self) -> AgentConfig {
+    pub fn config_snapshot(&self) -> AgentConfig {
         self.config.lock().unwrap().clone()
     }
 
-    pub(crate) fn inspect_or_switch_model(&self, arg: &str) -> String {
+    pub fn inspect_or_switch_model(&self, arg: &str) -> String {
         let mut cfg = self.config.lock().unwrap();
         if arg.is_empty() {
             format!(
@@ -132,6 +132,10 @@ impl AgentEngine {
             cfg.model_name = arg.to_string();
             format!("Switched active model to: {}", cfg.model_name)
         }
+    }
+
+    pub fn snapshots_list(&self) -> Vec<GameStateSnapshot> {
+        self.snapshots.lock().unwrap().clone()
     }
 
     pub(crate) fn snapshot_count(&self) -> usize {

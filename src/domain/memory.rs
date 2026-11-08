@@ -64,6 +64,10 @@ impl MemoryStore {
         self.search_memories("")
     }
 
+    pub fn remove_memory(&mut self, key: &str) -> bool {
+        self.entries.remove(key).is_some()
+    }
+
     pub fn restore_memories(&mut self, entries: Vec<MemoryEntry>) {
         self.entries.clear();
         for entry in entries {
