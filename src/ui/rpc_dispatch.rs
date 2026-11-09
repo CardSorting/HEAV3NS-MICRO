@@ -68,7 +68,13 @@ pub fn build_hello_response(ws_id: &str, sess_id: &str, workspace_root: &Path) -
             "conversation-memory-v1",
             "checkpoints-v1",
             "conversations",
-            "conversation-delete-v1"
+            "conversation-delete-v1",
+            "computer-use-v1",
+            "browser-dom-v1",
+            "vision-inspect-v1",
+            "skill-forge-v1",
+            "soul-vault-v1",
+            "heredoc-defense-v1"
         ]
     })
 }
@@ -390,36 +396,70 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
         }
         "files.list" => {
             let rel = params.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            let target_dir = if rel.is_empty() || rel.contains("..") { root.to_path_buf() } else { root.join(rel) };
-            let mut entries = Vec::new();
+            let clean_rel = if rel == "." { "" } else { rel.trim_matches('/') };
+            let query = params.get("query").and_then(|v| v.as_str()).unwrap_or("").trim().to_lowercase();
+            let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let target_dir = if clean_rel.is_empty() || clean_rel.contains("..") {
+                root.to_path_buf()
+            } else {
+                root.join(clean_rel)
+            };
+            let mut all_entries = Vec::new();
             if let Ok(rd) = fs::read_dir(&target_dir) {
                 let mut raw: Vec<_> = rd.flatten().collect();
-                raw.sort_by_key(|e| e.file_name());
+                raw.sort_by(|a, b| {
+                    let a_dir = a.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                    let b_dir = b.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                    b_dir.cmp(&a_dir).then_with(|| a.file_name().cmp(&b.file_name()))
+                });
                 for entry in raw {
                     let name = entry.file_name().to_string_lossy().to_string();
                     if matches!(name.as_str(), ".git" | "target" | ".build" | "node_modules" | ".DS_Store") {
                         continue;
                     }
-                    let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-                    let path_str = if rel.is_empty() { name.clone() } else { format!("{}/{}", rel.trim_end_matches('/'), name) };
-                    entries.push(json!({
+                    let ft = entry.file_type();
+                    let is_dir = ft.as_ref().map(|t| t.is_dir()).unwrap_or(false);
+                    let is_symlink = ft.as_ref().map(|t| t.is_symlink()).unwrap_or(false);
+                    let path_str = if clean_rel.is_empty() {
+                        name.clone()
+                    } else {
+                        format!("{clean_rel}/{name}")
+                    };
+                    if !query.is_empty() && !name.to_lowercase().contains(&query) && !path_str.to_lowercase().contains(&query) {
+                        continue;
+                    }
+                    all_entries.push(json!({
                         "path": path_str,
                         "name": name,
+                        "directory": is_dir,
+                        "symlink": is_symlink,
                         "type": if is_dir { "directory" } else { "file" }
                     }));
                 }
             }
-            json!({ "entries": entries })
+            let matched = all_entries.len();
+            let page_size = 100usize;
+            let entries: Vec<Value> = all_entries.into_iter().skip(offset).take(page_size).collect();
+            let next_offset = offset + entries.len();
+            json!({
+                "entries": entries,
+                "matched": matched,
+                "more": next_offset < matched,
+                "nextOffset": next_offset,
+                "scanLimited": false
+            })
         }
         "files.search" => {
-            let query = params.get("query").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+            let query = params.get("query").and_then(|v| v.as_str()).unwrap_or("").trim().to_lowercase();
             let mut matched = Vec::new();
             collect_search_files(root, root, &query, &mut matched, 0);
-            let count = matched.len();
+            matched.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.len().cmp(&b.1.len())).then_with(|| a.1.cmp(&b.1)));
+            let total_matched = matched.len();
+            let entries: Vec<Value> = matched.into_iter().take(60).map(|(_, _p, v)| v).collect();
             json!({
-                "entries": matched,
-                "matched": count,
-                "more": false,
+                "entries": entries,
+                "matched": total_matched,
+                "more": total_matched > 60,
                 "scanLimited": false,
                 "scope": "workspace"
             })
@@ -468,9 +508,22 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
             let staged = engine.vfs().lock().unwrap().export_staged();
             let entries: Vec<Value> = staged
                 .into_iter()
-                .map(|f| json!({ "path": f.path, "status": if f.is_deleted { "deleted" } else { "modified" } }))
+                .map(|f| {
+                    let name = Path::new(&f.path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| f.path.clone());
+                    json!({
+                        "path": f.path,
+                        "name": name,
+                        "status": if f.is_deleted { "deleted" } else { "modified" },
+                        "staged": true,
+                        "unstaged": false,
+                        "untracked": false
+                    })
+                })
                 .collect();
-            json!({ "entries": entries })
+            json!({ "entries": entries, "limited": false })
         }
         "changes.read" => {
             let path = params.get("path").and_then(|v| v.as_str()).unwrap_or("");
@@ -489,15 +542,16 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
     }
 }
 
-fn collect_search_files(root: &Path, dir: &Path, query: &str, out: &mut Vec<Value>, depth: usize) {
-    if depth > 5 || out.len() >= 60 {
+fn collect_search_files(root: &Path, dir: &Path, query: &str, out: &mut Vec<(i32, String, Value)>, depth: usize) {
+    if depth > 6 || out.len() >= 1000 {
         return;
     }
     let Ok(rd) = fs::read_dir(dir) else { return };
     let mut entries: Vec<_> = rd.flatten().collect();
     entries.sort_by_key(|e| e.file_name());
+    let terms: Vec<&str> = query.split_whitespace().collect();
     for entry in entries {
-        if out.len() >= 60 {
+        if out.len() >= 1000 {
             break;
         }
         let name = entry.file_name().to_string_lossy().to_string();
@@ -510,8 +564,24 @@ fn collect_search_files(root: &Path, dir: &Path, query: &str, out: &mut Vec<Valu
             collect_search_files(root, &path, query, out, depth + 1);
         } else if let Ok(rel) = path.strip_prefix(root) {
             let rel_str = rel.to_string_lossy().to_string();
-            if query.is_empty() || rel_str.to_lowercase().contains(query) {
-                out.push(json!({ "path": rel_str, "type": "file" }));
+            let rel_lower = rel_str.to_lowercase();
+            let name_lower = name.to_lowercase();
+            let matches = terms.is_empty() || terms.iter().all(|t| rel_lower.contains(t));
+            if matches {
+                let score = if query.is_empty() {
+                    0
+                } else if name_lower == query {
+                    1000
+                } else if name_lower.starts_with(query) {
+                    600
+                } else if name_lower.contains(query) {
+                    300
+                } else if rel_lower.contains(query) {
+                    150
+                } else {
+                    50
+                };
+                out.push((score, rel_str.clone(), json!({ "path": rel_str, "name": name, "type": "file" })));
             }
         }
     }

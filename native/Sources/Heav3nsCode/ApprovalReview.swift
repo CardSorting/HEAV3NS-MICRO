@@ -93,4 +93,5 @@ final class ApprovalReview: NSWindowController, NSWindowDelegate {
     }
     override func cancelOperation(_ sender: Any?) { dismiss() }
     func windowShouldClose(_ sender: NSWindow) -> Bool { dismiss(); return false }
+    func dispose() { dismiss() }
 }

@@ -205,6 +205,7 @@ final class ChatGPTAccountsWindow: NSWindowController, NSWindowDelegate {
     @objc private func toggleAuto(_ sender: NSButton) {
         perform("setAuto", params: ["enabled": sender.state == .on], success: sender.state == .on ? "Automatic switching is on." : "Automatic switching is off.")
     }
+    func dispose() { window?.orderOut(nil) }
 }
 
 private final class FlippedView: NSView { override var isFlipped: Bool { true } }

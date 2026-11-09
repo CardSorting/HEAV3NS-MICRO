@@ -165,4 +165,5 @@ final class ControlFrameReader {
         readLock.lock(); inbox.stop(); readLock.unlock()
         deliveryLock.lock(); delivery = nil; deliveryLock.unlock()
     }
+    func dispose() { stop() }
 }

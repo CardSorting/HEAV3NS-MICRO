@@ -3,13 +3,15 @@
 
 <p align="center">
   <a href="../README.md">Docs Hub</a> ·
+  <a href="../../doc.md">Foundational Charter (doc.md)</a> ·
+  <a href="ascendant-intelligence.md">Ascendant Intelligence</a> ·
   <a href="companion-brief.md">Companion Brief</a> ·
   <a href="philosophy.md">Philosophy</a> ·
   <a href="whitepaper.md">Whitepaper</a> ·
   <a href="../wiki/README.md">Wiki</a>
 </p>
 
-This section contains the theoretical and empirical foundations of **HEAV3NS-MICRO**, providing academic, philosophical, and executive perspectives on hyper-compressed agent runtime engineering.
+This section contains the theoretical, mathematical, and empirical foundations of **HEAV3NS — The Sovereign Intelligence Architecture** and its hyper-compressed runtime **HEAV3NS-MICRO**, providing foundational doctrine, philosophical principles, formal specifications, and executive metrics.
 
 ---
 
@@ -17,17 +19,19 @@ This section contains the theoretical and empirical foundations of **HEAV3NS-MIC
 
 | Paper | Scope | Key Topics |
 | :--- | :--- | :--- |
-| **[Companion Brief](companion-brief.md)** | Executive & SRE Overview | Live workspace-verified metrics, benchmark throughput, and operational comparison. |
-| **[Philosophy](philosophy.md)** | Engineering Values & Ethics | Spatial sovereignty, zero-allocation agent loops, and human-in-the-loop auditability. |
-| **[Technical Whitepaper](whitepaper.md)** | Formal Substrate Specification | Arena bump allocation, self-healing streaming parsing, and topological wave scheduling. |
+| **[The Ascendant Computational Intelligence](ascendant-intelligence.md)** | Foundational Doctrine & Cybernetic Theory | The Seven Sovereign Pillars (`HEAV3NS-MICRO`, `SPIDER`, `REWIND`, `BROCCOLI`, `SYNTHETIC SWARM`, `COMPUTER USE`, `THE HARNESS`), emergent intelligence formalism, and the 5 Grand Challenges. |
+| **[Companion Brief](companion-brief.md)** | Executive & SRE Overview | Live workspace-verified metrics (`64` Rust modules, `39` `I<Name>` traits, `29` tools, `49` Rust tests, `311` AppKit tests, `E_S = 0.0038`), benchmark throughput, and operational comparison. |
+| **[Philosophy](philosophy.md)** | Engineering Values & Ethics | Spatial sovereignty, embodied agency beyond passive token prediction, bounded memory, and reversible reality parity. |
+| **[Technical Whitepaper](whitepaper.md)** | Formal Substrate & Spatial Specification | Arena bump allocation, self-healing streaming parsing, two-phase VFS, Double-Wrapped Spatial Action Mediation (`Wrapper A` + `Wrapper B`), 9-stage Closed-Loop Computer Use, and AppKit JSON-RPC IPC. |
 
 ---
 
 ## Reading Order
 
-1. **New Visitors & Executives**: Start with the [Companion Brief](companion-brief.md) for a concise, verified summary of performance characteristics and architectural pillars.
-2. **Software Architects**: Read [Philosophy](philosophy.md) to understand why Joyzoning spatial sovereignty and zero-allocation memory models matter for autonomous systems.
-3. **Core Substrate Engineers**: Study the [Technical Whitepaper](whitepaper.md) for detailed mathematical models, formal algorithms, and empirical verification data.
+1. **Visionaries & System Leaders**: Begin with [`doc.md`](../../doc.md) and **[The Ascendant Computational Intelligence](ascendant-intelligence.md)** to understand the seven cooperating pillars of the HEAV3NS computational civilization.
+2. **New Visitors & Executives**: Read the **[Companion Brief](companion-brief.md)** for a concise, workspace-verified summary of metrics, capabilities, and architectural guarantees.
+3. **Software Architects**: Read **[Philosophy](philosophy.md)** to understand why Joyzoning spatial sovereignty, embodied agency, and zero-allocation memory models matter for autonomous systems.
+4. **Core Substrate Engineers**: Study the **[Technical Whitepaper](whitepaper.md)** for mathematical models, formal algorithms, and empirical verification data.
 
 ---
 
@@ -36,10 +40,14 @@ This section contains the theoretical and empirical foundations of **HEAV3NS-MIC
 All quantitative claims made across these papers are verified directly against the live repository:
 
 ```bash
-# Verify flight benchmarks and test suite
+# Verify Rust test suite (49 tests) and Agent Flight benchmarks (FT-01..FT-05)
 cargo test
 cargo run -- --flight
 
-# Verify documentation metrics and links
+# Verify Native macOS AppKit test suite (311 tests)
+cd native && swift test && cd ..
+
+# Verify 100% Joyzoning Stability Index and documentation guardrails
+npm run joy-check
 npm run docs:check
 ```

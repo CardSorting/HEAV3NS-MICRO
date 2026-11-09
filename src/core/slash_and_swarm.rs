@@ -1,7 +1,7 @@
 // [LAYER: CORE]
 use crate::core::engine::AgentEngine;
 use crate::domain::compaction::CompactionPolicy;
-use crate::domain::swarm::{SwarmAssignment, SwarmFormationResult, SwarmItemReport};
+use crate::domain::swarm::{classify_task_for_legion, SwarmAssignment, SwarmFormationResult, SwarmItemReport};
 use crate::domain::types::messages::{estimate_messages_tokens, Role, SessionMessage};
 use crate::domain::types::runtime::{CancellationToken, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel};
 use crate::infrastructure::vfs_store::{workspace_revision, SkillsIngestor};
@@ -179,7 +179,14 @@ impl AgentEngine {
                 "  /commit             - Commit staged VFS mutations to disk",
                 "  /discard            - Discard staged VFS mutations",
                 "  /memory [query]     - List or search persistent LUMI-MEMORY/1 facts",
-                "  /skills             - List discovered workspace SKILL.md capabilities",
+                "  /skills             - List discovered workspace SKILL.md & DAG capabilities",
+                "  /soul               - Inspect active Soul persona, axioms, and competencies",
+                "  /forge <prompt>     - Synthesize a new custom skill into the Skill Tree DAG",
+                "  /doctor             - Audit Computer Use SLA health and Skill Tree DAG integrity",
+                "  /computer [action]  - Capture or inspect Set-of-Marks Virtual Display state",
+                "  /browser [url]      - Navigate or snapshot interactive Set-of-Marks DOM tree",
+                "  /vision [path]      - Decode binary image header metadata or generate test SVG",
+                "  /legion <objective> - Classify task into The Legion 7-specialist swarm DAG",
                 "  /compact            - Force rolling LUMI-CONTEXT/1 compaction",
                 "  /model [name]       - Inspect or switch the active model",
                 "  /snapshot           - Capture a holistic session + VFS + arena snapshot",
@@ -256,7 +263,138 @@ impl AgentEngine {
             }
             "/skills" => {
                 let skills = SkillsIngestor::discover(self.workspace_root());
-                serde_json::to_string_pretty(&skills).unwrap_or_default()
+                let dag = self.tools().skill_catalog.lock().unwrap().evaluate_dag();
+                serde_json::to_string_pretty(&json!({ "workspaceSkills": skills, "skillTreeDag": dag })).unwrap_or_default()
+            }
+            "/soul" => {
+                let cat = self.tools().skill_catalog.lock().unwrap();
+                serde_json::to_string_pretty(&json!({
+                    "activeSoul": cat.active_soul,
+                    "competencies": cat.competency_scores
+                }))
+                .unwrap_or_default()
+            }
+            "/forge" => {
+                let prompt = if arg.is_empty() { "sovereign-custom-operator" } else { arg };
+                let mut cat = self.tools().skill_catalog.lock().unwrap();
+                match cat.forge_skill(&json!({ "prompt": prompt })) {
+                    Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_default(),
+                    Err(e) => format!("Skill forge error: {e}"),
+                }
+            }
+            "/doctor" => {
+                let disp_health = self.tools().display_state.lock().unwrap().audit_health();
+                let dag = self.tools().skill_catalog.lock().unwrap().evaluate_dag();
+                serde_json::to_string_pretty(&json!({
+                    "displayHealth": disp_health,
+                    "skillTreeAcyclic": dag.get("acyclic"),
+                    "skillNodeCount": dag.get("nodeCount")
+                }))
+                .unwrap_or_default()
+            }
+            "/computer" => {
+                let mut sub_parts = arg.splitn(2, char::is_whitespace);
+                let sub_cmd = sub_parts.next().unwrap_or("").trim().to_ascii_lowercase();
+                let sub_arg = sub_parts.next().unwrap_or("").trim();
+                match sub_cmd.as_str() {
+                    "observe" => {
+                        let obs = self.tools().computer_orchestrator.observe();
+                        serde_json::to_string_pretty(&obs).unwrap_or_default()
+                    }
+                    "interpret" => {
+                        let obs = self.tools().computer_orchestrator.observe();
+                        let interp = self.tools().computer_orchestrator.interpret(&obs);
+                        serde_json::to_string_pretty(&interp).unwrap_or_default()
+                    }
+                    "patterns" => {
+                        let kstore = self.tools().computer_orchestrator.knowledge_store.lock().unwrap();
+                        serde_json::to_string_pretty(&json!({
+                            "patterns": kstore.list_patterns(),
+                            "procedures": kstore.list_procedures()
+                        }))
+                        .unwrap_or_default()
+                    }
+                    "consult" => {
+                        use crate::domain::interfaces::ISwarmIntelligenceConsultant;
+                        let obs = self.tools().computer_orchestrator.observe();
+                        let goal = if sub_arg.is_empty() { "Analyze active window" } else { sub_arg };
+                        let mut req = crate::domain::types::swarm_intelligence_types::SwarmConsultationRequest::new(
+                            "consult-slash",
+                            goal,
+                            &obs.app_name,
+                            &obs.window_title,
+                        );
+                        req.modal_blocking = obs.modal_detected;
+                        req.candidate_target_ids = obs.elements.iter().map(|e| e.id.clone()).collect();
+                        let res = self.tools().computer_orchestrator.consult(&req);
+                        serde_json::to_string_pretty(&res).unwrap_or_default()
+                    }
+                    "orchestrate" => {
+                        let target = if sub_arg.is_empty() { None } else { Some(sub_arg.to_string()) };
+                        let contract = crate::domain::types::spatial_types::SpatialActionContract {
+                            action_name: "click".into(),
+                            target_selector: target,
+                            ..Default::default()
+                        };
+                        match self.tools().computer_orchestrator.execute_closed_loop_cycle("Slash command orchestration", &contract) {
+                            Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_default(),
+                            Err(e) => format!("Computer orchestration error: {e}"),
+                        }
+                    }
+                    _ => {
+                        let mut disp = self.tools().display_state.lock().unwrap();
+                        let action = if arg.is_empty() { "capture" } else { arg };
+                        match disp.execute_action(&json!({ "action": action })) {
+                            Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_default(),
+                            Err(e) => format!("Computer action error: {e}"),
+                        }
+                    }
+                }
+            }
+            "/browser" => {
+                let mut disp = self.tools().display_state.lock().unwrap();
+                let req = if arg.is_empty() {
+                    json!({ "action": "snapshot" })
+                } else {
+                    json!({ "action": "navigate", "url": arg })
+                };
+                match disp.execute_browser_action(&req) {
+                    Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_default(),
+                    Err(e) => format!("Browser action error: {e}"),
+                }
+            }
+            "/vision" => {
+                if arg.is_empty() {
+                    let svg = crate::plumbing::vision_and_dom::generate_synthetic_svg(800, 600, "HEAV3NS-MICRO Vision");
+                    let meta = crate::plumbing::vision_and_dom::decode_image_metadata(svg.as_bytes()).unwrap_or_default();
+                    serde_json::to_string_pretty(&meta).unwrap_or_default()
+                } else {
+                    match SkillsIngestor::inspect_workspace_image(self.workspace_root(), arg) {
+                        Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_default(),
+                        Err(e) => format!("Vision inspect error: {e}"),
+                    }
+                }
+            }
+            "/spatial" => {
+                if arg.is_empty() {
+                    serde_json::to_string_pretty(&self.tools().spatial_engine.audit_health()).unwrap_or_default()
+                } else {
+                    let contract = crate::domain::types::spatial_types::SpatialActionContract {
+                        action_name: "click".into(),
+                        target_selector: Some(arg.to_string()),
+                        ..Default::default()
+                    };
+                    let disp = self.tools().display_state.lock().unwrap();
+                    let fresh = crate::core::spatial_engine::SpatialInteractionEngine::extract_scene_from_display(&disp);
+                    let mut med = self.tools().spatial_engine.mediator.lock().unwrap();
+                    med.update_scene(fresh);
+                    let res = med.ground_action(&contract);
+                    serde_json::to_string_pretty(&res).unwrap_or_default()
+                }
+            }
+            "/legion" => {
+                let obj = if arg.is_empty() { "Audit, harden, and verify workspace architecture" } else { arg };
+                serde_json::to_string_pretty(&classify_task_for_legion(obj, &[], None, 5)).unwrap_or_default()
             }
             "/compact" => {
                 let mut sess = self.session().lock().unwrap();

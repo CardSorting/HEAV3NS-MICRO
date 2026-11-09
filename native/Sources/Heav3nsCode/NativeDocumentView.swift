@@ -113,4 +113,5 @@ final class NativeDocumentView: NSView {
         else if kind == .image { imageScroll.magnification = min(20, max(0.05, imageScroll.magnification * factor)) }
         changed()
     }
+    func dispose() {}
 }

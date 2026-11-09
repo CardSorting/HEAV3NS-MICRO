@@ -36,6 +36,22 @@ struct InspectionHistory {
         guard canGoForward else { return nil }
         index += 1; return current
     }
+    mutating func jump(to targetIndex: Int) -> InspectionDestination? {
+        guard entries.indices.contains(targetIndex) else { return nil }
+        index = targetIndex; return current
+    }
+    func recentFiles(limit: Int = 10) -> [String] {
+        guard limit > 0 else { return [] }
+        var seen = Set<String>()
+        var files = [String]()
+        for entry in entries.reversed() {
+            if case .file(let path) = entry, seen.insert(path).inserted {
+                files.append(path)
+                if files.count >= limit { break }
+            }
+        }
+        return files
+    }
 }
 
 struct RunDetails {

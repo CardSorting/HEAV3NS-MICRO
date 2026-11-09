@@ -210,6 +210,14 @@ impl ToolCallArgParser {
                                     if let Some(num) = serde_json::Number::from_f64(f) {
                                         args.insert(name.to_string(), Value::Number(num));
                                     }
+                                } else if let Some(pct) = s.trim().strip_suffix('%') {
+                                    if let Ok(p) = pct.trim().parse::<f64>() {
+                                        if let Some(num) = serde_json::Number::from_f64(p / 100.0) {
+                                            args.insert(name.to_string(), Value::Number(num));
+                                        }
+                                    } else {
+                                        errors.push(format!("Parameter '{name}' expected number, got '{s}'"));
+                                    }
                                 } else {
                                     errors.push(format!("Parameter '{name}' expected number, got '{s}'"));
                                 }

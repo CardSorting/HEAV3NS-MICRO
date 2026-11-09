@@ -615,4 +615,5 @@ final class WalkthroughView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     var diagnostics: [String: Any] {
         ["progressSummary": progressSummary.stringValue, "filter": selectedFilter.rawValue, "coverage": coverage.stringValue, "selectedRun": selectedID ?? "", "pinnedRun": pinnedID ?? "", "stage": stage, "animating": isAnimating, "visibleActivities": visibleActivities.count, "expandedActivities": expanded.count, "reduceMotion": reduceMotionOverride ?? NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, "continuationVisible": !resume.isHidden, "continuationEnabled": resume.isEnabled, "continuationTitle": resume.title]
     }
+    func dispose() {}
 }

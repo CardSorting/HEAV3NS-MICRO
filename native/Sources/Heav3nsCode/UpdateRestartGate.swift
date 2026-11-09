@@ -37,4 +37,9 @@ final class UpdateRestartGate {
             handler?()
         }
     }
+
+    func dispose() {
+        install = nil
+        changed = nil
+    }
 }

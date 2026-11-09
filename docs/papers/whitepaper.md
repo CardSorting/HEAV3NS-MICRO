@@ -1,119 +1,119 @@
 <!-- [LAYER: UI] -->
 # HEAV3NS-MICRO Technical Whitepaper
 
-**A Zero-Bloat, High-Throughput Rust Micro Agent Runtime & Native Desktop Architecture**  
+**A Zero-Bloat, High-Throughput Rust Intelligence Runtime, Double-Wrapped Spatial Action Architecture & Native macOS Control Station**  
 *HEAV3NS Architecture Working Group*
 
 <p align="center">
   <a href="README.md">Papers Hub</a> ·
+  <a href="../../doc.md">Foundational Charter (doc.md)</a> ·
+  <a href="ascendant-intelligence.md">Ascendant Intelligence</a> ·
   <a href="companion-brief.md">Companion Brief</a> ·
   <a href="philosophy.md">Philosophy</a> ·
   <a href="../architecture/current.md">Architecture</a> ·
-  <a href="../adr/0010-native-desktop-integration-and-rpc-protocol.md">ADR-0010</a>
+  <a href="../adr/0011-sovereign-intelligence-and-spatial-computer-use.md">ADR-0011</a>
 </p>
 
 ---
 
 ## Abstract
 
-We present **HEAV3NS-MICRO**, a hyper-compressed, deterministic agent execution runtime written in Rust paired with a native AppKit macOS developer control station. By organizing system modules across five sovereign architectural zones and enforcing mathematical dependency constraints, HEAV3NS-MICRO eliminates runtime heap fragmentation, parser desynchronization, speculative disk corruption, and UI thread stalls. Central to the runtime is a contiguous 16-MiB arena allocator enabling constant-time $O(1)$ scratch memory reclamation, an incremental self-healing JSON parser resilient to streaming markdown block fences, a two-phase virtual file system with baseline hash verification, a topological wave scheduler for concurrent tool execution, and a bidirectional stdio JSON-RPC IPC bridge connecting the substrate to the desktop IDE. We demonstrate 100% architectural sovereignty, zero blocking violations, and complete passing verification across 8 Rust test suites (including the 5-scenario Agent Flight benchmark) and 308 native AppKit tests.
+We present **HEAV3NS-MICRO** (`v0.1.0`), the distilled Rust intelligence runtime of **HEAV3NS — The Sovereign Intelligence Architecture**, paired with **HEAV3NS-CODE**, a native AppKit macOS developer control station. Organized across five mathematically enforced Joyzoning layers (`64` Rust modules, `39` formal `I<Name>` traits, `29` native tools, `280+` audited workspace files), the system unifies seven sovereign pillars: **`HEAV3NS-MICRO`** (runtime core), **`SPIDER`** (structural & interface perception), **`REWIND`** (multi-plane temporal continuity), **`BROCCOLI`** (durable behavioral knowledge & evolutionary skill DAG), **`SYNTHETIC SWARM`** (5-specialist cognitive consultation & 7-specialist Legion task orchestration), **`COMPUTER USE`** (9-stage closed-loop embodied agency with Double-Wrapped Spatial Action Mediation), and **`THE HARNESS`** (wave scheduler, token governor, zero-trust security, and `"v": 1` stdio JSON-RPC bridge). We demonstrate sub-microsecond spatial grounding ($\le 0.40\ \mu\text{s}$), 100% Joyzoning Stability Index ($E_S = 0.0038$), 100% Build Health (`Grade: A+ — SOVEREIGN`), and 100% pass rates across all 49 Rust test suites (including the `FT-01..FT-05` Flight benchmark) and 311 native AppKit tests.
 
 ---
 
-## 1. Introduction & Motivation
+## 1. Introduction & Architectural Motivation
 
-Autonomous software development workflows require executing LLM-generated operations against real file systems, terminal processes, and code repositories while providing developers with calm, responsive, and truthful oversight. Conventional agent runtime environments exhibit systemic vulnerabilities:
-1. **Dynamic Memory Sprawl**: Recursive parsing and unconstrained string concatenation incur thousands of small heap allocations, triggering frequent GC pauses and unpredictable latency.
-2. **Streaming Parser Fragility**: LLMs emit fragmented or subtly malformed JSON outputs (e.g., unmatched quotes, trailing commas, mixed markdown fences) that fail standard strict JSON deserializers.
-3. **Speculative Filesystem Corruption**: Tool execution without transactional boundaries risks modifying files on disk based on outdated repository state, clobbering concurrent developer edits.
-4. **Desktop UI Web-Wrapper Lag**: Desktop frontends built on Electron or WebKit wrappers introduce multi-gigabyte memory footprints, high IPC latency, and non-native keyboard navigation.
+Autonomous software engineering and computer-use agents must reason over codebases, execute filesystem mutations, and interact with live graphical and DOM interfaces under strict reliability guarantees. Conventional agent stacks exhibit six systemic failure modes:
+1. **Dynamic Memory Sprawl**: Unbounded heap allocations during streaming token generation and AST traversal.
+2. **Streaming Parser Fragility**: Crashes on truncated JSON tool calls, unescaped newlines, or markdown fences.
+3. **Speculative Filesystem Corruption**: Direct disk writes without baseline verification or atomic rollback.
+4. **Ungrounded Pointer & Keyboard Dispatch**: Blind `(x, y)` clicks that strike overlapping modals, off-screen elements, or disabled controls without postcondition verification.
+5. **Episodic Amnesia**: Inability to retain verified UI interaction patterns or multi-step recovery workflows across turns.
+6. **Web-Wrapper UI Latency**: Multi-gigabyte Electron frontends that block user input with modal approval sheets.
 
-HEAV3NS-MICRO resolves these challenges through a unified, dual-layer architecture: a hyper-compressed Rust micro-runtime and a pure AppKit native desktop client.
+HEAV3NS-MICRO resolves all six failure modes through a unified, sovereign architecture.
 
 ---
 
-## 2. Memory Arena & $O(1)$ Rewind Formalism
+## 2. Memory Arena & $O(1)$ `REWIND` Formalism (`src/domain/arena.rs`)
 
-HEAV3NS-MICRO allocates a fixed, contiguous memory slab of size $M = 16 \times 1024 \times 1024$ bytes (16 MiB) at startup:
+HEAV3NS-MICRO pre-allocates a contiguous memory slab of size $M = 16 \times 1024 \times 1024$ bytes (16 MiB):
 
 $$\text{Arena} = [b_0, b_1, \dots, b_{M-1}]$$
 
-Allocations within the arena proceed linearly via a bump pointer $P_{\text{alloc}} \in [0, M)$. For any allocation request of size $S$ with alignment $A = 8$:
+Allocations advance linearly via a bump pointer $P_{\text{alloc}} \in [0, M)$ with alignment $A = 4$:
 
-$$P_{\text{aligned}} = (P_{\text{alloc}} + A - 1) \ \& \ \sim(A - 1)$$
+$$P_{\text{aligned}} = (P_{\text{alloc}} + A - 1) \ \& \ \sim(A - 1), \qquad P_{\text{next}} = P_{\text{aligned}} + S$$
 
-$$P_{\text{next}} = P_{\text{aligned}} + S$$
-
-If $P_{\text{next}} > M$, the allocator returns an `ArenaOom` error, prompting explicit compaction.
-
-### Turn Watermarks & Constant-Time Rewinding
-At the start of turn $t$, the engine records the current watermark $W_t = P_{\text{alloc}}$. During the turn, transient string deltas, tool argument buffers, and intermediate AST nodes are allocated bump-by-bump. Upon turn completion, scratch allocations are reclaimed in $O(1)$ time by resetting the allocation pointer:
+At the start of turn $t$, the engine captures a [`SlabBufferSnapshot`](../../src/domain/arena.rs) recording watermark $W_t = P_{\text{alloc}}$. Upon turn completion or `/rewind`, transient scratch allocations are reclaimed in $O(1)$ constant time:
 
 $$P_{\text{alloc}} \leftarrow W_t$$
 
-This eliminates heap fragmentation and avoids individual object deallocation overhead.
+---
+
+## 3. Self-Healing Streaming Parser (`src/plumbing/json_repair.rs`, `src/domain/tool_parser.rs`)
+
+Given a streaming string buffer $S$ emitted by an LLM, the 3-stage parser executes:
+1. **Fast-Path Deserialization**: Direct `serde_json` parse when $S$ is well-formed.
+2. **Heuristic Structural Repair**: Strips markdown fences (` ```json `), repairs unescaped newlines inside string literals, strips trailing commas, and appends missing closing delimiters `}` / `]` via stack depth tracking.
+3. **Key-Value Fallback & Alias Canonicalization**: Extracts key-value pairs and maps 60+ parameter aliases (e.g., `file_path` $\to$ `path`, `target_id` / `selector` / `ref`) while validating against [`ParamSchema`](../../src/domain/types/tool_types.rs).
 
 ---
 
-## 3. Self-Healing Streaming Parser
+## 4. Two-Phase Staged VFS & Rollback Formalism (`src/infrastructure/vfs_store.rs`)
 
-Let $S$ be a streaming string buffer emitted by an LLM containing potential tool calls. The parser implements a multi-stage normalization pipeline:
-1. **Markdown Fence Stripping**: Matches and strips leading/trailing codeblock delimiters (` ```json ... ``` `).
-2. **Bracket Depth Balancing**: Computes open and closed bracket counters for both `{}` and `[]`. If unmatched openers exist at stream end, the repair engine appends the necessary closing tokens.
-3. **Escaped Character Normalization**: Handles unescaped newlines and carriage returns occurring within multi-line patch hunks.
-
-This ensures tool calls are extracted successfully even when models emit truncated tokens under token budget limits.
-
----
-
-## 4. Two-Phase Staged VFS & Rollback Formalism
-
-Disk modifications are staged through [`SessionVfs`](../../src/infrastructure/vfs_store.rs). When a tool requests a file write at path $F$ with content $C_{\text{new}}$:
-
-1. **Baseline Ingestion**: The system reads the existing disk file $C_{\text{disk}}$ and computes its baseline:
-   $$\text{Baseline}(F) = \big(\text{byte\_len}(C_{\text{disk}}), \text{FNV1a-32}(C_{\text{disk}})\big)$$
-2. **Overlay Staging**: The new content is staged in memory as an active overlay.
-3. **Commit Phase**: Prior to flushing $C_{\text{new}}$ to physical storage, the system re-evaluates the disk state:
-   $$\text{CurrentDisk}(F) \stackrel{?}{=} \text{Baseline}(F)$$
-   If the check passes, the file is written, and an undo delta is pushed to `TransactionJournal`. If the disk has changed externally, the commit aborts with `VfsConflict`.
+When a tool stages a write at path $F$ with content $C_{\text{new}}$:
+1. **Baseline Capture**: Reads existing disk file $C_{\text{disk}}$ and records [`VfsDiskBaseline`](../../src/domain/types/vfs_types.rs):
+   $$\text{Baseline}(F) = \big(\text{byte\_len}(C_{\text{disk}}), \ \text{FNV1a-32}(C_{\text{disk}})\big)$$
+2. **Overlay Staging**: Stages $C_{\text{new}}$ in memory as a [`VfsFileOverlay`](../../src/domain/types/vfs_types.rs).
+3. **Optimistic Concurrency Commit**: Before flushing to disk, verifies $\text{CurrentDisk}(F) = \text{Baseline}(F)$ and records an inverse patch in [`TransactionJournal`](../../src/infrastructure/transaction_journal.rs) for instant `/rewind` or `rollback_last_mutation`.
 
 ---
 
-## 5. Topological Wave Scheduler
+## 5. Double-Wrapped Spatial Action Architecture (`src/domain/spatial_mediator.rs`, `src/core/spatial_engine.rs`)
 
-Given a set of emitted tool calls $T = \{t_1, t_2, \dots, t_k\}$, each tool is mapped to its side-effect property $\text{Effect}(t) \in \{\text{ReadOnly}, \text{Mutating}\}$:
+To transcend brittle screenshot-only or DOM-only automation, bounding boxes are elevated into first-class [`SpatialTarget`](../../src/domain/types/spatial_types.rs) primitives mediated by two independent gates:
 
-$$\text{Wave}_{\text{read}} = \{t \in T \mid \text{Effect}(t) = \text{ReadOnly}\}$$
+### 5.1 Wrapper A — Spatial Grounding Gate
+Given a [`SpatialActionContract`](../../src/domain/types/spatial_types.rs) at layout epoch $\tau$:
+1. **Epoch Fence**: Verifies $\tau_{\text{expected}} = \tau_{\text{current}}$ (`SpatialError::StaleTargetEpoch`).
+2. **Multi-Modal Target Resolution**: Resolves candidates via Set-of-Marks badge (`som_id`), frame-fenced token (`s{hex}:{id}`), semantic label, or normalized coordinates (`screen`, `normalized_1000`, percentage). Targetless keyboard and viewport `scroll` actions ground to the active focus or active window plane.
+3. **Exact 2D Sweep-Line Occlusion Union (`src/plumbing/spatial_geometry.rs`)**: For all higher z-order blocking targets $\{O_1, \dots, O_m\}$, computes exact union area of intersections $I_k = R_{\text{target}} \cap R_{O_k}$ via 1D interval sweep over unique $X$-coordinates:
+   $$\text{OcclusionRatio}(R_{\text{target}}) = \frac{\text{Area}\left(\bigcup_{k=1}^m I_k\right)}{\text{Area}(R_{\text{target}})}$$
+   If $\text{OcclusionRatio} > \theta_{\text{max}}$, grounding rejects the action with `SpatialError::TargetOccluded`.
+4. **Viewport Visibility & Auto-Scroll Remediation**: Using [`ViewportTransform`](../../src/plumbing/spatial_geometry.rs), computes viewport intersection ratio. When $\text{Visibility} \le 0.05$, [`SpatialInteractionEngine::execute_spatially_grounded_action`](../../src/core/spatial_engine.rs) automatically dispatches a pre-scroll by centering delta $(\Delta x, \Delta y)$, updates `VirtualDisplayState.scroll_offset`, refreshes the `SpatialScene`, and re-grounds the target in-viewport (`visibilityRatio == 1.0`).
+5. **Safe Interior Point**: Computes $P_{\text{safe}}$ inset by margin $m = 0.15$ from all edges of $R_{\text{target}}$.
 
-$$\text{Wave}_{\text{write}} = [t_1, t_2, \dots] \quad \text{where} \ \forall t, \text{Effect}(t) = \text{Mutating}$$
-
-The wave scheduler executes $\text{Wave}_{\text{read}}$ concurrently across background worker tasks using async join pools. Following the completion of all read operations, each mutating tool in $\text{Wave}_{\text{write}}$ executes in strict serialized sequence.
-
----
-
-## 6. Desktop JSON-RPC Protocol & AppKit Client Architecture
-
-The desktop surface (`native/`) connects to `heav3ns-micro` via a bidirectional, newline-delimited JSON-RPC 2.0 pipe over standard streams.
-
-### Stream Invariants & Separation
-- **`stdout`**: Reserved strictly for valid JSON-RPC frames with mandatory `"v": 1` version tags.
-- **`stderr`**: Carries diagnostic logs and panic traces, ensuring zero framing desynchronization.
-- **Zero-Replay Task Reconciliation**: Interrupted or unconfirmed prompt submissions are preserved in local drafts; task status is verified via `task.lookup` without duplicate tool execution.
-
-### Modular Window Architecture (`SPI-203`)
-The AppKit client implements a modular 8-file extension topology where every source file remains under Tier 1 Optimal (< 800 lines):
-- **Core Controller (`WorkspaceWindow.swift`)**: Window lifecycle, view layout, table/window delegates, and resource disposal (`dispose()`).
-- **Composer & Navigation**: Independent attachment tokens, multi-line composer, Git diff explorer, and file tree.
-- **Live Walkthrough & Inspection**: Dynamic inspection viewports with Base64 binary page streaming, spider checks, and conversation memory.
-- **Topological Swarm & Radar**: Multi-specialist task graph visualization and live formation reconciliation.
+### 5.2 Wrapper B — Execution Assurance Gate
+1. **Pre-Execution Gate**: Rejects disabled targets (`SpatialError::TargetDisabled`), validates role capabilities (`ActionNotPermittedForRole`), and proves $P_{\text{safe}} \in R_{\text{target}}$ (`ContainmentViolation`).
+2. **Post-Execution Gate**: Evaluates observable scene transitions between $S_{\text{before}}$ and $S_{\text{after}}$ (`focus` acquisition, `value` mutation, `frame_seq` change, or `scroll_offset` delta) to produce a signed [`SpatialExecutionReceipt`](../../src/domain/spatial_action.rs) (`AssuranceVerdict::Confirmed` or `SuspectedNoop`).
 
 ---
 
-## 7. Empirical Verification & Conclusion
+## 6. Closed-Loop Computer Use, `SPIDER`, `BROCCOLI` & `SYNTHETIC SWARM` (`src/core/computer_use_orchestrator.rs`)
 
-HEAV3NS-MICRO has been verified across two full test environments:
-1. **Rust Substrate Test Suite**: All 8 test suites pass cleanly, including the 5-scenario Agent Flight suite (`FT-01..FT-05`) verifying discovery, VFS staging, parser repair, wave scheduling, and secret redaction.
-2. **Native AppKit Test Suite**: All 308 unit and integration tests pass cleanly with zero failures.
-3. **Joyzoning Conformance**: Static architecture analysis reports a 100% Stability Index with zero blocking violations.
+The [`ComputerUseOrchestrator`](../../src/core/computer_use_orchestrator.rs) executes a 9-stage cybernetic loop (`OBSERVE -> ORIENT -> INTERPRET -> REASON -> PLAN -> ACT -> OBSERVE -> VERIFY -> LEARN`):
+- **Modal Trap Auto-Interception**: When `SPIDER` (`detect_modal_or_dialog`) identifies an active modal window or inline dialog and the requested target lies outside the modal region, the orchestrator automatically intercepts the action and dispatches `key: Escape` to dismiss the trap while allowing internal modal interactions to proceed unhindered.
+- **Auto-Focus Planning**: Typing into an unfocused input automatically schedules a foreground focus-click prior to text entry, or executes a full 3-step [`SpatialActionPlan`](../../src/domain/spatial_mediator.rs) (`scroll -> click -> type`) via `SpatialInteractionEngine::execute_plan`.
+- **5-Specialist `SYNTHETIC SWARM` Consultation**: Under uncertainty or repeated failure, `VisualPerceiver`, `StructuralAnalyst`, `WorkflowNavigator`, `RiskAssessor`, and `RecoverySpecialist` synthesize recovery advice alongside `BROCCOLI` (`BehavioralKnowledgeStore`), with `ConflictResolver` ensuring live environmental observations override stale historical assumptions.
 
-HEAV3NS-MICRO establishes that an autonomous coding agent runtime can be simultaneously hyper-compressed, deterministic, safe, and seamlessly integrated with a responsive native macOS IDE.
+---
+
+## 7. Topological Wave Scheduler & Desktop JSON-RPC Bridge
+
+- **DAG Wave Scheduler (`src/core/tool_registry.rs`)**: Partitions batches of [`ScheduledToolCall`](../../src/domain/types/tool_schedule.rs) across 29 built-in tools into concurrent read waves and serialized write barriers.
+- **Desktop JSON-RPC Protocol (`src/ui/stdio_worker.rs`, `src/ui/rpc_dispatch.rs`, `native/`)**: Connects the Rust substrate to the modular 8-file `WorkspaceWindow` AppKit architecture over `"v": 1` newline-delimited JSON frames with zero-replay `task.lookup` reconciliation and deterministic `dispose()` lifecycle hygiene across all 30 Swift classes.
+
+---
+
+## 8. Empirical Verification Summary
+
+| Verification Suite | Command | Measured Result |
+| :--- | :--- | :--- |
+| **Rust Unit, Spatial & CUA Suite** | `cargo test` | **49 / 49 passed** (`0` failures, `0.05s`) |
+| **Agent Flight Benchmark (`FT-01..FT-05`)** | `cargo run -- --flight` | **5 / 5 scenarios (`19 / 19` checks, `100%`)** |
+| **Spatial Grounding Micro-Benchmark** | `cargo test test_microbenchmark` | **$\le 0.40\ \mu\text{s}$ / op** (`> 240,000` groundings/sec) |
+| **Native macOS AppKit Test Suite** | `cd native && swift test` | **311 / 311 passed** (`0` failures) |
+| **Strict Joyzoning & Stability Doctor** | `npm run joy-check` | **100% Stability Index ($E_S = 0.0038$)**, **Grade A+ (`100% SOVEREIGN`)** |
+| **Documentation Guardrails** | `npm run docs:check` | **100% header, section, and link parity** |

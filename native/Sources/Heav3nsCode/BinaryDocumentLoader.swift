@@ -51,4 +51,5 @@ final class BinaryDocumentLoader {
             }
         }
     }
+    func dispose() { cancel() }
 }

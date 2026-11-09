@@ -500,4 +500,5 @@ final class ModelPicker: NSWindowController, NSWindowDelegate, NSTextFieldDelega
          "applyEnabled": apply.isEnabled, "status": status.stringValue, "availability": availability.stringValue,
          "catalogStatus": catalogStatus.stringValue, "modelInformation": modelInformation.stringValue, "modelSuggestions": suggestions, "customVisible": !customRow.isHidden, "list": modelChoice.diagnostics]
     }
+    func dispose() { window?.orderOut(nil) }
 }

@@ -2,7 +2,7 @@
 use crate::core::engine::AgentEngine;
 use crate::core::flight_runner::run_agent_flight_test;
 use crate::domain::compaction::CompactionPolicy;
-use crate::domain::swarm::SwarmAssignment;
+use crate::domain::swarm::{classify_task_for_legion, SwarmAssignment};
 use crate::domain::types::runtime::{CancellationToken, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel};
 use crate::plumbing::hash_and_math::{fnv1a_32, now_ms};
 use crate::ui::rpc_dispatch::{build_context_history_response, build_context_inspect_response, build_hello_response, build_model_catalog, build_model_discovery, build_model_selection, build_spider_check_response, build_state_inspect_response, handle_files_rpc, handle_memory_rpc, progress_to_walkthrough_activity, sha256_hex};
@@ -307,7 +307,76 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>) {
                 println!("{}", json!({ "v": 1, "kind": "response", "id": req_id, "result": { "enabled": true, "criticalCompletionReview": true, "hierarchicalDefer": true, "legion": true, "maxSpecialists": 8, "strategy": "adaptive", "deferBoundary": "safe_boundary" } }));
             }
             "agentSwarm.classify" => {
-                println!("{}", json!({ "v": 1, "kind": "response", "id": req_id, "result": { "intent": "autonomous_orchestration", "strategy": "hierarchical", "complexity": 2, "assignments": [{ "id": "core-arch", "specialist_id": "core-arch", "role": "Architect", "objective": "Perform comprehensive system verification", "task": "Perform comprehensive system verification" }] } }));
+                let task_desc = params.get("objective").or_else(|| params.get("task")).and_then(|v| v.as_str()).unwrap_or("Verify system architecture and execute requested changes");
+                let strategy = params.get("strategy").and_then(|v| v.as_str());
+                let max_spec = params.get("maxSpecialists").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
+                let legion_plan = classify_task_for_legion(task_desc, &[], strategy, max_spec);
+                println!("{}", json!({ "v": 1, "kind": "response", "id": req_id, "result": legion_plan }));
+            }
+            "computer.action" | "computer.capture" | "computer.health" => {
+                let mut req = params.clone();
+                if method == "computer.capture" && req.get("action").is_none() { req["action"] = json!("capture"); }
+                if method == "computer.health" && req.get("action").is_none() { req["action"] = json!("audit_health"); }
+                let out = engine.tools().display_state.lock().unwrap().execute_action(&req).unwrap_or_else(|e| json!({"error": e}));
+                println!("{}", json!({ "v": 1, "kind": "response", "id": req_id, "result": out }));
+            }
+            "computer.observe" | "computer.interpret" | "computer.consult" | "computer.orchestrate" => {
+                let action = match method {
+                    "computer.observe" => "observe",
+                    "computer.interpret" => "interpret",
+                    "computer.consult" => "consult_swarm",
+                    _ => "orchestrate",
+                };
+                let mut req = params.clone();
+                req["action"] = json!(action);
+                let call = crate::domain::types::tool_schedule::ScheduledToolCall {
+                    id: format!("req-{}", req_id),
+                    name: "computer_use".into(),
+                    args: req,
+                };
+                let res = engine.tools().execute_single(&call, engine.workspace_root(), crate::domain::types::runtime::ExecutionAuthorityLevel::Autonomous, None).await;
+                println!("{}", json!({ "v": 1, "kind": "response", "id": req_id, "result": if res.success { res.output } else { json!({"error": res.error}) } }));
+            }
+            "computer.patterns" => {
+                let kstore = engine.tools().computer_orchestrator.knowledge_store.lock().unwrap();
+                println!("{}", json!({ "v": 1, "kind": "response", "id": req_id, "result": { "patterns": kstore.list_patterns(), "procedures": kstore.list_procedures() } }));
+            }
+            "browser.action" | "browser.snapshot" | "browser.navigate" => {
+                let mut req = params.clone();
+                if method == "browser.snapshot" && req.get("action").is_none() { req["action"] = json!("snapshot"); }
+                if method == "browser.navigate" && req.get("action").is_none() { req["action"] = json!("navigate"); }
+                let out = engine.tools().display_state.lock().unwrap().execute_browser_action(&req).unwrap_or_else(|e| json!({"error": e}));
+                println!("{}", json!({ "v": 1, "kind": "response", "id": req_id, "result": out }));
+            }
+            "spatial.ground" | "spatial.execute" | "spatial.health" | "spatial.query" => {
+                let action = match method {
+                    "spatial.ground" => "ground",
+                    "spatial.query" => "query",
+                    "spatial.health" => "audit",
+                    _ => "execute",
+                };
+                let mut req = params.clone();
+                req["action"] = json!(action);
+                let call = crate::domain::types::tool_schedule::ScheduledToolCall {
+                    id: format!("req-{}", req_id),
+                    name: "spatial_interact".into(),
+                    args: req,
+                };
+                let res = engine.tools().execute_single(&call, engine.workspace_root(), crate::domain::types::runtime::ExecutionAuthorityLevel::Autonomous, None).await;
+                println!("{}", json!({ "v": 1, "kind": "response", "id": req_id, "result": if res.success { res.output } else { json!({"error": res.error}) } }));
+            }
+            "skills.dag" | "skills.forge" | "skills.lint" | "soul.status" => {
+                let mut cat = engine.tools().skill_catalog.lock().unwrap();
+                let out = match method {
+                    "skills.forge" => cat.forge_skill(&params).unwrap_or_else(|e| json!({"error": e})),
+                    "skills.lint" => {
+                        let id = params.get("id").and_then(|v| v.as_str()).unwrap_or("computer-use-operator");
+                        cat.lint_and_autofix_skill(id, params.get("autofix").and_then(|v| v.as_bool()).unwrap_or(false)).unwrap_or_else(|e| json!({"error": e}))
+                    }
+                    "soul.status" => json!({ "activeSoul": cat.active_soul, "competencies": cat.competency_scores }),
+                    _ => cat.evaluate_dag(),
+                };
+                println!("{}", json!({ "v": 1, "kind": "response", "id": req_id, "result": out }));
             }
             "agentSwarm.form" | "agentSwarm.formResume" => {
                 let objective = params.get("objective").and_then(|v| v.as_str()).unwrap_or("Swarm task execution").to_string();

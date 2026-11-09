@@ -32,5 +32,6 @@ final class RunSleepAssertion {
         }
     }
 
+    func dispose() { if let assertion { self.assertion = nil; release(assertion) } }
     deinit { if let assertion { release(assertion) } }
 }

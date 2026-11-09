@@ -103,4 +103,5 @@ final class ReasoningPicker: NSPopUpButton {
     var diagnostics: [String: Any] {
         ["value": selection?.reasoningEffort ?? "default", "options": selection?.reasoningOptions ?? [], "pending": pending, "reconciled": reconciled, "enabled": isEnabled, "title": title]
     }
+    func dispose() { onPending = nil }
 }

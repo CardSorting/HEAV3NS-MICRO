@@ -87,8 +87,8 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
     let approval = NSStackView()
     let approvalText = NSTextView()
     let reviewApprovalButton = NSButton(title: "Review Request…", target: nil, action: nil)
-    let denyButton = NSButton(title: "Deny", target: nil, action: nil)
-    let allowButton = NSButton(title: "Allow Once", target: nil, action: nil)
+    let denyButton = NSButton(title: "Deny", target: nil, action: nil); let allowButton = NSButton(title: "Allow Once", target: nil, action: nil)
+    var pendingLineJump: (line: Int, column: Int)?
     var approvalReview: ApprovalReview?
     struct ApprovalDecision: Equatable {
         let id = UUID()

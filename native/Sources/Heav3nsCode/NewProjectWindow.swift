@@ -112,4 +112,5 @@ final class NewProjectWindow: NSWindowController, NSTextFieldDelegate {
         }
     }
     private func dismiss() { if let window { window.sheetParent?.endSheet(window); window.orderOut(nil) }; onClose?() }
+    func dispose() { dismiss() }
 }

@@ -141,4 +141,5 @@ final class QueuedInstructionEditor: NSWindowController, NSWindowDelegate, NSTex
     }
     @objc private func dismiss() { guard !saving else { return }; if let window, let parent = window.sheetParent { parent.endSheet(window); window.orderOut(nil) } }
     func windowShouldClose(_ sender: NSWindow) -> Bool { dismiss(); return false }
+    func dispose() { dismiss() }
 }

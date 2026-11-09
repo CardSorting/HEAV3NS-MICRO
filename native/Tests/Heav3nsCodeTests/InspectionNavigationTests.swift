@@ -97,4 +97,30 @@ final class InspectionNavigationTests: XCTestCase {
         XCTAssertEqual(resolveURL(fileDest).path, "/test/project/Sources/App.swift")
         XCTAssertEqual(resolveURL(diffDest).path, "/test/project/Sources/Model.swift")
     }
+
+    func testUnicodeIntraLineDiffAndExtendedRustOutlineAndRecentFiles() {
+        let emojiDiff = "@@ -1,1 +1,1 @@\n-let status = \"🚀 Ready\"\n+let status = \"🚀 Verified ✨\""
+        let highlighted = CodeOutline.highlight(emojiDiff, diff: true)
+        XCTAssertEqual(highlighted.string, emojiDiff)
+        let addedTokenRange = (emojiDiff as NSString).range(of: "Verified ✨")
+        XCTAssertNotEqual(addedTokenRange.location, NSNotFound)
+        let font = highlighted.attribute(.font, at: addedTokenRange.location, effectiveRange: nil) as? NSFont
+        XCTAssertNotNil(font)
+
+        let rustSource = """
+        pub const fn compute_budget() -> usize { 1 }
+        pub extern "Rust" fn audit_health() -> bool { true }
+        pub type LedgerFilter = String;
+        """
+        let decls = CodeOutline.declarations(in: rustSource, path: "src/domain/computer_use.rs")
+        XCTAssertEqual(decls.count, 3)
+
+        var history = InspectionHistory()
+        history.visit(.file("src/a.rs"))
+        history.visit(.diff("src/a.rs", staged: false))
+        history.visit(.file("src/b.rs"))
+        history.visit(.file("src/a.rs"))
+        XCTAssertEqual(history.recentFiles(limit: 5), ["src/a.rs", "src/b.rs"])
+        XCTAssertEqual(history.jump(to: 1), .diff("src/a.rs", staged: false))
+    }
 }

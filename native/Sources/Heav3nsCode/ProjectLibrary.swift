@@ -78,4 +78,5 @@ final class ProjectLibrary {
             }
     }
     private func save() { if persist, let data = try? JSONEncoder().encode(projects) { defaults.set(data, forKey: key) } }
+    func dispose() {}
 }

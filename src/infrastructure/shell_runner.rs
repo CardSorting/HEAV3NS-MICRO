@@ -1,5 +1,6 @@
 // [LAYER: INFRASTRUCTURE]
 use crate::domain::types::runtime::CancellationToken;
+use crate::plumbing::secret_redactor::SafetyPolicy;
 use serde_json::{json, Value};
 use std::path::Path;
 use std::process::Stdio;
@@ -52,17 +53,29 @@ pub async fn execute_shell_command(
     match outcome {
         Ok((Ok(status), out_bytes, err_bytes)) => {
             let exit_code = status.code().unwrap_or(-1);
-            let stdout = String::from_utf8_lossy(&out_bytes).into_owned();
+            let (cleaned_out, _pty_replies) = SafetyPolicy::strip_and_respond_pty_queries(&out_bytes, 24, 80);
+            let stdout = String::from_utf8_lossy(&cleaned_out).into_owned();
             let stderr = String::from_utf8_lossy(&err_bytes).into_owned();
-            Ok((
-                json!({
-                    "exitCode": exit_code,
-                    "success": status.success(),
-                    "stdout": stdout,
-                    "stderr": stderr
-                }),
-                false,
-            ))
+            let mut advisories = Vec::new();
+            if let Some(adv) = SafetyPolicy::detect_heredoc_file_redirection(cmd_str) {
+                advisories.push(adv);
+            }
+            if let Some(adv) = SafetyPolicy::detect_terminal_file_read(cmd_str) {
+                advisories.push(adv);
+            }
+            if let Some(adv) = SafetyPolicy::detect_foreground_background_guidance(cmd_str) {
+                advisories.push(adv);
+            }
+            let mut payload = json!({
+                "exitCode": exit_code,
+                "success": status.success(),
+                "stdout": stdout,
+                "stderr": stderr
+            });
+            if !advisories.is_empty() {
+                payload["ergonomicAdvisories"] = json!(advisories);
+            }
+            Ok((payload, false))
         }
         Ok((Err(e), _, _)) => Err(format!("Command execution failed: {e}")),
         Err(_) => Err(format!("Command timed out after {timeout_ms}ms")),

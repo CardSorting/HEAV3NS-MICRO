@@ -14,6 +14,20 @@ struct WorkspaceAction {
             .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
         return terms.allSatisfy { searchable.contains($0) }
     }
+
+    func matchScore(_ query: String) -> Int {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, matches(trimmed) else { return 0 }
+        let foldedQuery = trimmed.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        let foldedTitle = title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        if foldedTitle == foldedQuery { return 1000 }
+        if foldedTitle.hasPrefix(foldedQuery) { return 600 }
+        if foldedTitle.contains(" " + foldedQuery) { return 400 }
+        if foldedTitle.contains(foldedQuery) { return 200 }
+        let terms = foldedQuery.split(whereSeparator: { $0.isWhitespace })
+        if terms.allSatisfy({ foldedTitle.contains($0) }) { return 150 }
+        return 50
+    }
 }
 
 final class ActionPalette: NSWindowController, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
@@ -55,8 +69,16 @@ final class ActionPalette: NSWindowController, NSWindowDelegate, NSTableViewData
         window.makeKeyAndOrderFront(nil); window.makeFirstResponder(search)
     }
     func controlTextDidChange(_ obj: Notification) {
+        let query = search.stringValue
         let selected = matches.indices.contains(table.selectedRow) ? matches[table.selectedRow].title : nil
-        matches = actions.filter { $0.matches(search.stringValue) }
+        matches = actions.enumerated()
+            .filter { $0.element.matches(query) }
+            .sorted { a, b in
+                let sa = a.element.matchScore(query)
+                let sb = b.element.matchScore(query)
+                return sa != sb ? sa > sb : a.offset < b.offset
+            }
+            .map(\.element)
         empty.isHidden = !matches.isEmpty
         table.deselectAll(nil); table.reloadData()
         if !matches.isEmpty {
@@ -87,6 +109,7 @@ final class ActionPalette: NSWindowController, NSWindowDelegate, NSTableViewData
     func windowDidResignKey(_ notification: Notification) { dismiss(restoreFocus: false) }
     override func cancelOperation(_ sender: Any?) { dismiss() }
     func windowShouldClose(_ sender: NSWindow) -> Bool { dismiss(); return false }
+    func dispose() { dismiss(restoreFocus: false) }
     @objc private func choose() { guard !dismissed, matches.indices.contains(table.selectedRow) else { return }; let action = matches[table.selectedRow]; dismiss(); action.perform() }
     func numberOfRows(in tableView: NSTableView) -> Int { matches.count }
     func searchProbe(_ query: String) {

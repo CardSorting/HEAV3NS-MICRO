@@ -302,7 +302,15 @@ extension WorkspaceWindow {
         }
     }
 
-    func readFile(_ path: String) { inspect(.file(path)) }
+    func readFile(_ rawPath: String) {
+        let (path, line, col) = QuickOpenWindow.parseFileLineCol(rawPath)
+        if inspectedFile == path, let line {
+            goToLine(line, column: col ?? 1)
+            return
+        }
+        if let line { self.pendingLineJump = (line, col ?? 1) }
+        inspect(.file(path))
+    }
 
     func readDiff(_ path: String) { inspect(.diff(path, staged: diffScope.selectedSegment == 1)) }
 }

@@ -100,6 +100,7 @@ extension WorkspaceWindow {
                     let update: () -> Void
                     init(update: @escaping () -> Void) { self.update = update }
                     @objc func masterDidToggle(_ sender: NSButton) { update() }
+                    func dispose() {}
                 }
                 let master = NSButton(checkboxWithTitle: "Enable Agent Swarm", target: nil, action: nil)
                 let review = NSButton(checkboxWithTitle: "Critical completion review", target: nil, action: nil)

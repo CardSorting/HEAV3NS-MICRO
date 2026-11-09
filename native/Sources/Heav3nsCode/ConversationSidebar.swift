@@ -126,4 +126,5 @@ final class ConversationSidebar: NSVisualEffectView, NSTableViewDataSource, NSTa
         cell.textField = name; cell.imageView = icon; cell.toolTip = item.title
         return cell
     }
+    func dispose() { onSelect = nil; onDelete = nil; onNew = nil; onMore = nil }
 }

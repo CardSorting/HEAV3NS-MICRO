@@ -40,4 +40,5 @@ final class JourneyButton: NSButton {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) unavailable") }
     @objc private func activate() { handler() }
+    func dispose() { target = nil; action = nil }
 }

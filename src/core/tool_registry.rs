@@ -1,19 +1,29 @@
 // [LAYER: CORE]
+use crate::core::computer_use_orchestrator::ComputerUseOrchestrator;
+use crate::core::spatial_engine::SpatialInteractionEngine;
 use crate::core::tool_governor::{ToolExecutionCache, ToolLoopBreaker, ToolOutputGovernor};
 use crate::core::tool_specs::builtin_tool_specs;
-use crate::domain::interfaces::{BoxFuture, IToolExecutor};
+use crate::domain::computer_use::VirtualDisplayState;
+use crate::domain::interfaces::{BoxFuture, ISwarmIntelligenceConsultant, IToolExecutor};
 use crate::domain::memory::MemoryStore;
+use crate::domain::skill_tree::SkillTreeCatalog;
+use crate::domain::swarm::classify_task_for_legion;
 use crate::domain::tool_parser::ToolCallArgParser;
 use crate::domain::types::progress::ToolExecutionRecord;
 use crate::domain::types::runtime::{CancellationToken, ExecutionAuthorityLevel};
+use crate::domain::types::spatial_types::SpatialActionContract;
+use crate::domain::types::swarm_intelligence_types::SwarmConsultationRequest;
 use crate::domain::types::tool_schedule::ScheduledToolCall;
 use crate::domain::types::tool_types::ToolSpec;
+use crate::infrastructure::behavioral_store::BehavioralKnowledgeStore;
 use crate::infrastructure::fs_tools::dispatch_fs_tool;
 use crate::infrastructure::search_tools::resolve_workspace_path;
 use crate::infrastructure::shell_runner::execute_shell_command;
 use crate::infrastructure::transaction_journal::TransactionJournal;
+use crate::infrastructure::vfs_store::SkillsIngestor;
 use crate::plumbing::secret_redactor::SafetyPolicy;
 use crate::plumbing::text_tokens::canonical_tool_name;
+use crate::plumbing::vision_and_dom::{decode_image_metadata, generate_synthetic_bmp, generate_synthetic_svg};
 use futures::future::join_all;
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -31,11 +41,32 @@ pub struct ToolRegistry {
     pub governor: Mutex<ToolOutputGovernor>,
     pub loop_breaker: Mutex<ToolLoopBreaker>,
     pub memory_store: Arc<Mutex<MemoryStore>>,
+    pub display_state: Arc<Mutex<VirtualDisplayState>>,
+    pub spatial_engine: Arc<SpatialInteractionEngine>,
+    pub behavioral_store: Arc<Mutex<BehavioralKnowledgeStore>>,
+    pub computer_orchestrator: Arc<ComputerUseOrchestrator>,
+    pub skill_catalog: Mutex<SkillTreeCatalog>,
     pub max_concurrency: usize,
 }
 
 impl ToolRegistry {
     pub extern "Rust" fn new(memory_store: Arc<Mutex<MemoryStore>>) -> Self {
+        let display_state = Arc::new(Mutex::new(VirtualDisplayState::new()));
+        let spatial_engine = Arc::new(SpatialInteractionEngine::new(Arc::clone(&display_state)));
+        let mem_sink = {
+            let m = Arc::clone(&memory_store);
+            Arc::new(move |k: &str, v: &str, cat: &str| {
+                if let Ok(mut lock) = m.lock() {
+                    lock.save_memory(k, v, cat);
+                }
+            })
+        };
+        let behavioral_store = Arc::new(Mutex::new(BehavioralKnowledgeStore::new(Some(mem_sink))));
+        let computer_orchestrator = Arc::new(ComputerUseOrchestrator::new(
+            Arc::clone(&display_state),
+            Arc::clone(&spatial_engine),
+            Arc::clone(&behavioral_store),
+        ));
         let mut registry = Self {
             specs: HashMap::new(),
             ordered_names: Vec::new(),
@@ -45,6 +76,11 @@ impl ToolRegistry {
             governor: Mutex::new(ToolOutputGovernor::new()),
             loop_breaker: Mutex::new(ToolLoopBreaker::default()),
             memory_store,
+            display_state,
+            spatial_engine,
+            behavioral_store,
+            computer_orchestrator,
+            skill_catalog: Mutex::new(SkillTreeCatalog::new()),
             max_concurrency: 8,
         };
         for spec in builtin_tool_specs() {
@@ -79,8 +115,18 @@ impl ToolRegistry {
                 spec.is_core
                     || lower.is_empty()
                     || lower.contains(spec.name)
-                    || (matches!(spec.name, "list_skills" | "use_skill")
-                        && (lower.contains("skill") || lower.contains("workflow")))
+                    || (matches!(spec.name, "list_skills" | "use_skill" | "skill_forge")
+                        && (lower.contains("skill") || lower.contains("workflow") || lower.contains("soul") || lower.contains("forge")))
+                    || (spec.name == "computer_use"
+                        && (lower.contains("computer") || lower.contains("click") || lower.contains("window") || lower.contains("display") || lower.contains("gui") || lower.contains("screen")))
+                    || (spec.name == "browser_use"
+                        && (lower.contains("browser") || lower.contains("dom") || lower.contains("url") || lower.contains("http") || lower.contains("web")))
+                    || (spec.name == "vision_inspect"
+                        && (lower.contains("vision") || lower.contains("image") || lower.contains("png") || lower.contains("svg") || lower.contains("jpeg")))
+                    || (spec.name == "engage_swarm"
+                        && (lower.contains("swarm") || lower.contains("legion") || lower.contains("specialist") || lower.contains("parallel")))
+                    || (spec.name == "spatial_interact"
+                        && (lower.contains("spatial") || lower.contains("bounding") || lower.contains("ground") || lower.contains("occlu") || lower.contains("geometry") || lower.contains("assurance")))
                     || (matches!(spec.name, "apply_unified_diff" | "get_workspace_diff")
                         && (lower.contains("diff") || lower.contains("patch") || lower.contains("git")))
                     || (matches!(spec.name, "search_symbols" | "batch_replace_regex")
@@ -390,6 +436,10 @@ impl ToolRegistry {
             "save_memory" => {
                 let key = args.get("key").and_then(|v| v.as_str()).ok_or("Missing 'key'")?;
                 let value = args.get("value").and_then(|v| v.as_str()).ok_or("Missing 'value'")?;
+                let threats = SafetyPolicy::scan_for_threats(value, "all");
+                if !threats.is_empty() {
+                    return Err(format!("Blocked memory write containing security threats: {:?}", threats));
+                }
                 let category = args.get("category").and_then(|v| v.as_str()).unwrap_or("fact");
                 let mut mem = self.memory_store.lock().map_err(|_| "Memory lock poisoned")?;
                 let entry = mem.save_memory(key, value, category);
@@ -410,6 +460,209 @@ impl ToolRegistry {
                     Some(v) => Ok((v, false)),
                     None => Err(format!("Spill ID '{spill_id}' not found or expired")),
                 }
+            }
+            "computer_use" => {
+                let act = args.get("action").and_then(|v| v.as_str()).unwrap_or("capture").trim().to_ascii_lowercase();
+                match act.as_str() {
+                    "orchestrate" | "closed_loop" => {
+                        let goal = args.get("goal").or_else(|| args.get("objective")).and_then(|v| v.as_str()).unwrap_or("Execute computer use operation");
+                        let contract = SpatialActionContract {
+                            action_name: args.get("target_action").or_else(|| args.get("sub_action")).and_then(|v| v.as_str()).unwrap_or("click").to_string(),
+                            target_selector: args.get("target_id").or_else(|| args.get("selector")).or_else(|| args.get("ref")).or_else(|| args.get("element_id")).and_then(|v| v.as_str()).map(|s| s.to_string()),
+                            som_id: args.get("som_id").and_then(|v| v.as_u64()).map(|n| n as u32),
+                            delivery_mode: args.get("delivery_mode").and_then(|v| v.as_str()).unwrap_or("background").to_string(),
+                            payload_text: args.get("text").or_else(|| args.get("value")).and_then(|v| v.as_str()).map(|s| s.to_string()),
+                            keys: args.get("keys").or_else(|| args.get("key")).and_then(|v| v.as_str()).map(|s| s.to_string()),
+                            ..SpatialActionContract::default()
+                        };
+                        let res = self.computer_orchestrator.execute_closed_loop_cycle(goal, &contract)?;
+                        Ok((res, false))
+                    }
+                    "observe" | "env_observe" => {
+                        let obs = self.computer_orchestrator.observe();
+                        Ok((serde_json::to_value(obs).unwrap_or(Value::Null), false))
+                    }
+                    "interpret" | "env_interpret" => {
+                        let obs = self.computer_orchestrator.observe();
+                        let interp = self.computer_orchestrator.interpret(&obs);
+                        Ok((interp, false))
+                    }
+                    "consult_swarm" | "swarm_consult" => {
+                        let goal = args.get("goal").or_else(|| args.get("objective")).and_then(|v| v.as_str()).unwrap_or("Environmental interpretation");
+                        let app = args.get("app").and_then(|v| v.as_str()).unwrap_or("Heav3nsCode");
+                        let req = SwarmConsultationRequest::new("consult-cli", goal, app, "Active Window");
+                        let res = self.computer_orchestrator.consult(&req);
+                        Ok((serde_json::to_value(res).unwrap_or(Value::Null), false))
+                    }
+                    _ => {
+                        let val_args = Value::Object(args.clone());
+                        let mut disp = self.display_state.lock().map_err(|_| "Display lock poisoned")?;
+                        let res = disp.execute_action(&val_args)?;
+                        Ok((res, false))
+                    }
+                }
+            }
+            "browser_use" => {
+                let val_args = Value::Object(args.clone());
+                let mut disp = self.display_state.lock().map_err(|_| "Display lock poisoned")?;
+                let res = disp.execute_browser_action(&val_args)?;
+                Ok((res, false))
+            }
+            "spatial_interact" => {
+                let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("execute");
+                let contract = SpatialActionContract {
+                    action_name: args.get("target_action").or_else(|| args.get("sub_action")).and_then(|v| v.as_str()).unwrap_or("click").to_string(),
+                    target_selector: args.get("target_id").or_else(|| args.get("selector")).or_else(|| args.get("ref")).and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    som_id: args.get("som_id").and_then(|v| v.as_u64()).map(|n| n as u32),
+                    coordinates: if args.get("x").is_some() && args.get("y").is_some() {
+                        let x = args.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        let y = args.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        Some([x, y])
+                    } else {
+                        None
+                    },
+                    coordinate_space: args.get("coordinate_space").and_then(|v| v.as_str()).unwrap_or("screen").to_string(),
+                    delivery_mode: args.get("delivery_mode").and_then(|v| v.as_str()).unwrap_or("background").to_string(),
+                    required_confidence: args.get("required_confidence").and_then(|v| v.as_f64()).unwrap_or(0.50) as f32,
+                    max_occlusion: args.get("max_occlusion").and_then(|v| v.as_f64()).unwrap_or(0.60),
+                    expected_epoch: args.get("expected_epoch").and_then(|v| v.as_u64()),
+                    payload_text: args.get("text").or_else(|| args.get("value")).and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    keys: args.get("keys").or_else(|| args.get("key")).and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    to_coordinates: None,
+                    exclusion_zones: Vec::new(),
+                    auto_scroll_if_needed: true,
+                };
+
+                match action {
+                    "ground" => {
+                        let disp = self.display_state.lock().map_err(|_| "Display lock poisoned")?;
+                        let fresh = SpatialInteractionEngine::extract_scene_from_display(&disp);
+                        let mut med = self.spatial_engine.mediator.lock().map_err(|_| "Mediator lock poisoned")?;
+                        med.update_scene(fresh);
+                        let res = med.ground_action(&contract);
+                        Ok((serde_json::to_value(res).unwrap_or(Value::Null), false))
+                    }
+                    "plan" => {
+                        let disp = self.display_state.lock().map_err(|_| "Display lock poisoned")?;
+                        let fresh = SpatialInteractionEngine::extract_scene_from_display(&disp);
+                        let mut med = self.spatial_engine.mediator.lock().map_err(|_| "Mediator lock poisoned")?;
+                        med.update_scene(fresh);
+                        let plan = med.plan_action(&contract);
+                        Ok((serde_json::to_value(plan).unwrap_or(Value::Null), false))
+                    }
+                    "execute_plan" | "run_plan" => {
+                        let res = self.spatial_engine.execute_plan(&contract)?;
+                        Ok((res, false))
+                    }
+                    "query" => {
+                        let origin = args.get("origin_id").or_else(|| args.get("target_id")).and_then(|v| v.as_str()).unwrap_or("");
+                        let dir = args.get("direction").and_then(|v| v.as_str()).unwrap_or("right");
+                        let matched = self.spatial_engine.query_directional(origin, dir);
+                        Ok((json!({ "origin": origin, "direction": dir, "matched": matched }), false))
+                    }
+                    "reconcile" => {
+                        let dom_els = args.get("interactiveElements").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+                        let scene = self.spatial_engine.reconcile_dom_and_visual(&dom_els);
+                        Ok((serde_json::to_value(scene).unwrap_or(Value::Null), false))
+                    }
+                    "audit" => {
+                        Ok((self.spatial_engine.audit_health(), false))
+                    }
+                    "orchestrate" | "closed_loop" => {
+                        let goal = args.get("goal").or_else(|| args.get("objective")).and_then(|v| v.as_str()).unwrap_or("Spatial closed-loop execution");
+                        let res = self.computer_orchestrator.execute_closed_loop_cycle(goal, &contract)?;
+                        Ok((res, false))
+                    }
+                    _ => {
+                        let res = self.spatial_engine.execute_spatially_grounded_action(&contract)?;
+                        Ok((res, false))
+                    }
+                }
+            }
+            "vision_inspect" => {
+                let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("inspect");
+                let w = args.get("width").and_then(|v| v.as_u64()).unwrap_or(800) as u32;
+                let h = args.get("height").and_then(|v| v.as_u64()).unwrap_or(600) as u32;
+                match action {
+                    "generate_svg" => {
+                        let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("HEAV3NS-MICRO");
+                        let svg = generate_synthetic_svg(w, h, title);
+                        let meta = decode_image_metadata(svg.as_bytes())?;
+                        Ok((json!({ "svg": svg, "metadata": meta }), false))
+                    }
+                    "generate_bmp" => {
+                        let bmp = generate_synthetic_bmp(w, h, 15, 23, 42);
+                        let meta = decode_image_metadata(&bmp)?;
+                        Ok((json!({ "byteLength": bmp.len(), "metadata": meta }), false))
+                    }
+                    _ => {
+                        let path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path' for vision_inspect")?;
+                        let meta = SkillsIngestor::inspect_workspace_image(cwd, path)?;
+                        Ok((meta, false))
+                    }
+                }
+            }
+            "skill_forge" => {
+                let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("list_dag");
+                let val_args = Value::Object(args.clone());
+                let mut cat = self.skill_catalog.lock().map_err(|_| "Skill catalog lock poisoned")?;
+                let res = match action {
+                    "list_dag" | "dag" | "list" => cat.evaluate_dag(),
+                    "forge" | "create" | "wizard" => cat.forge_skill(&val_args)?,
+                    "apply_pack" | "power_up" => {
+                        let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("computer-use-operator");
+                        let pack = args.get("pack").and_then(|v| v.as_str()).unwrap_or("tdd-enforcer");
+                        cat.apply_power_up_pack(id, pack)?
+                    }
+                    "clone" | "fork" => {
+                        let src = args.get("id").and_then(|v| v.as_str()).unwrap_or("computer-use-operator");
+                        let new_id = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("computer-use-fork");
+                        cat.clone_skill(src, new_id, None)?
+                    }
+                    "lint" => {
+                        let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("computer-use-operator");
+                        cat.lint_and_autofix_skill(id, false)?
+                    }
+                    "autofix" | "doctor" => {
+                        let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("computer-use-operator");
+                        cat.lint_and_autofix_skill(id, true)?
+                    }
+                    "sync_vault" | "sync" => {
+                        let vault_files = SkillsIngestor::read_drop_vault_files(cwd);
+                        let mut ingested = Vec::new();
+                        for (fname, raw) in vault_files {
+                            if let Ok(item) = cat.ingest_multi_format(&fname, &raw) {
+                                ingested.push(item);
+                            }
+                        }
+                        json!({
+                            "syncedCount": ingested.len(),
+                            "totalCatalogSkills": cat.nodes.len(),
+                            "activeSoul": cat.active_soul.name,
+                            "ingested": ingested
+                        })
+                    }
+                    "export" => {
+                        let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("computer-use-operator");
+                        let fmt = args.get("format").and_then(|v| v.as_str()).unwrap_or("markdown");
+                        cat.export_node(id, fmt)?
+                    }
+                    "ingest" => {
+                        let fname = args.get("id").and_then(|v| v.as_str()).unwrap_or("imported.md");
+                        let content = args.get("content").or_else(|| args.get("prompt")).and_then(|v| v.as_str()).unwrap_or("");
+                        cat.ingest_multi_format(fname, content)?
+                    }
+                    "soul_status" | "soul" => json!({ "activeSoul": cat.active_soul, "competencies": cat.competency_scores }),
+                    other => return Err(format!("Unsupported skill_forge action '{other}'")),
+                };
+                Ok((res, false))
+            }
+            "engage_swarm" => {
+                let objective = args.get("objective").and_then(|v| v.as_str()).unwrap_or("Execute complex objective");
+                let strategy = args.get("strategy").and_then(|v| v.as_str());
+                let max_spec = args.get("maxSpecialists").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
+                let plan = classify_task_for_legion(objective, &[], strategy, max_spec);
+                Ok((plan, false))
             }
             other => {
                 let res = dispatch_fs_tool(other, args, cwd, &self.journal)?;

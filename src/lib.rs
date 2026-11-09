@@ -16,7 +16,7 @@ pub use crate::plumbing::hash_and_math::now_ms;
 pub mod engine {
     pub use crate::core::engine::AgentEngine;
     pub use crate::core::request_queue::{PromptComposer, QueuePermit, QueueState, RuntimeRequestQueue};
-    pub use crate::domain::swarm::{SwarmAssignment, SwarmFormationResult, SwarmItemReport};
+    pub use crate::domain::swarm::{classify_task_for_legion, SwarmAssignment, SwarmFormationResult, SwarmItemReport};
 }
 
 /// Backward-compatible public module facade for the Agent Flight Test suite and micro-benchmarks.
@@ -57,10 +57,12 @@ pub mod session {
     pub use crate::plumbing::text_tokens::{estimate_text_tokens, render_unified_diff, truncate_text_to_token_budget};
 }
 
-/// Backward-compatible public module facade for the 23 built-in tools, wave scheduler, and patch engine.
+/// Backward-compatible public module facade for the 28 built-in tools, wave scheduler, and patch engine.
 pub mod tools {
     pub use crate::core::tool_governor::{ToolExecutionCache, ToolLoopBreaker, ToolOutputGovernor};
     pub use crate::core::tool_registry::ToolRegistry;
+    pub use crate::domain::computer_use::{UiElement, VirtualDisplayState, VirtualWindow};
+    pub use crate::domain::skill_tree::{SkillNode, SkillTreeCatalog, SoulProfile};
     pub use crate::domain::types::skill_types::GovernedOutput;
     pub use crate::domain::types::tool_schedule::{MutationTransaction, RollbackResult, ScheduledToolCall};
     pub use crate::domain::types::tool_types::ToolSpec;
@@ -70,4 +72,25 @@ pub mod tools {
     pub use crate::infrastructure::transaction_journal::TransactionJournal;
     pub use crate::plumbing::fuzzy_patch::{heal_fuzzy_patch, DeterministicPatchEngine, PatchHunkLine, PatchOperation};
     pub use crate::plumbing::secret_redactor::SafetyPolicy;
+    pub use crate::plumbing::vision_and_dom::{calculate_aspect_ratio, decode_image_metadata, generate_synthetic_bmp, generate_synthetic_svg, redact_cdp_url, sanitize_trojan_unicode, snapshot_html_dom, validate_navigation_url};
+}
+
+/// Backward-compatible public module facade for the first-class Spatial Action Architecture.
+pub mod spatial {
+    pub use crate::core::spatial_engine::SpatialInteractionEngine;
+    pub use crate::domain::spatial_action::{GroundedSpatialTarget, SpatialExecutionReceipt, SpatialGroundingResult};
+    pub use crate::domain::spatial_mediator::{SpatialActionMediator, SpatialActionPlan, SpatialInteractionAudit};
+    pub use crate::domain::types::spatial_types::{AssuranceVerdict, SpatialActionContract, SpatialError, SpatialScene, SpatialTarget, TargetProvenance};
+    pub use crate::plumbing::spatial_geometry::{calculate_rectangles_union_area, normalize_coordinate_in_space, normalize_coordinate_value, validate_trajectory, SpatialPoint, SpatialRect, ViewportTransform};
+}
+
+/// Backward-compatible public module facade for Closed-Loop Computer Use & Swarm Collective Intelligence.
+pub mod computer_use {
+    pub use crate::core::computer_use_orchestrator::ComputerUseOrchestrator;
+    pub use crate::domain::computer_use::{IUiElement, IVirtualDisplay, UiElement, VirtualDisplayState, VirtualWindow};
+    pub use crate::domain::types::environmental_types::{BehavioralAffordance, EnvironmentalObservation, EnvironmentalRegion, IBehavioralAffordance, IEnvironmentalObservation, RegionKind};
+    pub use crate::domain::types::learned_knowledge_types::{EnvironmentalReconciliationReport, ILearnedPattern, IReconciliationReport, LearnedInteractionPattern, LearnedWorkflowProcedure};
+    pub use crate::domain::types::swarm_intelligence_types::{ConsultationRiskLevel, ISpecialistInsight, ISwarmConsultationResponse, SpecialistInsight, SwarmConsultationRequest, SwarmConsultationResponse};
+    pub use crate::infrastructure::behavioral_store::BehavioralKnowledgeStore;
+    pub use crate::plumbing::environmental_diff::{analyze_spider_structural_relationships, calibrate_confidence_score, classify_element_affordance, compute_element_deltas, detect_modal_or_dialog, diagnose_failure_cause};
 }

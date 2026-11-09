@@ -3,10 +3,12 @@ use crate::core::engine::AgentEngine;
 use crate::core::session_store::SessionCompactor;
 use crate::domain::arena::ArenaAllocator;
 use crate::domain::compaction::CompactionPolicy;
+use crate::domain::spatial_mediator::SpatialActionMediator;
 use crate::domain::tool_parser::ToolCallArgParser;
 use crate::domain::types::messages::{Role, SessionMessage};
 use crate::domain::types::progress::{EngineProgressEvent, EngineProgressPhase, EngineProgressStatus};
 use crate::domain::types::runtime::{AgentConfig, CancellationToken, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel};
+use crate::domain::types::spatial_types::{SpatialActionContract, SpatialScene, SpatialTarget};
 use crate::infrastructure::scripted_provider::{ProviderStep, ScriptedProvider};
 use crate::plumbing::hash_and_math::now_ms;
 use crate::plumbing::secret_redactor::DeterministicSecretRedactor;
@@ -583,10 +585,34 @@ pub fn run_micro_benchmarks() -> Value {
     }
     let compact_us = t_compact.elapsed().as_micros() as u64;
 
+    let t_spatial = Instant::now();
+    let mut med = SpatialActionMediator::new(1440, 900, "bench-win");
+    let mut scene = SpatialScene::new(1440, 900, "bench-win");
+    for i in 0..50 {
+        scene.targets.push(SpatialTarget::new(
+            format!("el-{}", i),
+            Some(i as u32),
+            "button",
+            format!("Element {}", i),
+            [(i % 10) * 120, (i / 10) * 60, 100, 40],
+        ));
+    }
+    med.update_scene(scene);
+    let contract = SpatialActionContract {
+        action_name: "click".into(),
+        target_selector: Some("el-25".into()),
+        ..Default::default()
+    };
+    for _ in 0..10_000 {
+        let _ = med.ground_action(&contract);
+    }
+    let spatial_us = t_spatial.elapsed().as_micros() as u64;
+
     json!({
         "arena100kAllocsUs": arena_us,
         "parser10kRepairsUs": parser_us,
         "redactor10kScansUs": redactor_us,
         "compactor500RunsUs": compact_us,
+        "spatial10kGroundingsUs": spatial_us,
     })
 }

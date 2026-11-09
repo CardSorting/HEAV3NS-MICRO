@@ -276,6 +276,10 @@ final class SwarmRadarWindow: NSWindowController, NSWindowDelegate {
         SwarmRadarManager.shared.setHeartbeatDisabled(isOptedOut)
     }
 
+    func dispose() {
+        NotificationCenter.default.removeObserver(self)
+    }
+
     deinit {
         NotificationCenter.default.removeObserver(self)
     }

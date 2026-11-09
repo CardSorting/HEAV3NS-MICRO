@@ -143,4 +143,5 @@ final class TranscriptMessageCell: NSTableCellView {
         return ["row": row.id, "cell": NSStringFromRect(bounds), "surface": NSStringFromRect(surface.frame),
             "labels": [title, body, evidence].filter { !$0.isHidden }.map { ["frame": NSStringFromRect($0.frame), "text": String($0.stringValue.prefix(80))] }]
     }
+    func dispose() {}
 }

@@ -8,143 +8,102 @@
   <a href="../architecture/current.md">Architecture</a>
 </p>
 
-Comprehensive reference of the public types, contracts, and programmatic interfaces exposed by the `heav3ns-micro` crate.
+Comprehensive reference of the public types, contracts (`39` formal `I<Name>` traits), and programmatic interfaces exposed by the `heav3ns-micro` crate across all Seven Sovereign Pillars.
 
 ---
 
-## 1. Domain Interfaces (`src/domain/interfaces/mod.rs`)
+## 1. Domain Port Interfaces (`src/domain/interfaces/mod.rs`)
 
-All core interactions with infrastructure adapters are decoupled through formal `I<Name>` traits under the Principle of Contractual Sovereignty (`ADR-0007`):
+All core interactions with infrastructure adapters and spatial/cognitive subsystems are decoupled through formal `I<Name>` traits under the Principle of Contractual Sovereignty (`ADR-0007`, `ADR-0011`):
 
-### `ILlmProvider`
+### Provider, Persistence, VFS & Journal Contracts
 ```rust
 pub trait ILlmProvider: Send + Sync {
-    fn query(&self, request: ProviderRequest) -> BoxFuture<'_, Result<ProviderResponse, ProviderError>>;
+    fn complete<'a>(&'a self, request: &'a ProviderRequest, on_progress: Option<&'a ProgressCallback>, cancel_token: Option<&'a CancellationToken>) -> BoxFuture<'a, Result<ProviderResponse, ProviderError>>;
 }
-```
-Implemented by [`HttpProvider`](../../src/infrastructure/http_provider.rs) and [`ScriptedProvider`](../../src/infrastructure/scripted_provider.rs).
-
-### `ISessionPersistence` & `IFileSessionPersistence`
-```rust
+pub trait IHttpProvider: ILlmProvider {}
+pub trait IScriptedProvider: ILlmProvider { fn remaining_steps(&self) -> usize; }
 pub trait ISessionPersistence: Send + Sync {
     fn save_jsonl(&self, path: &Path, payload: &str) -> Result<bool, String>;
     fn load_jsonl(&self, path: &Path) -> Result<String, String>;
 }
-```
-Implemented by [`FileSessionPersistence`](../../src/infrastructure/vfs_store.rs).
-
-### `ISessionVfs`
-```rust
+pub trait IFileSessionPersistence: ISessionPersistence {}
 pub trait ISessionVfs: Send + Sync {
     fn export_staged_overlays(&self) -> Vec<VfsFileOverlay>;
     fn commit_staged(&mut self) -> Result<Vec<String>, String>;
 }
-```
-Implemented by [`SessionVfs`](../../src/infrastructure/vfs_store.rs).
-
-### `ITransactionJournal`
-```rust
+pub trait ISkillsIngestor: Send + Sync {
+    fn discover_manifests(workspace_root: &Path) -> Vec<SkillManifest>;
+}
 pub trait ITransactionJournal: Send + Sync {
     fn record_file_mutation(&mut self, tool_name: &str, target_path: &Path) -> String;
     fn rollback_last_mutation(&mut self) -> RollbackResult;
 }
-```
-Implemented by [`TransactionJournal`](../../src/infrastructure/transaction_journal.rs).
-
-### `ISkillsIngestor`
-```rust
-pub trait ISkillsIngestor: Send + Sync {
-    fn discover_manifests(workspace_root: &Path) -> Vec<SkillManifest>;
+pub trait IToolExecutor: Send + Sync {
+    fn execute_batch_contract<'a>(&'a self, calls: &'a [ScheduledToolCall], cwd: &'a Path, authority: ExecutionAuthorityLevel, cancel_token: Option<&'a CancellationToken>) -> BoxFuture<'a, Vec<ToolExecutionRecord>>;
 }
 ```
-Implemented by [`SkillsIngestor`](../../src/infrastructure/vfs_store.rs).
+
+### Spatial Action, `SPIDER`, `BROCCOLI` & `SYNTHETIC SWARM` Contracts
+```rust
+pub trait ISpatialMediator: Send + Sync {
+    fn ground_contract(&self, contract: &SpatialActionContract) -> SpatialGroundingResult;
+}
+pub trait ISpatialGroundingGate: Send + Sync {
+    fn ground(&self, contract: &SpatialActionContract) -> SpatialGroundingResult;
+}
+pub trait IExecutionAssuranceGate: Send + Sync {
+    fn assure_pre(&self, grounded: &GroundedSpatialTarget, contract: &SpatialActionContract) -> Result<(), SpatialError>;
+    fn verify_post(&mut self, action: &str, grounded: Option<&GroundedSpatialTarget>, before: &SpatialScene, after: &SpatialScene, duration_ms: u64) -> SpatialExecutionReceipt;
+}
+pub trait IEnvironmentalObserver: Send + Sync {
+    fn observe_environment(&self) -> EnvironmentalObservation;
+    fn detect_modal_trap(&self, obs: &EnvironmentalObservation) -> Option<String>;
+}
+pub trait IBehavioralKnowledgeStore: Send + Sync {
+    fn lookup_pattern(&self, app: &str, objective: &str) -> Option<LearnedInteractionPattern>;
+    fn record_outcome(&mut self, pattern_id: &str, app: &str, success: bool, epoch: u64);
+    fn reconcile_state(&self, checkpoint_epoch: u64, current_epoch: u64, external_hash_changed: bool) -> EnvironmentalReconciliationReport;
+}
+pub trait IBehavioralStore: IBehavioralKnowledgeStore {}
+pub trait ISwarmIntelligenceConsultant: Send + Sync {
+    fn consult(&self, request: &SwarmConsultationRequest) -> SwarmConsultationResponse;
+}
+pub trait IComputerUseOrchestrator: Send + Sync {
+    fn execute_closed_loop(&self, goal: &str, contract: &SpatialActionContract) -> Result<serde_json::Value, String>;
+}
+```
 
 ---
 
-## 2. Core Engine & Orchestrator (`src/core/engine.rs`)
+## 2. Core Engines & Orchestrators (`src/core/`)
 
-### `AgentEngine`
-The central ReAct state machine orchestrating agent turns, context compaction, tool dispatch, and streaming progress events.
+### `AgentEngine` (`src/core/engine.rs`)
+The central multi-turn ReAct state machine orchestrating agent turns, context compaction, tool dispatch, and streaming progress events.
+- `AgentEngine::with_defaults(workspace_root)`
+- `AgentEngine::tick(&self, input: EngineTickInput) -> EngineTickResult`
+- `AgentEngine::ask_side_question(&self, question: &str) -> Result<String, ProviderError>`
+- `AgentEngine::handle_slash_command(&self, input: &str) -> Option<String>` (`16` slash commands)
+- `AgentEngine::run_swarm(&self, goal: &str) -> SwarmFormationResult`
+- `AgentEngine::create_snapshot(&self) -> GameStateSnapshot` & `rewind_to_snapshot(&self, index: usize)`
 
-```rust
-pub struct AgentEngine {
-    // Internal substrate components
-}
+### `ComputerUseOrchestrator` (`src/core/computer_use_orchestrator.rs`)
+The 9-stage closed-loop embodied agency orchestrator (`OBSERVE -> ORIENT -> INTERPRET -> REASON -> PLAN -> ACT -> OBSERVE -> VERIFY -> LEARN`).
+- `ComputerUseOrchestrator::observe(&self) -> EnvironmentalObservation`
+- `ComputerUseOrchestrator::interpret(&self, obs: &EnvironmentalObservation) -> Value`
+- `ComputerUseOrchestrator::consult(&self, req: &SwarmConsultationRequest) -> SwarmConsultationResponse`
+- `ComputerUseOrchestrator::execute_closed_loop_cycle(&self, goal: &str, contract: &SpatialActionContract) -> Result<Value, String>`
 
-impl AgentEngine {
-    /// Constructs a new engine with default providers, tools, and 16-MiB arena slab.
-    pub fn with_defaults(workspace_root: impl Into<PathBuf>) -> Self;
-
-    /// Executes a single multi-step ReAct agent tick with tool execution waves.
-    pub async fn tick(&self, input: EngineTickInput) -> EngineTickResult;
-
-    /// Answers a stateless side question without tool invocation or transcript retention.
-    pub async fn ask_side_question(&self, question: &str) -> Result<String, ProviderError>;
-
-    /// Handles an interactive slash command (/help, /status, /compact, /commit, etc.).
-    pub fn handle_slash_command(&self, input: &str) -> Option<String>;
-
-    /// Orchestrates a topological multi-agent specialist swarm formation.
-    pub fn run_swarm(&self, goal: &str) -> SwarmFormationResult;
-
-    /// Returns a list of captured snapshots across transcript, memory, and VFS.
-    pub fn snapshots_list(&self) -> Vec<GameStateSnapshot>;
-
-    /// Captures an atomic multi-state snapshot.
-    pub fn create_snapshot(&self) -> GameStateSnapshot;
-
-    /// Rewinds transcript, memory, VFS, and Arena slab to a previous snapshot index.
-    pub fn rewind_to_snapshot(&self, index: usize) -> Result<GameStateSnapshot, String>;
-
-    /// Introspects or dynamically switches active model configuration.
-    pub fn inspect_or_switch_model(&self, arg: &str) -> String;
-
-    /// Accessors for substrate components.
-    pub fn workspace_root(&self) -> &Path;
-    pub fn tools(&self) -> &Arc<ToolRegistry>;
-    pub fn session(&self) -> &Mutex<SessionStore>;
-    pub fn vfs(&self) -> &Mutex<SessionVfs>;
-    pub fn memory(&self) -> &Arc<Mutex<MemoryStore>>;
-    pub fn queue(&self) -> &Arc<RuntimeRequestQueue>;
-    pub fn compactor(&self) -> &SessionCompactor;
-    pub fn config_snapshot(&self) -> AgentConfig;
-}
-```
+### `SpatialInteractionEngine` (`src/core/spatial_engine.rs`)
+- `SpatialInteractionEngine::execute_spatially_grounded_action(&self, contract: &SpatialActionContract) -> Result<Value, String>` (includes automatic off-screen pre-scroll remediation)
+- `SpatialInteractionEngine::execute_plan(&self, contract: &SpatialActionContract) -> Result<Value, String>` (executes multi-step `SpatialActionPlan` sequences)
+- `SpatialInteractionEngine::reconcile_dom_and_visual(&self, dom_elements: &[Value]) -> SpatialScene`
+- `SpatialInteractionEngine::query_directional(&self, origin_id: &str, direction: &str) -> Option<SpatialTarget>`
+- `SpatialInteractionEngine::audit_health(&self) -> Value`
 
 ---
 
 ## 3. UI & IPC Dispatch (`src/ui/`)
 
-### Stdio Worker Entrypoint (`src/ui/stdio_worker.rs`)
-```rust
-pub async fn run_stdio_worker(
-    workspace_root: PathBuf,
-    account: Option<String>,
-) -> Result<(), Box<dyn std::error::Error>>;
-```
-Runs the standard I/O JSON-RPC 2.0 loop, emitting `"v": 1` version-tagged frames to `stdout` and diagnostic logs to `stderr`.
-
-### Desktop RPC Router (`src/ui/rpc_dispatch.rs`)
-```rust
-pub struct RpcDispatcher;
-
-impl RpcDispatcher {
-    pub async fn dispatch(
-        engine: &AgentEngine,
-        request: RpcRequest,
-    ) -> RpcResponse;
-}
-```
-Routes incoming desktop requests to handlers (`files.list`, `files.readBinary`, `changes.read`, `spider.check`, `memory.*`, `task.*`, `swarm.*`, `checkpoint.*`).
-
----
-
-## 4. Key Substrate Primitives (`src/plumbing/`)
-
-- **`encode_base64(data: &[u8]) -> String`**: RFC 4648 Base64 encoder for binary file inspection.
-- **`estimate_text_tokens(text: &str) -> usize`**: Deterministic BPE token estimation ($O(N)$).
-- **`truncate_text_to_token_budget(text: &str, budget: usize) -> String`**: Head/tail preservation with explicit truncation markers.
-- **`extract_json_roots(text: &str) -> Vec<&str>`**: Balanced brace extraction ignoring braces inside string literals.
-- **`repair_json_string(raw: &str) -> String`**: 3-stage heuristic repair (markdown fence stripping, quote healing, unclosed bracket recovery).
-- **`DeterministicSecretRedactor::redact_text(input: &str) -> String`**: Replaces API keys, tokens, and passwords with cryptographic redaction badges.
-- **`heal_fuzzy_patch(source: &str, patch: &str) -> Result<String, PatchError>`**: Whitespace-tolerant V4A patch applier ($95\%$ tolerance).
+- **`run_stdio_worker` (`src/ui/stdio_worker.rs`)**: Runs the `"v": 1` JSON-RPC 2.0 loop over standard I/O.
+- **`RpcDispatcher` (`src/ui/rpc_dispatch.rs`)**: Routes desktop requests (`files.*`, `changes.read`, `spider.check`, `memory.*`, `task.*`, `swarm.*`, `checkpoint.*`, `spatial.*`, `cua.*`).

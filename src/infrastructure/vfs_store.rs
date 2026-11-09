@@ -4,6 +4,8 @@ use crate::domain::types::skill_types::SkillManifest;
 use crate::domain::types::vfs_types::{VfsDiskBaseline, VfsFileOverlay};
 use crate::plumbing::hash_and_math::now_ms;
 use crate::plumbing::text_tokens::render_unified_diff;
+use crate::plumbing::vision_and_dom::decode_image_metadata;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
@@ -222,6 +224,56 @@ impl SkillsIngestor {
             .map(|m| serde_json::json!({ "name": m.name, "description": m.description }))
             .collect();
         Some(serde_json::json!({ "availableSkills": items }).to_string())
+    }
+
+    /// Scans `skills/`, `.agents/skills/`, `.claude/skills/`, and `souls/` drop vaults for multi-format assets.
+    pub fn read_drop_vault_files(workspace_root: &Path) -> Vec<(String, String)> {
+        let mut files = Vec::new();
+        let vaults = [
+            workspace_root.join("skills"),
+            workspace_root.join(".agents/skills"),
+            workspace_root.join(".claude/skills"),
+            workspace_root.join("souls"),
+        ];
+        for vault in &vaults {
+            if !vault.is_dir() {
+                continue;
+            }
+            let Ok(entries) = fs::read_dir(vault) else { continue };
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    let skill_md = p.join("SKILL.md");
+                    if let Ok(raw) = fs::read_to_string(&skill_md) {
+                        let fname = p.file_name().and_then(|n| n.to_str()).unwrap_or("skill.md").to_string();
+                        files.push((fname, raw));
+                    }
+                } else if p.is_file() {
+                    let fname = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+                    let supported = [".md", ".json", ".xml", ".yaml", ".yml", ".txt", ".prompt"]
+                        .iter()
+                        .any(|ext| fname.to_ascii_lowercase().ends_with(ext));
+                    if supported {
+                        if let Ok(raw) = fs::read_to_string(&p) {
+                            files.push((fname, raw));
+                        }
+                    }
+                }
+            }
+        }
+        files
+    }
+
+    pub fn inspect_workspace_image(workspace_root: &Path, rel_path: &str) -> Result<Value, String> {
+        let candidate = if Path::new(rel_path).is_absolute() {
+            Path::new(rel_path).to_path_buf()
+        } else {
+            workspace_root.join(rel_path)
+        };
+        let bytes = fs::read(&candidate).map_err(|e| format!("Failed to read image '{}': {e}", candidate.display()))?;
+        let mut meta = decode_image_metadata(&bytes)?;
+        meta["path"] = json!(rel_path);
+        Ok(meta)
     }
 }
 

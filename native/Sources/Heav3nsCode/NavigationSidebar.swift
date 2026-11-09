@@ -162,5 +162,6 @@ final class NavigationSidebar: NSView, NSTableViewDataSource, NSTableViewDelegat
         if showDetail { detail.widthAnchor.constraint(equalTo: labels.widthAnchor).isActive = true }
         return cell
     }
+    func dispose() { filterWork?.cancel() }
     deinit { filterWork?.cancel() }
 }

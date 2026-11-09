@@ -70,4 +70,6 @@ final class WorkspaceDraftStore {
             }
         }
     }
+
+    func dispose() {}
 }

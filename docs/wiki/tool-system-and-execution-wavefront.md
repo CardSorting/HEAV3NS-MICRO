@@ -1,79 +1,78 @@
 <!-- [LAYER: UI] -->
-# Tool System & Execution Wavefront
+# Tool System & Execution Wavefront (`29` Native Tools)
 
 <p align="center">
   <a href="README.md">Wiki Hub</a> ·
   <a href="../api/cli.md">CLI Reference</a> ·
   <a href="../PORTABLE_TRINITY.md">Substrate Primitives</a> ·
-  <a href="../adr/0005-dag-wave-scheduler-concurrency.md">ADR-0005</a>
+  <a href="../adr/0005-dag-wave-scheduler-concurrency.md">ADR-0005</a> ·
+  <a href="../adr/0011-sovereign-intelligence-and-spatial-computer-use.md">ADR-0011</a>
 </p>
 
-Architecture of the 23 native agent tools and the concurrency wavefront managed by [`WaveScheduler`](../../src/core/tool_governor.rs).
+Architecture of the **29 native agent tools** declared in [`src/core/tool_specs.rs`](../../src/core/tool_specs.rs) and the concurrency wavefront managed by [`ToolRegistry::partition_waves`](../../src/core/tool_registry.rs).
 
 ---
 
 ## 1. Concurrency Geometry & Wave Scheduling
 
-When an agent emits multiple tool calls in a single turn, executing them naively introduces major race conditions. The DAG Wave Scheduler partitions tool calls into two distinct execution phases:
+When an agent emits multiple tool calls in a single turn, [`ToolRegistry::partition_waves`](../../src/core/tool_registry.rs) partitions them into conflict-free execution waves:
 
 ```mermaid
 sequenceDiagram
   autonumber
   participant Agent as Agent Turn (Engine)
-  participant Scheduler as WaveScheduler
-  participant ReadPool as Parallel Read Workers
-  participant WriteBarrier as Serialized Mutating Barrier
+  participant Scheduler as ToolRegistry::partition_waves
+  participant ReadPool as Parallel Read Wave (join_all)
+  participant WriteBarrier as Serialized Mutating Wave
 
-  Agent->>Scheduler: Emit Tool Calls [t1(read), t2(read), t3(write)]
-  Scheduler->>Scheduler: Partition into Wave 1 (Reads) & Wave 2 (Writes)
-  Scheduler->>ReadPool: Dispatch [t1, t2] concurrently
-  ReadPool-->>Scheduler: Return outputs for [t1, t2]
-  Scheduler->>WriteBarrier: Dispatch t3 sequentially
-  WriteBarrier-->>Scheduler: Return output for t3
-  Scheduler-->>Agent: Consolidated execution results
+  Agent->>Scheduler: Emit Tool Calls [view_file, grep_search, spatial_interact]
+  Scheduler->>Scheduler: Partition into Wave 1 (Reads) & Wave 2 (Mutating)
+  Scheduler->>ReadPool: Dispatch [view_file, grep_search] concurrently
+  ReadPool-->>Scheduler: Return governed outputs
+  Scheduler->>WriteBarrier: Dispatch spatial_interact sequentially
+  WriteBarrier-->>Scheduler: Return Double-Wrapped execution receipt
+  Scheduler-->>Agent: Consolidated ToolExecutionRecord batch
 ```
 
 ---
 
-## 2. The 23 Native Tools Catalog
+## 2. The 29 Native Tools Catalog (`src/core/tool_specs.rs`)
 
-Built-in tools declared in [`src/core/tool_specs.rs`](../../src/core/tool_specs.rs) and registered in [`src/core/tool_registry.rs`](../../src/core/tool_registry.rs):
+### A. Filesystem & VFS Operations (`12` Tools)
+1. `view_file`: Read file contents with line range pagination. (ReadOnly)
+2. `write_file`: Create or overwrite a file with TransactionJournal backup. (Mutating)
+3. `replace_file_content`: Exact or fuzzy single-block replacement. (Mutating)
+4. `multi_replace_file_content`: Atomic multi-hunk file replacement. (Mutating)
+5. `edit_file_anchored`: Line-anchor and FNV-1a hash-guarded file edit. (Mutating)
+6. `apply_unified_diff`: Apply standard unified diff or V4A `*** Begin Patch` multi-file patches. (Mutating)
+7. `delete_file`: Delete a workspace file with rollback backup. (Mutating)
+8. `move_file`: Move or rename a file within the workspace. (Mutating)
+9. `list_dir`: List directory contents. (ReadOnly)
+10. `find_files`: Glob and substring file path discovery. (ReadOnly)
+11. `file_info`: Inspect file byte length, timestamps, and FNV-1a hash. (ReadOnly)
+12. `directory_tree`: Render recursive workspace directory tree. (ReadOnly)
 
-### Filesystem Inspection & Mutation
-1. `fs_read`: Read file contents with byte range support. (ReadOnly)
-2. `fs_write`: Stage file creation or overwrite in SessionVfs. (Mutating)
-3. `fs_remove`: Stage file removal in SessionVfs. (Mutating)
-4. `fs_list`: List directory contents with depth recursion. (ReadOnly)
-5. `fs_stat`: Query file metadata, size, and permissions. (ReadOnly)
+### B. Search, Refactoring & Git Diff (`4` Tools)
+13. `grep_search`: Fast regex/literal content search across workspace files. (ReadOnly)
+14. `search_symbols`: Polyglot symbol extractor (`fn`, `struct`, `trait`, `class`, `interface`). (ReadOnly)
+15. `batch_replace_regex`: Workspace-wide regex replacement with dry-run preview. (Mutating)
+16. `get_workspace_diff`: Unified diff of current workspace changes. (ReadOnly)
 
-### Search & Code Navigation
-6. `search_grep`: Regex text search across workspace files. (ReadOnly)
-7. `search_symbol`: Locate class, function, and trait symbol definitions. (ReadOnly)
-8. `search_path`: Glob path search for matching filenames. (ReadOnly)
+### C. Shell Execution & Journal Rewind (`2` Tools)
+17. `run_command`: Execute shell command with timeout, PTY ANSI responder, and `SafetyPolicy` guards (`ADR-0015`/`0016`). (Mutating)
+18. `rollback_last_mutation`: Undo the most recent file mutation via `TransactionJournal`. (Mutating)
 
-### Patching & Diffs
-9. `patch_apply`: Apply unified diff hunks with fuzzy healing. (Mutating)
-10. `patch_preview`: Preview simulated patch changes without staging. (ReadOnly)
-11. `diff_unified`: Generate unified diff between disk and staged overlay. (ReadOnly)
+### D. Memory, Spill Recovery & Skills (`5` Tools)
+19. `save_memory`: Save a durable fact into `MemoryStore` (`BROCCOLI`). (Mutating)
+20. `search_memory`: Hybrid TF-IDF + FNV-1a semantic recall across stored memories. (ReadOnly)
+21. `retrieve_spill_content`: Retrieve line ranges from oversized tool outputs spilled by `ToolOutputGovernor`. (ReadOnly)
+22. `list_skills`: Discover workspace `SKILL.md` manifests. (ReadOnly)
+23. `use_skill`: Load full instructions for a named skill. (ReadOnly)
 
-### Git Operations
-12. `git_status`: Inspect working directory state and modified files. (ReadOnly)
-13. `git_diff`: Retrieve git diff for specific commits or working tree. (ReadOnly)
-14. `git_log`: Query recent commit history and messages. (ReadOnly)
-
-### Shell Execution
-15. `shell_execute`: Execute arbitrary terminal command under timeout. (Mutating, Requires `ShellExecute` authority)
-
-### Virtual File System & Transactions
-16. `session_vfs_status`: Inspect currently staged overlays and baselines. (ReadOnly)
-17. `session_vfs_commit`: Atomically commit all staged overlays to disk. (Mutating)
-18. `session_rollback`: Revert the last committed file transaction. (Mutating)
-
-### Memory & State
-19. `session_memory_store`: Store key-value semantic fact. (Mutating)
-20. `session_memory_recall`: Query stored memories by key or topic. (ReadOnly)
-
-### Skills & Swarm Coordination
-21. `skill_invoke`: Invoke an ingested workspace `SKILL.md` workflow. (Mutating)
-22. `swarm_delegate`: Delegate sub-task to specialist agent. (Mutating)
-23. `agent_status`: Inspect active sub-agent states and progress. (ReadOnly)
+### E. Embodied Computer Use, Spatial Mediation, Vision & Swarm (`6` Tools)
+24. `computer_use`: Set-of-Marks GUI interaction (`capture`, `click`, `type`, `key`, `scroll`, `orchestrate` 9-stage closed loop, `observe`, `interpret`, `consult_swarm`, `undo`, `redo`, `query_ledger`, `audit_health`). (Mutating)
+25. `browser_use`: Zero-trust DOM snapshotter (`snapshot`, `navigate` with SSRF/IMDSv2 guard, `click`, `type`, `evaluate`). (Mutating)
+26. `vision_inspect`: Binary image header codec (`PNG`, `JPEG`, `GIF`, `WebP`, `BMP`, `SVG`) and synthetic SVG/BMP generator. (ReadOnly)
+27. `skill_forge`: Evolutionary Skill Tree & Soul Drop Vault (`list_dag`, `forge`, `apply_pack`, `clone`, `lint`, `autofix`, `sync_vault`, `export`, `ingest`, `soul_status`). (Mutating)
+28. `engage_swarm`: `The Legion` 7-specialist topological task classifier (`classify_task_for_legion`). (ReadOnly)
+29. `spatial_interact`: First-class Double-Wrapped Spatial Action engine (`ground`, `execute` with off-screen auto-scroll, `plan`, `execute_plan`, `query` directional relationships, `reconcile` DOM+SoM, `audit`, `orchestrate`). (Mutating)

@@ -13,9 +13,10 @@ enum CodeOutline {
         let pattern: String
         switch ext {
         case "swift": pattern = #"(?m)^\s*(?:(?:public|private|fileprivate|internal|open|final|static|class|override|mutating|nonisolated|indirect)\s+)*(?:struct|class|enum|protocol|extension|actor|func)\s+([\w.]+)"#
-        case "ts", "tsx", "js", "jsx": pattern = #"(?m)^\s*(?:(?:export|default|declare|abstract|async)\s+)*(?:class|interface|type|enum|function|const|let)\s+([\w$]+)"#
+        case "ts", "tsx", "js", "jsx", "mjs", "cjs": pattern = #"(?m)^\s*(?:(?:export|default|declare|abstract|async)\s+)*(?:class|interface|type|enum|function|const|let)\s+([\w$]+)"#
         case "py": pattern = #"(?m)^\s*(?:async\s+)?(?:class|def)\s+(\w+)"#
-        case "rs": pattern = #"(?m)^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:struct|enum|trait|impl|fn)\s+(\w+)"#
+        case "rs": pattern = #"(?m)^\s*(?:pub(?:\([^)]*\))?\s+)?(?:const\s+)?(?:async\s+)?(?:extern\s+"[^"]+"\s+)?(?:struct|enum|trait|impl|fn|type|mod)\s+(\w+)"#
+        case "go": pattern = #"(?m)^\s*(?:func(?:\s*\([^)]+\))?|type)\s+(\w+)"#
         default: return []
         }
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
@@ -70,8 +71,8 @@ enum CodeOutline {
                     result.addAttribute(.foregroundColor, value: NSColor.systemGreen, range: nextLineRange)
                     result.addAttribute(.backgroundColor, value: NSColor.systemGreen.withAlphaComponent(0.09), range: nextLineRange)
 
-                    let oldSlice = Array(line.dropFirst())
-                    let newSlice = Array(nextLine.dropFirst())
+                    let oldSlice = Array((line as NSString).substring(from: 1).utf16)
+                    let newSlice = Array((nextLine as NSString).substring(from: 1).utf16)
                     var p = 0
                     while p < oldSlice.count && p < newSlice.count && oldSlice[p] == newSlice[p] { p += 1 }
                     var s = 0

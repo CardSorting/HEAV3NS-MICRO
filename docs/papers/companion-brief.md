@@ -3,13 +3,13 @@
 
 **Executive summary · v0.1.0 · workspace-verified**
 
-_Companion to the [Technical Whitepaper](whitepaper.md). All figures below are measured directly from the repository (`Cargo.toml`, `src/domain/`, `src/core/`, `src/infrastructure/`, `src/plumbing/`, `src/ui/`) and verified by `npm run docs:check`._
+_Companion to [The Ascendant Computational Intelligence](ascendant-intelligence.md) and the [Technical Whitepaper](whitepaper.md). All figures below are measured directly from the repository (`Cargo.toml`, `src/domain/`, `src/core/`, `src/infrastructure/`, `src/plumbing/`, `src/ui/`, `native/`) and verified by `npm run docs:check`._
 
 ---
 
 ## One sentence
 
-**HEAV3NS-MICRO** (`v0.1.0`) is a hyper-compressed, high-performance Rust micro agent runtime structured under the **HEAV3NS-JOY** 5-Zone Joyzoning architecture, delivering a 16-MiB contiguous memory arena with $O(1)$ tick pointer rewinding, self-healing streaming tool call parsing, two-phase staged filesystem transactions, and topological DAG wave scheduling.
+**HEAV3NS-MICRO** (`v0.1.0`) is the distilled Rust intelligence runtime at the heart of **HEAV3NS — The Sovereign Intelligence Architecture**, uniting a 16-MiB $O(1)$-rewind memory arena, self-healing tool parser, transactional VFS, Double-Wrapped Spatial Action Architecture (`Wrapper A` + `Wrapper B`), 9-stage Closed-Loop Computer Use orchestrator, `SPIDER` structural perception, `BROCCOLI` persistent behavioral learning, and `SYNTHETIC SWARM` collective cognition with a native macOS AppKit IDE (`HEAV3NS-CODE`).
 
 ---
 
@@ -18,52 +18,59 @@ _Companion to the [Technical Whitepaper](whitepaper.md). All figures below are m
 | Metric | Value | Where |
 |--------|-------|-------|
 | Crate version | **0.1.0** (`2021` edition) | [`Cargo.toml`](../../Cargo.toml) |
-| Canonical architectural zones | **5** | [`stability.config.json`](../../stability.config.json) |
-| Rust source modules (`src/`) | **44** (all `< 800` lines Tier 1 Optimal) | [`docs/PROJECT_MAP.md`](../PROJECT_MAP.md) |
-| Formal `I<Name>` domain interfaces | **9** traits | [`src/domain/interfaces/mod.rs`](../../src/domain/interfaces/mod.rs) |
-| Built-in native agent tools | **23** tools | [`src/core/tool_specs.rs`](../../src/core/tool_specs.rs) |
-| Interactive slash commands | **10** commands | [`src/core/slash_and_swarm.rs`](../../src/core/slash_and_swarm.rs) |
-| Default memory arena slab | **16 MiB** contiguous buffer | [`src/domain/arena.rs`](../../src/domain/arena.rs) |
+| Sovereign Intelligence Pillars | **7** (`HEAV3NS-MICRO`, `SPIDER`, `REWIND`, `BROCCOLI`, `SYNTHETIC SWARM`, `COMPUTER USE`, `THE HARNESS`) | [`doc.md`](../../doc.md) · [`ascendant-intelligence.md`](ascendant-intelligence.md) |
+| Canonical architectural zones | **5** (`PLUMBING`, `DOMAIN`, `INFRASTRUCTURE`, `CORE`, `UI`) | [`stability.config.json`](../../stability.config.json) |
+| Rust source modules (`src/`) | **64** (`10` Plumbing · `25` Domain · `9` Infra · `14` Core · `6` UI, all `< 800` lines Tier 1 Optimal) | [`docs/PROJECT_MAP.md`](../PROJECT_MAP.md) |
+| Total Joyzoning-audited workspace files | **280+** files (`329` local dependency edges) | [`VALIDATION_REPORT.md`](../../VALIDATION_REPORT.md) |
+| Formal `I<Name>` domain interfaces | **39** traits (`19` port interfaces + `20` entity contracts) | [`src/domain/interfaces/mod.rs`](../../src/domain/interfaces/mod.rs) |
+| Built-in native agent tools | **29** tools | [`src/core/tool_specs.rs`](../../src/core/tool_specs.rs) |
+| Interactive slash commands | **16** commands | [`src/core/slash_and_swarm.rs`](../../src/core/slash_and_swarm.rs) |
+| Default memory arena slab | **16 MiB** contiguous buffer with $O(1)$ rewind | [`src/domain/arena.rs`](../../src/domain/arena.rs) |
+| Spatial grounding throughput | **$\le 0.40\ \mu\text{s}$** per operation (`> 240,000` ops/sec) | [`src/core/spatial_tests.rs`](../../src/core/spatial_tests.rs) |
+| Rust unit & integration tests | **49** passed (`0` failed) across substrate, spatial, and computer-use suites | `cargo test` |
 | Agent Flight Test scenarios | **5** (`FT-01..FT-05`, `19/19` checks passing) | [`src/core/flight_runner.rs`](../../src/core/flight_runner.rs) |
-| Joyzoning Stability Index ($SI$) | **100% (`SOVEREIGN`)** | [`VALIDATION_REPORT.md`](../../VALIDATION_REPORT.md) |
-| Joyzoning Build Health | **100% (`Grade: A+ — SOVEREIGN`)** | [`VALIDATION_REPORT.md`](../../VALIDATION_REPORT.md) |
-| Maximum relative import traversal | **3** (`../../..`) | `SPI-209` rule |
-| Tier 1 Optimal module size cap | **800** lines | `SPI-203` rule |
-| Architecture Decision Records (ADRs) | **10** + template | [`docs/adr/README.md`](../adr/README.md) |
-| Native macOS AppKit Tests | **308** passed (`0` failed) | [`native/Tests/Heav3nsCodeTests/`](../../native/Tests/Heav3nsCodeTests/) |
+| Native macOS AppKit Tests | **311** passed (`0` failed) | [`native/Tests/Heav3nsCodeTests/`](../../native/Tests/Heav3nsCodeTests/) |
+| Joyzoning Stability Index ($SI$) | **100% (`SOVEREIGN`, $E_S = 0.0038$)** | [`VALIDATION_REPORT.md`](../../VALIDATION_REPORT.md) |
+| Joyzoning Build Health | **100% (`Grade: A+ — SOVEREIGN`, `0` violations, `0` advisories)** | [`VALIDATION_REPORT.md`](../../VALIDATION_REPORT.md) |
+| Architecture Decision Records (ADRs) | **11** + template (`ADR-0001..0011`) | [`docs/adr/README.md`](../adr/README.md) |
 | Operational Playbooks & Postmortems | **6** playbooks · **5** postmortems | [`docs/playbooks/README.md`](../playbooks/README.md) · [`docs/postmortems/README.md`](../postmortems/README.md) |
-| Concept Wiki & Knowledge Base Articles | **4** wiki guides · **3** KB articles | [`docs/wiki/README.md`](../wiki/README.md) · [`docs/kb/README.md`](../kb/README.md) |
+| Concept Wiki & Knowledge Base Articles | **4** wiki guides · **3** KB articles · **4** papers | [`docs/wiki/README.md`](../wiki/README.md) · [`docs/kb/README.md`](../kb/README.md) |
 
 ---
 
 ## What problem it solves
 
-Autonomous coding agents frequently suffer from runtime bloat, non-deterministic memory consumption, brittle parser crashes on LLM-generated JSON, and dangerous, unverified filesystem mutations. HEAV3NS-MICRO solves these structural problems through four concrete innovations:
+Autonomous coding and computer-use agents frequently suffer from runtime bloat, ungrounded pointer clicks, infinite failure loops, brittle JSON parser crashes, and unverified filesystem mutations. HEAV3NS-MICRO resolves these challenges across seven integrated pillars:
 
 | Challenge | HEAV3NS-MICRO Solution |
 | :--- | :--- |
-| **Heap thrashing & memory leaks** | Pre-allocated 16-MiB memory arena with constant-time $O(1)$ bump-pointer rewinds at turn boundaries ([ADR-0002](../adr/0002-arena-allocator-and-o1-tick-rewind.md)). |
-| **Malformed JSON & unclosed markdown fences** | Self-healing streaming parser that reconstructs unbalanced braces, escaped strings, and streaming argument deltas ([ADR-0003](../adr/0003-self-healing-tool-call-parser.md)). |
-| **Clobbered writes & unsafe disk mutations** | Two-phase staged VFS with FNV-1a disk baseline verification and atomic rollback journaling ([ADR-0004](../adr/0004-two-phase-vfs-staging-and-transaction-journal.md)). |
-| **Tool contention & race conditions** | DAG Wave Scheduler that executes read tools in parallel and mutative tools in serialized stages ([ADR-0005](../adr/0005-dag-wave-scheduler-concurrency.md)). |
-| **Credential leakage into event streams** | Zero-allocation deterministic redactor sanitizing API tokens and sensitive file paths ([ADR-0008](../adr/0008-secret-redaction-and-security-policy.md)). |
+| **Blind coordinate clicks & occluded UI targets** | **Double-Wrapped Spatial Action Architecture (`COMPUTER USE`)**: Wrapper A enforces stale-epoch fencing, exact 2D sweep-line occlusion union, off-screen auto-scroll, and 15% inset safe points; Wrapper B enforces role permissions and verifies post-action focus/value/scroll deltas ([ADR-0011](../adr/0011-sovereign-intelligence-and-spatial-computer-use.md)). |
+| **Repeated UI failures & modal dialog traps** | **9-Stage Closed-Loop Orchestrator + `SPIDER` + `SYNTHETIC SWARM`**: Automatically detects modal traps, intercepts outside clicks with `Escape` dismissal, auto-focuses unfocused inputs before typing, and convenes 5 specialist personas with `ConflictResolver` grounding sovereignty ([ADR-0011](../adr/0011-sovereign-intelligence-and-spatial-computer-use.md)). |
+| **Amnesia across interaction turns** | **`BROCCOLI` Durable Behavioral Store**: Calibrates interaction pattern confidence via Laplace-smoothed outcomes, synthesizes multi-step workflow procedures, and syncs proven knowledge into the hybrid TF-IDF `MemoryStore`. |
+| **Heap thrashing & irreversible state corruption** | **`REWIND` Temporal Continuity**: 16-MiB arena with $O(1)$ pointer rewind ([ADR-0002](../adr/0002-arena-allocator-and-o1-tick-rewind.md)), two-phase `SessionVfs` with FNV-1a disk baseline checks ([ADR-0004](../adr/0004-two-phase-vfs-staging-and-transaction-journal.md)), `TransactionJournal` rollback, and 32-deep display undo/redo. |
+| **Malformed JSON & unclosed markdown fences** | **3-Stage Self-Healing Streaming Parser (`HEAV3NS-MICRO`)** that reconstructs unbalanced braces, escaped strings, and streaming argument deltas ([ADR-0003](../adr/0003-self-healing-tool-call-parser.md)). |
+| **Tool contention & credential leakage** | **`THE HARNESS`**: DAG Wave Scheduler executing read waves in parallel and write barriers in sequence ([ADR-0005](../adr/0005-dag-wave-scheduler-concurrency.md)), plus zero-allocation secret redaction and SSRF/Trojan-Source defenses ([ADR-0008](../adr/0008-secret-redaction-and-security-policy.md)). |
 
 ---
 
 ## Architecture at a glance
 
 ```text
-User / IDE Supervisor (Headless Stdio JSONL / Interactive REPL)
+Native macOS AppKit IDE (native/Sources/Heav3nsCode/ · 311 tests) / CLI REPL
+         ↕ (stdio JSON-RPC 2.0 · "v": 1 framing)
+UI: cli_presenter.rs · stdio_worker.rs · rpc_dispatch.rs · lib.rs · main.rs
          ↕
-UI: cli_presenter.rs · lib.rs · main.rs
+CORE: engine.rs · computer_use_orchestrator.rs · spatial_engine.rs · tool_registry.rs
+      tool_governor.rs · slash_and_swarm.rs · session_store.rs · request_queue.rs · flight_runner.rs
+         ↕ (via 39 formal I<Name> traits in src/domain/interfaces/mod.rs & src/domain/*)
+INFRASTRUCTURE: http_provider.rs · scripted_provider.rs · vfs_store.rs · behavioral_store.rs
+                transaction_journal.rs · fs_tools.rs · search_tools.rs · shell_runner.rs
          ↕
-CORE: engine.rs · flight_runner.rs · tool_governor.rs · slash_and_swarm.rs · tool_specs.rs
-         ↕ (via IHttpProvider, IScriptedProvider, ISessionVfs, ITransactionJournal)
-INFRASTRUCTURE: http_provider.rs · scripted_provider.rs · vfs_store.rs · transaction_journal.rs
+DOMAIN: arena.rs · computer_use.rs · spatial_mediator.rs · spatial_action.rs · skill_tree.rs
+        memory.rs · compaction.rs · swarm.rs · tool_parser.rs · interfaces/* · types/* (0% I/O)
          ↕
-DOMAIN: arena.rs · compaction.rs · memory.rs · interfaces/mod.rs · types/* (0% I/O)
-         ↕
-PLUMBING: json_repair.rs · hash_and_math.rs · text_tokens.rs · secret_redactor.rs · fuzzy_patch.rs (0% State)
+PLUMBING: spatial_geometry.rs · environmental_diff.rs · display_telemetry.rs · vision_and_dom.rs
+          json_repair.rs · fuzzy_patch.rs · secret_redactor.rs · text_tokens.rs · hash_and_math.rs (0% State)
 ```
 
 ---
@@ -73,6 +80,7 @@ PLUMBING: json_repair.rs · hash_and_math.rs · text_tokens.rs · secret_redacto
 ```bash
 cargo test
 cargo run -- --flight
+cd native && swift test && cd ..
 npm run joy-check
 npm run docs:check
 ```

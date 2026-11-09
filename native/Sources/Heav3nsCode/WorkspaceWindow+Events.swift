@@ -218,6 +218,9 @@ extension WorkspaceWindow {
             WorkspaceAction(title: "Show Walkthrough", shortcut: "⌘6") { [weak self] in self?.showWalkthrough() },
             WorkspaceAction(title: "Show Up Next", shortcut: "⌘4", keywords: ["queue", "pending instructions"]) { [weak self] in self?.showQueue() },
             WorkspaceAction(title: "Toggle Navigation", shortcut: "⌘B", keywords: ["sidebar"]) { [weak self] in self?.toggleNavigation() },
+            WorkspaceAction(title: "Go to Line…", shortcut: "⌘G", keywords: ["jump", "line", "offset"]) { [weak self] in self?.showGoToLine() },
+            WorkspaceAction(title: "Go to Symbol in File…", shortcut: "⇧⌘O", keywords: ["symbol", "declaration", "method", "function"]) { [weak self] in self?.showGoToSymbol() },
+            WorkspaceAction(title: "Command Palette…", shortcut: "⌘K", keywords: ["commands", "palette", "actions"]) { [weak self] in self?.showCommandPalette() },
             WorkspaceAction(title: "Refresh Current Destination", shortcut: "") { [weak self] in self?.refreshNavigation() }
         ]
         if reasoningPicker.isEnabled { actions.insert(WorkspaceAction(title: "Change Reasoning Level…", shortcut: "", keywords: ["effort", "thinking", "speed", "depth"]) { [weak self] in self?.reasoningPicker.performClick(nil) }, at: 1) }
@@ -276,9 +279,18 @@ extension WorkspaceWindow {
         palette = ActionPalette(actions: actions); palette?.present(for: window)
     }
 
-    @objc func showQuickOpen() {
+    @objc func showQuickOpen() { presentQuickOpen(mode: .files) }
+    @objc func showGoToLine() { presentQuickOpen(mode: .line) }
+    @objc func showGoToSymbol() { presentQuickOpen(mode: .symbols) }
+    @objc func showCommandPalette() { presentQuickOpen(mode: .actions) }
+
+    func presentQuickOpen(mode: OmnibarMode = .files) {
         guard canOpenFile, let window else { return }
-        if let quickOpen, quickOpen.window?.isVisible == true { quickOpen.window?.makeKeyAndOrderFront(nil); return }
+        if let quickOpen, quickOpen.window?.isVisible == true {
+            quickOpen.window?.makeKeyAndOrderFront(nil)
+            quickOpen.present(for: window, mode: mode)
+            return
+        }
         let picker = QuickOpenWindow(folder: folder, search: { [weak self] query, refresh, completion in
             guard let self else { return }
             self.client.request("files.search", params: ["query": query, "refresh": refresh], completion: completion)
@@ -296,18 +308,16 @@ extension WorkspaceWindow {
             }
         }, checkpoints: { [weak self] in
             guard let self else { return [] }
-            var seen = Set<String>()
-            var result = [OmnibarCheckpointItem]()
+            var seen = Set<String>(); var result = [OmnibarCheckpointItem]()
             for run in self.runs.reversed() {
                 let text = String((run["text"] as? String ?? "Instruction").replacingOccurrences(of: "\n", with: " ").prefix(60))
-                if let after = run["checkpointAfter"] as? String, !after.isEmpty, seen.insert(after).inserted {
-                    result.append(OmnibarCheckpointItem(id: after, title: "After: \(text)", detail: "Checkpoint \(String(after.prefix(8)))"))
-                }
-                if let before = run["checkpointBefore"] as? String, !before.isEmpty, seen.insert(before).inserted {
-                    result.append(OmnibarCheckpointItem(id: before, title: "Before: \(text)", detail: "Checkpoint \(String(before.prefix(8)))"))
-                }
+                if let after = run["checkpointAfter"] as? String, !after.isEmpty, seen.insert(after).inserted { result.append(OmnibarCheckpointItem(id: after, title: "After: \(text)", detail: "Checkpoint \(String(after.prefix(8)))")) }
+                if let before = run["checkpointBefore"] as? String, !before.isEmpty, seen.insert(before).inserted { result.append(OmnibarCheckpointItem(id: before, title: "Before: \(text)", detail: "Checkpoint \(String(before.prefix(8)))")) }
             }
             return result
+        }, lines: { [weak self] in
+            guard let self, !self.inspection.string.isEmpty else { return [] }
+            return (self.inspection.string as NSString).components(separatedBy: "\n")
         }, open: { [weak self] path in self?.readFile(path) })
         picker.onSelectSymbol = { [weak self] index in
             guard let self, self.declarations.indices.contains(index) else { return }
@@ -317,8 +327,9 @@ extension WorkspaceWindow {
             self.window?.makeFirstResponder(self.inspection)
         }
         picker.onSelectCheckpoint = { [weak self] checkpoint in self?.openCheckpoints(selected: checkpoint) }
+        picker.onSelectLine = { [weak self] line, col in self?.goToLine(line, column: col) }
         quickOpen = picker
-        quickOpen?.present(for: window, mode: .files)
+        quickOpen?.present(for: window, mode: mode)
     }
 
     var canShowMemory: Bool { client.isReady && client.capabilities.contains("conversation-memory-v1") && !switchingConversation && !closing }

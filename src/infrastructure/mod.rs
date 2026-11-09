@@ -1,4 +1,5 @@
 // [LAYER: INFRASTRUCTURE]
+pub mod behavioral_store;
 pub mod fs_tools;
 pub mod http_provider;
 pub mod scripted_provider;
@@ -7,6 +8,7 @@ pub mod shell_runner;
 pub mod transaction_journal;
 pub mod vfs_store;
 
+pub use crate::infrastructure::behavioral_store::BehavioralKnowledgeStore;
 pub use crate::infrastructure::fs_tools::dispatch_fs_tool;
 pub use crate::infrastructure::http_provider::{parse_sse_stream, HttpProvider};
 pub use crate::infrastructure::scripted_provider::{ProviderStep, ScriptedProvider};

@@ -84,7 +84,62 @@ pub fn canonical_tool_name(name: &str) -> &str {
         "workspace_diff" | "v4a_collect_working_diff" | "get_workspace_diff" => "get_workspace_diff",
         "memory_remember" | "remember" | "save_memory" => "save_memory",
         "memory_recall" | "recall" | "search_memory" => "search_memory",
-        "spawn_subagent" | "execute_parallel_batch" | "engage_swarm" => "engage_swarm",
+        "spawn_subagent" | "execute_parallel_batch" | "legion_classify" | "swarm_classify" | "engage_swarm" => "engage_swarm",
+        "computer_action"
+        | "computer_capture_frame"
+        | "computer_click"
+        | "computer_double_click"
+        | "computer_right_click"
+        | "computer_middle_click"
+        | "computer_key"
+        | "computer_wait"
+        | "computer_type"
+        | "computer_drag"
+        | "computer_scroll"
+        | "computer_set_value"
+        | "computer_focus_window"
+        | "computer_focus_app"
+        | "computer_list_windows"
+        | "computer_list_apps"
+        | "computer_list_elements"
+        | "computer_audit_health"
+        | "computer_get_metrics"
+        | "computer_search_dsl"
+        | "computer_undo"
+        | "computer_redo"
+        | "computer_lease"
+        | "drive_preview"
+        | "annotate_preview"
+        | "desktop_preview"
+        | "read_window_below"
+        | "gui_action"
+        | "computer_use" => "computer_use",
+        "browser_navigate"
+        | "browser_snapshot"
+        | "browser_click"
+        | "browser_type"
+        | "browser_dialog"
+        | "browser_eval"
+        | "cdp_navigate"
+        | "cdp_snapshot"
+        | "browser_use" => "browser_use",
+        "vision_describe" | "vision_generate" | "inspect_image" | "decode_image" | "vision_inspect" => "vision_inspect",
+        "skill_forge_custom"
+        | "skill_lint_node"
+        | "skill_autofix_node"
+        | "skill_sync_directory"
+        | "soul_forge_custom"
+        | "soul_lint_profile"
+        | "soul_autofix_profile"
+        | "skill_tree"
+        | "soul_vault"
+        | "skill_forge" => "skill_forge",
+        "spatial_action"
+        | "spatial_ground"
+        | "spatial_execute"
+        | "spatial_query"
+        | "spatial_plan"
+        | "spatial_interact" => "spatial_interact",
         other => other,
     }
 }

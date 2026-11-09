@@ -173,4 +173,5 @@ final class ModelChoiceList: NSStackView, NSTableViewDataSource, NSTableViewDele
         table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false); activate()
     }
     var diagnostics: [String: Any] { ["query": search.stringValue, "matches": matches, "highlighted": highlighted ?? "", "current": current ?? "", "empty": !empty.isHidden] }
+    func dispose() {}
 }

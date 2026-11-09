@@ -80,4 +80,5 @@ final class WorkspaceViewportStore {
         case invalid
         var errorDescription: String? { "The saved viewport is invalid or belongs to another workspace." }
     }
+    func dispose() {}
 }

@@ -1,32 +1,32 @@
 <!-- [LAYER: UI] -->
-# Architecture (Current) — `HEAV3NS-MICRO`
+# Architecture (Current) — `HEAV3NS-MICRO` & The Seven Sovereign Pillars
 
-This document describes the unified architecture of **HEAV3NS-MICRO** (`v0.1.0`), encompassing the hyper-compressed Rust micro-runtime and the AppKit Native Desktop IDE client across all Joyzoning zones (`PLUMBING`, `DOMAIN`, `INFRASTRUCTURE`, `CORE`, `UI`).
+This document describes the unified architecture of **HEAV3NS-MICRO** (`v0.1.0`), the distilled intelligence runtime of **[`HEAV3NS — The Sovereign Intelligence Architecture`](../../doc.md)**, encompassing the 64-module Rust substrate and the AppKit Native Desktop IDE client (`HEAV3NS-CODE`) across all five Joyzoning zones (`PLUMBING`, `DOMAIN`, `INFRASTRUCTURE`, `CORE`, `UI`).
 
 ---
 
-## 1. Dual-Layer System Topology
+## 1. Dual-Layer System Topology & The Seven Sovereign Pillars
 
-The system operates across two distinct but tightly interlaced runtime layers:
+The system operates across two tightly interlaced layers uniting the seven sovereign pillars (`HEAV3NS-MICRO`, `SPIDER`, `REWIND`, `BROCCOLI`, `SYNTHETIC SWARM`, `COMPUTER USE`, `THE HARNESS`):
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│               AppKit Native Desktop IDE (native/)               │
+│         AppKit Native Desktop IDE (native/ · HEAV3NS-CODE)      │
 │                                                                 │
 │  ┌───────────────────────┐             ┌─────────────────────┐  │
-│  │ Navigation Sidebar    │             │ Task Context Panel  │  │
-│  │ - Chats (History)     │             │ - Live Walkthrough  │  │
-│  │ - File Tree Explorer  │             │ - Changes (Diffs)   │  │
-│  │ - Git Changes View    │             │ - Inspect (Evidence)│  │
-│  └───────────┬───────────┘             │ - Project Run       │  │
+│  │ Unified Left Navigator│             │ Task Context Panel  │  │
+│  │ - Chats (⌘1)          │             │ - Live Walkthrough  │  │
+│  │ - Files (⌘2)          │             │ - Changes (Diffs)   │  │
+│  │ - Changes (⌘3)        │             │ - Inspect & Spider  │  │
+│  └───────────┬───────────┘             │ - Project Run & Web │  │
 │              │                         └──────────┬──────────┘  │
 │              ▼                                    ▼             │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │ WorkspaceWindow (Core Controller & Layout Coordinator)     │  │
+│  │ WorkspaceWindow (8-File Modular Tier 1 Optimal Topology)  │  │
 │  │  - Attachment Token Bar & Multiline Composer              │  │
 │  │  - Transcript Scroll View & Turn Scrubber Rail            │  │
-│  │  - Non-blocking Docked Approval Bar                       │  │
-│  │  - Action Palette (Cmd+K) & Quick Open (Cmd+P)            │  │
+│  │  - Non-blocking Docked Approval Bar & Unified Omnibar     │  │
+│  │  - Swarm Radar & Multi-Project Pods Command Station       │  │
 │  └─────────────────────────────┬─────────────────────────────┘  │
 │                                │                                │
 │                                ▼                                │
@@ -38,117 +38,108 @@ The system operates across two distinct but tightly interlaced runtime layers:
                                  │ stdio JSON-RPC (v: 1 framing)
                                  │
 ┌────────────────────────────────▼────────────────────────────────┐
-│               Rust Agent Substrate (heav3ns-micro)              │
+│          Rust Sovereign Substrate (heav3ns-micro · 64 Modules)  │
 │                                                                 │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │ src/ui/stdio_worker.rs (Handshake, Routing & Event Loops) │  │
+│  │ UI: stdio_worker.rs · rpc_dispatch.rs · cli_presenter.rs  │  │
 │  └─────────────────────────────┬─────────────────────────────┘  │
 │                                │                                │
 │                                ▼                                │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │ src/ui/rpc_dispatch.rs (Desktop RPC Dispatcher)           │  │
-│  │  - files.*, changes.read, spider.check, memory.*          │  │
-│  │  - task.submit, task.stop, task.lookup, swarm.*           │  │
+│  │ CORE: AgentEngine · ComputerUseOrchestrator · SpatialEng  │  │
+│  │  - 9-Stage Closed-Loop CUA & Double-Wrapped Mediation     │  │
+│  │  - 5-Specialist Swarm Consultant & 7-Specialist Legion    │  │
+│  │  - 29 Native Tools & Parallel Read / Exclusive Write Waves│  │
 │  └─────────────────────────────┬─────────────────────────────┘  │
-│                                │                                │
+│                                │ (39 Formal I<Name> Traits)     │
 │                                ▼                                │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │ src/core/engine.rs (AgentEngine Multi-Turn ReAct Loop)    │  │
-│  │  - Parallel Read Waves & Write Barriers (ToolRegistry)    │  │
-│  │  - 16-MiB Slab Arena & Snapshot Rewind (ArenaAllocator)   │  │
-│  │  - Transactional VFS & Baseline Guard (SessionVfs)        │  │
-│  │  - 3-Stage Self-Healing Tool Call Parser (json_repair)    │  │
+│  │ INFRASTRUCTURE & DOMAIN & PLUMBING                        │  │
+│  │  - REWIND: 16-MiB Arena · SessionVfs · TransactionJournal │  │
+│  │  - BROCCOLI: BehavioralKnowledgeStore · Memory · SkillDAG │  │
+│  │  - SPIDER: environmental_diff · spatial_geometry          │  │
 │  └───────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 2. Module Inventory
+## 2. Complete Module Inventory
 
-### Rust Substrate Modules (`src/` — 44 Modules)
+### Rust Substrate Modules (`src/` — 64 Modules, All `< 800` Lines Tier 1 Optimal)
 
-| Module | Zone | Architectural Responsibility |
+| Module | Zone | Sovereign Pillar & Architectural Responsibility |
 | :--- | :--- | :--- |
-| `src/plumbing/hash_and_math.rs` | `PLUMBING` | `now_ms`, `fnv1a_32`, `levenshtein` distance |
-| `src/plumbing/text_tokens.rs` | `PLUMBING` | `estimate_text_tokens`, token budgeting, `render_unified_diff`, `encode_base64` |
-| `src/plumbing/json_repair.rs` | `PLUMBING` | `extract_json_roots`, `repair_json_string`, streaming tool deduplication |
-| `src/plumbing/secret_redactor.rs` | `PLUMBING` | `DeterministicSecretRedactor` (8 secret regex families) & `SafetyPolicy` |
-| `src/plumbing/fuzzy_patch.rs` | `PLUMBING` | `heal_fuzzy_patch`, `DeterministicPatchEngine` (V4A patch parser & applier) |
-| `src/domain/interfaces/mod.rs` | `DOMAIN` | `ILlmProvider`, `IHttpProvider`, `IScriptedProvider`, `IToolExecutor`, `ISessionPersistence`, `IFileSessionPersistence`, `ISessionVfs`, `ISkillsIngestor`, `ITransactionJournal` |
-| `src/domain/types/*.rs` | `DOMAIN` | Pure value types (`messages.rs`, `runtime.rs`, `progress.rs`, `tick_result.rs`, `vfs_types.rs`, `tool_types.rs`, `tool_schedule.rs`, `skill_types.rs`) |
-| `src/domain/arena.rs` | `DOMAIN` | 16-MiB 4-byte aligned bump-pointer `ArenaAllocator` & `SlabBufferSnapshot` |
-| `src/domain/memory.rs` | `DOMAIN` | `MemoryStore`, `MemoryEntry`, `GameStateSnapshot`, memory mutability (`remove_memory`) |
-| `src/domain/compaction.rs` | `DOMAIN` | `CompactionPolicy`, `CompactionReport`, `ContextBudgetInfo` |
-| `src/domain/swarm.rs` | `DOMAIN` | `SwarmAssignment`, `SwarmItemReport`, `SwarmFormationResult` |
-| `src/domain/tool_parser.rs` | `DOMAIN` | 3-stage self-healing `ToolCallArgParser` with 60+ parameter aliases |
-| `src/infrastructure/http_provider.rs` | `INFRASTRUCTURE` | Multi-protocol `HttpProvider` (OpenAI, Anthropic, Gemini) + SSE stream accumulator |
-| `src/infrastructure/scripted_provider.rs` | `INFRASTRUCTURE` | Deterministic `ScriptedProvider` & `ProviderStep` for Flight Tests |
-| `src/infrastructure/vfs_store.rs` | `INFRASTRUCTURE` | `SessionVfs`, `SkillsIngestor`, `FileSessionPersistence`, `workspace_revision` |
-| `src/infrastructure/transaction_journal.rs` | `INFRASTRUCTURE` | `TransactionJournal` atomic pre-mutation file backups and rollback |
-| `src/infrastructure/shell_runner.rs` | `INFRASTRUCTURE` | `execute_shell_command` with timeout and cancellation enforcement |
-| `src/infrastructure/fs_tools.rs` | `INFRASTRUCTURE` | `dispatch_fs_tool` (filesystem read/write/patch/rollback tool handlers) |
-| `src/infrastructure/search_tools.rs` | `INFRASTRUCTURE` | `resolve_workspace_path`, `suggest_nearby_files`, `execute_grep_search`, `extract_workspace_symbols` |
-| `src/core/engine.rs` | `CORE` | `AgentEngine` multi-turn ReAct state machine, context compaction, and model failover |
-| `src/core/slash_and_swarm.rs` | `CORE` | `AgentEngine::run_swarm` topological wave execution & 10 interactive slash commands |
-| `src/core/session_store.rs` | `CORE` | `SessionStore` (Arena + JSONL persistence) & `SessionCompactor` |
-| `src/core/tool_governor.rs` | `CORE` | `ToolOutputGovernor` (65%/35% head/tail truncation), `ToolLoopBreaker`, `ToolExecutionCache` |
-| `src/core/tool_specs.rs` | `CORE` | `builtin_tool_specs` (23 built-in tool schemas) |
-| `src/core/tool_registry.rs` | `CORE` | `ToolRegistry` & parallel read / exclusive write wave scheduler (`partition_waves`) |
-| `src/core/request_queue.rs` | `CORE` | `RuntimeRequestQueue` & `PromptComposer` |
-| `src/core/flight_runner.rs` | `CORE` | `run_agent_flight_test` (`FT-01..FT-05`) & `run_micro_benchmarks` |
-| `src/core/substrate_tests.rs` | `CORE` | 8 unit and integration test suites |
+| `src/plumbing/hash_and_math.rs` | `PLUMBING` | `THE HARNESS`: `now_ms`, `fnv1a_32`, `levenshtein` distance |
+| `src/plumbing/text_tokens.rs` | `PLUMBING` | `THE HARNESS`: `estimate_text_tokens`, token budgeting, `render_unified_diff`, `encode_base64`, `canonical_tool_name` |
+| `src/plumbing/json_repair.rs` | `PLUMBING` | `HEAV3NS-MICRO`: `extract_json_roots`, `repair_json_string`, streaming tool deduplication |
+| `src/plumbing/secret_redactor.rs` | `PLUMBING` | `THE HARNESS`: `DeterministicSecretRedactor` (8 secret families) & `SafetyPolicy` (Trojan Source, SSRF, `ADR-0015`/`0016`, C2 scanner) |
+| `src/plumbing/fuzzy_patch.rs` | `PLUMBING` | `THE HARNESS`: `heal_fuzzy_patch`, `DeterministicPatchEngine` (V4A multi-file patch parser & applier) |
+| `src/plumbing/vision_and_dom.rs` | `PLUMBING` | `COMPUTER USE`: `decode_image_metadata` (PNG/JPEG/GIF/WebP/BMP/SVG), `snapshot_html_dom`, `validate_navigation_url` (SSRF/IMDSv2 guard), synthetic SVG/BMP generators |
+| `src/plumbing/spatial_geometry.rs` | `PLUMBING` | `COMPUTER USE`: `SpatialPoint`, `SpatialRect` (15% safe center, IoU), `ViewportTransform` (scroll & DPR), `calculate_rectangles_union_area` (exact 2D sweep-line union), `validate_trajectory` |
+| `src/plumbing/environmental_diff.rs` | `PLUMBING` | `SPIDER`: `compute_element_deltas`, `classify_element_affordance`, `detect_modal_or_dialog`, `analyze_spider_structural_relationships`, `diagnose_failure_cause` |
+| `src/plumbing/display_telemetry.rs` | `PLUMBING` | `COMPUTER USE` & `REWIND`: `compute_preview_delta`, `apply_annotation_mutation`, `query_action_ledger_dsl`, `compute_action_ledger_health`, `extract_dom_ui_tuples` |
+| `src/plumbing/mod.rs` | `PLUMBING` | Stateless plumbing module exports |
+| `src/domain/interfaces/mod.rs` | `DOMAIN` | `19` core port traits (`ILlmProvider`, `IHttpProvider`, `IScriptedProvider`, `IToolExecutor`, `ISessionPersistence`, `IFileSessionPersistence`, `ISessionVfs`, `ISkillsIngestor`, `ITransactionJournal`, `ISpatialMediator`, `ISpatialGroundingGate`, `IExecutionAssuranceGate`, `IEnvironmentalObserver`, `IBehavioralKnowledgeStore`, `IBehavioralStore`, `ISwarmIntelligenceConsultant`, `IEnvironmentalDiffer`, `ISpatialGeometry`, `IComputerUseOrchestrator`) |
+| `src/domain/types/*.rs` (`14` files) | `DOMAIN` | Pure value & behavioral domain types (`messages.rs`, `runtime.rs`, `progress.rs`, `tick_result.rs`, `vfs_types.rs`, `tool_types.rs`, `tool_schedule.rs`, `skill_types.rs`, `computer_use_types.rs` [`UiElement`, `VirtualWindow`], `spatial_types.rs`, `environmental_types.rs`, `swarm_intelligence_types.rs`, `learned_knowledge_types.rs`, `mod.rs`) |
+| `src/domain/arena.rs` | `DOMAIN` | `REWIND`: 16-MiB 4-byte aligned bump-pointer `ArenaAllocator` & `SlabBufferSnapshot` |
+| `src/domain/memory.rs` | `DOMAIN` | `BROCCOLI`: `MemoryStore` (hybrid TF-IDF + FNV-1a recall), `MemoryEntry`, `GameStateSnapshot` |
+| `src/domain/compaction.rs` | `DOMAIN` | `HEAV3NS-MICRO`: `CompactionPolicy`, `CompactionReport`, `ContextBudgetInfo` |
+| `src/domain/swarm.rs` | `DOMAIN` | `SYNTHETIC SWARM`: `SwarmAssignment`, `SwarmItemReport`, `SwarmFormationResult`, `classify_task_for_legion` (7-specialist Legion classifier) |
+| `src/domain/tool_parser.rs` | `DOMAIN` | `HEAV3NS-MICRO`: 3-stage self-healing `ToolCallArgParser` with 60+ parameter aliases |
+| `src/domain/computer_use.rs` | `DOMAIN` | `COMPUTER USE` & `REWIND`: `VirtualDisplayState` (`scroll_offset`, 32-deep undo/redo snapshots, epoch-fenced control lease, Set-of-Marks & DOM execution) |
+| `src/domain/skill_tree.rs` | `DOMAIN` | `BROCCOLI`: `SkillTreeCatalog` (Kahn's topological DAG, 6 power-up packs, `SkillDoctor` linter, multi-format Soul Drop Vault import/export) |
+| `src/domain/spatial_action.rs` | `DOMAIN` | `COMPUTER USE`: `GroundedSpatialTarget`, `SpatialGroundingResult`, `SpatialExecutionReceipt` |
+| `src/domain/spatial_mediator.rs` | `DOMAIN` | `COMPUTER USE`: `SpatialActionMediator` (Wrapper A Grounding Gate + Wrapper B Execution Assurance Gate), `SpatialActionPlan`, `SpatialInteractionAudit` |
+| `src/domain/mod.rs` | `DOMAIN` | Pure domain layer barrel exports |
+| `src/infrastructure/http_provider.rs` | `INFRASTRUCTURE` | `HEAV3NS-MICRO`: Multi-protocol `HttpProvider` (OpenAI, Anthropic, Gemini) + SSE stream accumulator |
+| `src/infrastructure/scripted_provider.rs` | `INFRASTRUCTURE` | `THE HARNESS`: Deterministic `ScriptedProvider` & `ProviderStep` for Flight Tests |
+| `src/infrastructure/vfs_store.rs` | `INFRASTRUCTURE` | `REWIND`: `SessionVfs` (`VfsDiskBaseline` verification), `SkillsIngestor`, `FileSessionPersistence` |
+| `src/infrastructure/transaction_journal.rs` | `INFRASTRUCTURE` | `REWIND`: `TransactionJournal` atomic pre-mutation file backups and rollback |
+| `src/infrastructure/behavioral_store.rs` | `INFRASTRUCTURE` | `BROCCOLI` & `REWIND`: `BehavioralKnowledgeStore` (Laplace confidence calibration, workflow procedure registry, `reconcile_state` epoch drift check) |
+| `src/infrastructure/shell_runner.rs` | `INFRASTRUCTURE` | `THE HARNESS`: `execute_shell_command` with timeout, PTY ANSI query responder, and cancellation |
+| `src/infrastructure/fs_tools.rs` | `INFRASTRUCTURE` | `THE HARNESS`: `dispatch_fs_tool` (filesystem read/write/patch/rollback tool handlers) |
+| `src/infrastructure/search_tools.rs` | `INFRASTRUCTURE` | `SPIDER`: `resolve_workspace_path`, `suggest_nearby_files`, `execute_grep_search`, `extract_workspace_symbols` |
+| `src/infrastructure/mod.rs` | `INFRASTRUCTURE` | Infrastructure adapter exports |
+| `src/core/engine.rs` | `CORE` | `HEAV3NS-MICRO`: `AgentEngine` multi-turn ReAct state machine, context compaction, and model failover |
+| `src/core/computer_use_orchestrator.rs` | `CORE` | `COMPUTER USE` · `SPIDER` · `SYNTHETIC SWARM`: `ComputerUseOrchestrator` 9-stage closed loop, modal auto-intercept, auto-focus planning, and 5-specialist Swarm consultation |
+| `src/core/spatial_engine.rs` | `CORE` | `COMPUTER USE`: `SpatialInteractionEngine` (Double-Wrapped dispatch, automatic off-screen pre-scroll, multi-step `execute_plan`, DOM/visual reconciliation, directional queries) |
+| `src/core/slash_and_swarm.rs` | `CORE` | `SYNTHETIC SWARM`: `AgentEngine::run_swarm` topological wave execution & 16 interactive slash commands |
+| `src/core/session_store.rs` | `CORE` | `REWIND`: `SessionStore` (Arena + JSONL persistence) & `SessionCompactor` |
+| `src/core/tool_governor.rs` | `CORE` | `THE HARNESS`: `ToolOutputGovernor` (65%/35% head/tail truncation + disk spill), `ToolLoopBreaker`, `ToolExecutionCache` |
+| `src/core/tool_specs.rs` | `CORE` | `THE HARNESS`: `builtin_tool_specs` (29 built-in tool schemas) |
+| `src/core/tool_registry.rs` | `CORE` | `THE HARNESS`: `ToolRegistry` & parallel read / exclusive write wave scheduler (`partition_waves`) |
+| `src/core/request_queue.rs` | `CORE` | `THE HARNESS`: `RuntimeRequestQueue` & `PromptComposer` |
+| `src/core/flight_runner.rs` | `CORE` | `THE HARNESS`: `run_agent_flight_test` (`FT-01..FT-05`) & `run_micro_benchmarks` |
+| `src/core/substrate_tests.rs`, `spatial_tests.rs`, `computer_use_tests.rs`, `mod.rs` | `CORE` | 49 unit, spatial, computer-use, and integration test suites |
 | `src/ui/cli_presenter.rs` | `UI` | CLI parser, terminal REPL presenter, `--desktop-worker` and `--desktop-account` routing |
 | `src/ui/stdio_worker.rs` | `UI` | Stdio JSON-RPC worker protocol engine (`v: 1` framing, handshakes, token checks) |
-| `src/ui/rpc_dispatch.rs` | `UI` | Desktop JSON-RPC method handlers (`files.*`, `changes.*`, `spider.*`, `memory.*`, `task.*`, `swarm.*`) |
-| `src/lib.rs` & `src/main.rs` | `UI` | Library and binary Composition Roots |
+| `src/ui/rpc_dispatch.rs` | `UI` | Desktop JSON-RPC method handlers (`files.*`, `changes.*`, `spider.*`, `memory.*`, `task.*`, `swarm.*`, `spatial.*`, `cua.*`) |
+| `src/ui/mod.rs`, `src/lib.rs`, `src/main.rs` | `UI` | UI module and binary/library Composition Roots |
 
 ### Native macOS Client Modules (`native/Sources/Heav3nsCode/`)
 
 | File | Architectural Role | Line Cap Status (`SPI-203`) |
 | :--- | :--- | :--- |
-| `WorkspaceWindow.swift` | Primary window controller, view hierarchy assembly, window/table delegates, and `dispose()` | 791 lines (Tier 1 Optimal) |
-| `WorkspaceAttachmentViews.swift` | `AttachmentTokenBar`, `ComposerView`, `TranscriptScrollView`, `TurnScrubberRail` | 222 lines (Tier 1 Optimal) |
-| `WorkspaceWindow+Swarm.swift` | Swarm formation graphs, specialist reconciliation loops, and radar state | 603 lines (Tier 1 Optimal) |
-| `WorkspaceWindow+SwarmSettings.swift` | Swarm configuration popovers, command recovery sheets, and action confirmations | 223 lines (Tier 1 Optimal) |
-| `WorkspaceWindow+Navigation.swift` | Navigation sidebar, chat switcher, file tree browser, and Git change navigator | 308 lines (Tier 1 Optimal) |
-| `WorkspaceWindow+Inspection.swift` | File, diff, saved-state, spider check, and context report viewports with scroll anchors | 557 lines (Tier 1 Optimal) |
-| `WorkspaceWindow+Execution.swift` | Instruction submission, queue reordering, draft preservation, and checkpoint restoration | 515 lines (Tier 1 Optimal) |
-| `WorkspaceWindow+Events.swift` | JSON-RPC event routing, action palette (`Cmd+K`), toolbar delegate, and Pod snapshots | 764 lines (Tier 1 Optimal) |
-| `RuntimeClient.swift` | Child process lifecycle management, IPC stream transport, and promise resolution | 382 lines (Tier 1 Optimal) |
-| `ControlFrameReader.swift` | Chunked framing parser enforcing `"v": 1` protocol contracts and bounds checking | 114 lines (Tier 1 Optimal) |
-| `WalkthroughView.swift` & `WalkthroughState.swift` | Live turn-by-turn agent activity inspector with jump-to-source capabilities | 618 & 282 lines (Tier 1 Optimal) |
-| `PodsWindow.swift` & `PodLiveView.swift` | Multi-project swarm command station with concurrent task health telemetry | 284 & 186 lines (Tier 1 Optimal) |
+| `WorkspaceWindow.swift` | Primary window controller, view hierarchy assembly, window/table delegates, and `dispose()` | Tier 1 Optimal (`< 800` lines) |
+| `WorkspaceAttachmentViews.swift` | `AttachmentTokenBar`, `ComposerView`, `TranscriptScrollView`, `TurnScrubberRail` | Tier 1 Optimal (`< 800` lines) |
+| `WorkspaceWindow+Swarm.swift` | Swarm formation graphs, specialist reconciliation loops, and radar state | Tier 1 Optimal (`< 800` lines) |
+| `WorkspaceWindow+SwarmSettings.swift` | Swarm configuration popovers, command recovery sheets, and `MasterToggleController` | Tier 1 Optimal (`< 800` lines) |
+| `WorkspaceWindow+Navigation.swift` | Unified left navigator (`[Chats \| Files \| Changes]`), file tree browser, and Git change navigator | Tier 1 Optimal (`< 800` lines) |
+| `WorkspaceWindow+Inspection.swift` | File, diff, saved-state, spider check, and context report viewports with scroll anchors | Tier 1 Optimal (`< 800` lines) |
+| `WorkspaceWindow+Execution.swift` | Instruction submission, queue reordering, draft preservation, and checkpoint restoration | Tier 1 Optimal (`< 800` lines) |
+| `WorkspaceWindow+Events.swift` | JSON-RPC event routing, action palette (`Cmd+K`), toolbar delegate, and Pod snapshots | Tier 1 Optimal (`< 800` lines) |
+| `CodeOutline.swift` & `InspectionNavigation.swift` | Unicode-safe UTF-16 intra-line diff highlighter, Rust/Swift/TS/Python/Go lexical outline, `jump(to:)`, and `recentFiles(limit:)` | Tier 1 Optimal (`< 800` lines) |
+| `RuntimeClient.swift` & `ControlFrameReader.swift` | Child process lifecycle management, `"v": 1` IPC stream transport, and promise resolution | Tier 1 Optimal (`< 800` lines) |
+| `WalkthroughView.swift` & `PodsWindow.swift` | Live turn-by-turn agent activity inspector (Timeline/List/Kanban) and Multi-Project Pods command station | Tier 1 Optimal (`< 800` lines) |
 
 ---
 
-## 3. Desktop JSON-RPC Protocol Specification (`v: 1`)
+## 3. Architectural Invariants & Governance
 
-Communication between the AppKit client and `heav3ns-micro` flows across standard I/O using single-line JSON objects tagged with version `"v": 1`:
-
-### Handshake & Initialization
-1. Host launches `heav3ns-micro --stdio --desktop-worker`.
-2. Worker writes initial connection frame: `{"v": 1, "type": "connection", "state": "ready"}`.
-3. Client issues `initialize` request negotiating capabilities: `["conversations", "spider-check-v1", "runtime-state-v1", "task-continuation-v1", "project-repair-v1", "checkpoints-v1", "run-details", "queue-edit", "queue-remove"]`.
-4. Client requests `snapshot` for workspace and session state.
-
-### Core RPC Methods
-- **`files.list`**: Returns recursive workspace directory tree.
-- **`files.read` / `files.readBinary`**: Reads UTF-8 source or Base64-encoded binary documents (PDF, images, CSV) with pagination.
-- **`changes.read`**: Renders unified diffs for staged or working-tree file modifications.
-- **`spider.check`**: Runs static AST syntax checks, local import verification, and circular dependency checks.
-- **`context.inspect` / `context.history`**: Inspects active context window budget, rolling summaries, and retained history.
-- **`memory.list` / `memory.save` / `memory.remove`**: Inspects, stores, or deletes long-term conversation memory facts.
-- **`task.submit` / `task.stop` / `task.lookup`**: Dispatches instructions, initiates graceful cancellation, or polls unconfirmed submissions without replay.
-- **`swarm.plan` / `swarm.next` / `swarm.report`**: Coordinates multi-agent specialist task graphs.
-
----
-
-## 4. Architectural Invariants & Governance
-
-1. **Rule 1 (`[LAYER: <ZONE>]` Headers)**: Every file across Rust and Swift begins with a layer declaration comment on line 1.
+1. **Rule 1 (`[LAYER: <ZONE>]` Headers)**: Every file across Rust, Swift, and Markdown begins with a layer declaration header.
 2. **Rule 2 (Geographic Alignment)**: Physical disk layout strictly matches architectural zone boundaries (`SPI-208`).
 3. **Rule 3 (Import Discipline)**: Single-line `use` and `import` declarations; zero cyclic dependency loops (`SPI-201`).
-4. **Rule 4 (Contractual Sovereignty)**: All concrete infrastructure adapters consumed by Core adhere to formal `I<Name>` traits (`SPI-107`).
-5. **Rule 5 (Simplicity Caps)**: All modules remain in **Tier 1 Optimal (< 800 lines, `SPI-203`)**; domain files contain `<= 3` structs.
-6. **Rule 6 (Resource Lifecycle Hygiene)**: Window controllers and background task managers implement explicit `dispose()` routines (`SPI-110`).
+4. **Rule 4 (Contractual Sovereignty)**: All concrete infrastructure adapters and domain entities adhere to `39` formal `I<Name>` traits (`SPI-107`).
+5. **Rule 5 (Simplicity Caps)**: All `280+` workspace files remain in **Tier 1 Optimal (`< 800` lines, `SPI-203`)**; domain files contain `<= 3` structs (`<= 1` struct if `> 500` lines).
+6. **Rule 6 (Resource Lifecycle Hygiene)**: Every Swift class in `native/` implements explicit `dispose()` teardown (`0` `SPI-603` advisories).

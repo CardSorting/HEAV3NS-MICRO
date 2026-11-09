@@ -217,5 +217,6 @@ final class TurnScrubberRail: NSView {
             onSelectTurn?(turns[target].rowIndex)
         }
     }
+    func dispose() { onSelectTurn = nil }
 }
 

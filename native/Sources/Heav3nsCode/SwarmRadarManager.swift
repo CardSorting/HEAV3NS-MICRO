@@ -267,4 +267,5 @@ final class SwarmRadarManager {
         try? newID.write(to: fileURL, atomically: true, encoding: .utf8)
         return newID
     }
+    func dispose() {}
 }

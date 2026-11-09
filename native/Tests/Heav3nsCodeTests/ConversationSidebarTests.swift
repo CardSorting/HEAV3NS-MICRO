@@ -57,4 +57,5 @@ final class ConversationSidebarTests: XCTestCase {
         XCTAssertTrue(button.isEnabled)
         XCTAssertEqual(button.accessibilityLabel(), "Delete conversation: Second")
     }
+    func dispose() {}
 }

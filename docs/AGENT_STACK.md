@@ -1,53 +1,56 @@
 <!-- [LAYER: UI] -->
-# HEAV3NS-MICRO Agent Stack
+# HEAV3NS-MICRO Agent Stack & The Seven Sovereign Pillars
 
 <p align="center">
   <a href="README.md">Docs Hub</a> ·
+  <a href="../doc.md">Sovereign Charter (doc.md)</a> ·
+  <a href="papers/ascendant-intelligence.md">Ascendant Intelligence</a> ·
   <a href="PORTABLE_TRINITY.md">Substrate Primitives</a> ·
   <a href="architecture/current.md">Architecture</a> ·
   <a href="api/public-api.md">Public API</a> ·
-  <a href="../AGENTS.md">AGENTS.md</a> ·
-  <a href="../native/PRODUCT.md">Native Desktop Spec</a>
+  <a href="../AGENTS.md">AGENTS.md</a>
 </p>
 
-The **HEAV3NS-MICRO Agent Stack** provides a sovereign, high-throughput execution environment for autonomous AI coding agents. Unlike conventional agent harnesses that rely on fragmented dynamic interpreters, unbounded heap allocations, and brittle tool call regexes, HEAV3NS-MICRO delivers a unified dual-layer architecture organized across four concrete surfaces:
+The **HEAV3NS-MICRO Agent Stack** is the concrete engineering realization of **[`HEAV3NS — The Sovereign Intelligence Architecture`](../doc.md)**. Rather than treating an AI agent as a fragile dynamic wrapper around an LLM endpoint, it organizes cooperating intelligence across **Seven Sovereign Pillars** and **Five Canonical Joyzoning Surfaces**:
 
-1. **Spatial Sovereignty (Joyzoning)**: 5 canonical zones (`PLUMBING`, `DOMAIN`, `INFRASTRUCTURE`, `CORE`, `UI`) enforcing strict dependency inversion.
-2. **Substrate Runtime**: A 16-MiB contiguous memory arena, $O(1)$ tick pointer rewinding, self-healing JSON parser, and two-phase VFS staging.
-3. **Native Agent Execution**: Headless stdio JSON-RPC worker protocol, interactive CLI REPL, 10 slash commands, and a 5-scenario Agent Flight benchmark.
-4. **AppKit Native Desktop Control Station**: Pure macOS desktop IDE with turn scrubbers, multi-agent swarm radar, live walkthroughs, and Pod management.
+1. **`HEAV3NS-MICRO` (The Distilled Intelligence Runtime)**: Multi-turn ReAct engine, 3-stage self-healing JSON tool parser, and multi-provider failover.
+2. **`SPIDER` (Structural Perception & Environmental Understanding)**: Viewport region partitioning, UI affordance classification, relational graph synthesis, and static AST dependency checks.
+3. **`REWIND` (Temporal Cognition, Continuity & Recoverability)**: 16-MiB `ArenaAllocator` ($O(1)$ pointer rewind), two-phase `SessionVfs` (`VfsDiskBaseline` parity), `TransactionJournal` rollback, 32-deep display undo/redo, and epoch drift reconciliation.
+4. **`BROCCOLI` (Persistent Knowledge, Memory & Historical Evolution)**: `BehavioralKnowledgeStore` (Laplace confidence calibration & workflow procedure synthesis), hybrid TF-IDF `MemoryStore`, and Kahn-verified `SkillTreeCatalog` DAG & Soul Drop Vault.
+5. **`SYNTHETIC SWARM` (Distributed Collective Intelligence)**: 5-specialist parallel cognitive consultation (`VisualPerceiver`, `StructuralAnalyst`, `WorkflowNavigator`, `RiskAssessor`, `RecoverySpecialist` + `ConflictResolver`) and 7-specialist `Legion` topological task formations.
+6. **`COMPUTER USE` (Embodied Agency)**: 9-stage closed-loop `ComputerUseOrchestrator`, Double-Wrapped Spatial Action Mediation (`Wrapper A` Grounding + `Wrapper B` Execution Assurance), automatic off-screen pre-scroll, multi-step `execute_plan`, and SSRF-guarded `browser_use`.
+7. **`THE HARNESS` (The Sovereign Computational Substrate)**: 5-Zone Joyzoning (`64` Rust modules, `39` `I<Name>` traits), `29` native tools with DAG wave scheduling, `ToolOutputGovernor`, `DeterministicSecretRedactor`, `"v": 1` stdio JSON-RPC bridge, and Native macOS AppKit IDE (`HEAV3NS-CODE`).
 
 ---
 
-## The Four Surfaces
+## The Five Architectural Surfaces
 
 ```mermaid
 flowchart TD
   subgraph Surface1 ["Surface 1: Spatial Sovereignty (Joyzoning)"]
-    ZONES["5 Canonical Zones (src/plumbing, src/domain, src/infrastructure, src/core, src/ui)"]
-    CONTRACTS["Formal I<Name> Port Traits (src/domain/interfaces/mod.rs)"]
-    HEADER["Top-of-File [LAYER: <ZONE>] Enforcement (joy-check strict)"]
+    ZONES["5 Canonical Zones (64 Rust Modules + Native AppKit · 280+ Files)"]
+    CONTRACTS["39 Formal I<Name> Contracts (src/domain/interfaces/mod.rs & src/domain/*)"]
+    HEADER["Top-of-File [LAYER: <ZONE>] Enforcement (100% SI · E_S = 0.0038)"]
   end
 
-  subgraph Surface2 ["Surface 2: Substrate Runtime"]
-    ARENA["16-MiB Arena Slab Allocator (src/domain/arena.rs)"]
-    PARSER["Self-Healing Tool Call Parser (src/plumbing/json_repair.rs)"]
-    VFS["Two-Phase SessionVfs & TransactionJournal (src/infrastructure/vfs_store.rs)"]
-    WAVE["DAG Wave Scheduler (src/core/tool_governor.rs)"]
+  subgraph Surface2 ["Surface 2: REWIND, BROCCOLI & Substrate Runtime"]
+    ARENA["16-MiB Arena Slab Allocator (O(1) Rewind · src/domain/arena.rs)"]
+    PARSER["3-Stage Self-Healing Tool Call Parser (src/plumbing/json_repair.rs)"]
+    VFS["Two-Phase SessionVfs, TransactionJournal & BehavioralKnowledgeStore"]
+    WAVE["DAG Wave Scheduler & ToolOutputGovernor (src/core/tool_registry.rs)"]
   end
 
-  subgraph Surface3 ["Surface 3: Native Agent Execution"]
-    STDIO["Headless Stdio JSON-RPC Protocol (--stdio)"]
-    CLI["Interactive CLI REPL & Slash Commands (/help, /vfs, /compact)"]
-    TOOLS["23 Native Tools (fs_read, fs_write, patch, search, execute)"]
-    FLIGHT["Agent Flight Test Benchmark (FT-01..FT-05)"]
+  subgraph Surface3 ["Surface 3: SPIDER, SWARM & Embodied Computer Use"]
+    ORCH["9-Stage Closed-Loop ComputerUseOrchestrator (src/core/computer_use_orchestrator.rs)"]
+    SPATIAL["Double-Wrapped SpatialActionMediator (Wrapper A Grounding + Wrapper B Assurance)"]
+    SWARM_C["5-Specialist Swarm Consultant & 7-Specialist Legion Classifier"]
+    TOOLS["29 Native Built-In Tools & 16 Interactive Slash Commands"]
   end
 
-  subgraph Surface4 ["Surface 4: AppKit Native Desktop IDE"]
-    WINDOW["Modular WorkspaceWindow Architecture (native/Sources/Heav3nsCode/)"]
-    SWARM["Multi-Specialist Swarm Formations & Radar"]
-    WALK["Live Turn Scrubber & Activity Walkthrough"]
-    PODS["Multi-Project Pods Command Station"]
+  subgraph Surface4 ["Surface 4: AppKit Native Desktop IDE (HEAV3NS-CODE)"]
+    WINDOW["Modular 8-File WorkspaceWindow Architecture (native/Sources/Heav3nsCode/)"]
+    RADAR["Swarm Radar, Docked Non-Blocking Approvals & Turn Scrubber Rail"]
+    PODS["Multi-Project Pods Command Station & Unicode-Safe Intra-Line Diffs"]
   end
 
   Surface1 --> Surface2 --> Surface3 --> Surface4
@@ -55,83 +58,31 @@ flowchart TD
 
 ---
 
-## Surface 1: Spatial Sovereignty & Contractual Independence
+## The 29 Native Built-In Agent Tools (`src/core/tool_specs.rs`)
 
-Every component in HEAV3NS-MICRO resides in its designated Joyzoning zone:
-
-| Zone | Path | Responsibility | Permitted Inward Edges |
-| :--- | :--- | :--- | :--- |
-| **`PLUMBING`** | `src/plumbing/`, `native/...` | Pure stateless algorithms: FNV-1a hash, Levenshtein, fuzzy patch engine, token counter, JSON repair, Base64 encoder, and secret redactor. | None. Zero upward dependencies. |
-| **`DOMAIN`** | `src/domain/` | State machines, memory models, arena allocator, session compaction, and formal `I<Name>` traits. | May only import `plumbing`. Zero I/O (`SPI-206`). |
-| **`INFRASTRUCTURE`** | `src/infrastructure/` | Concrete I/O adapters: HTTP provider, scripted mock provider, disk VFS, transaction journal, shell runner, and search tools. | Implements `domain/interfaces/I*`. |
-| **`CORE`** | `src/core/` | Use-case orchestration: agent execution loop, wave scheduler, tool governor, request queue, flight runner, and substrate tests. | Depends on `domain` and `domain/interfaces/I*`. Never on `ui`. |
-| **`UI`** | `src/ui/`, `src/lib.rs`, `src/main.rs`, `native/` | CLI presenter, stdio JSON-RPC worker, AppKit Native Desktop client, and Composition Roots. | Reaches infrastructure only through core. |
-
----
-
-## Surface 2: High-Performance Substrate Runtime
-
-### 1. 16-MiB Contiguous Arena Allocation
-Rather than issuing millions of small heap allocations (`malloc`/`free`) during rapid LLM token generation, HEAV3NS-MICRO pre-allocates a 16-MiB memory slab. Session messages, temporary string tokens, and intermediate tool call buffers are allocated linearly. When a turn finishes, an $O(1)$ pointer rewind resets scratch buffers without memory leaks or fragmentation ([ADR-0002](adr/0002-arena-allocator-and-o1-tick-rewind.md)).
-
-### 2. Self-Healing Streaming Parser
-LLM generation frequently exhibits subtle JSON malformations: missing closing braces, unescaped newlines in diff strings, or Markdown codeblock fences (` ```json `). The `json_repair` plumbing automatically repairs truncated JSON objects, normalizes streaming argument deltas, and extracts valid tool calls without failing the agent tick ([ADR-0003](adr/0003-self-healing-tool-call-parser.md)).
-
-### 3. Two-Phase Virtual File System (`SessionVfs`)
-Filesystem modifications made by tools (`fs_write`, `patch_apply`) do not touch the underlying disk immediately. Instead:
-- Overlays are staged in memory with baseline hash verification (`VfsDiskBaseline`).
-- If another process modifies the target file on disk before commit, the commit aborts safely.
-- All committed file changes are logged to [`TransactionJournal`](../src/infrastructure/transaction_journal.rs) for instant rollback ([ADR-0004](adr/0004-two-phase-vfs-staging-and-transaction-journal.md)).
-
-### 4. DAG Wave Scheduler
-Tool calls emitted in parallel are analyzed by the [`WaveScheduler`](../src/core/tool_governor.rs). Safe read-only operations (`fs_read`, `search_grep`, `git_status`) execute concurrently in parallel worker threads, while mutating actions (`fs_write`, `shell_execute`) are staged into serialized barriers ([ADR-0005](adr/0005-dag-wave-scheduler-concurrency.md)).
-
----
-
-## Surface 3: Native Agent Execution
-
-### 1. Headless Stdio JSON-RPC Protocol (`--stdio`)
-HEAV3NS-MICRO operates as a background coprocessor under IDE plugins or native desktop wrappers. Each frame incorporates the version invariant (`"v": 1`):
-```json
-{"jsonrpc":"2.0","method":"turn","params":{"prompt":"audit codebase"},"id":1}
-```
-Progress events, tool calls, and LLM tokens stream across stdout in deterministic order ([ADR-0006](adr/0006-stdio-jsonl-and-flight-test-harness.md), [ADR-0010](adr/0010-native-desktop-integration-and-rpc-protocol.md)).
-
-### 2. 23 Native Agent Tools
-Built-in tools cover the complete coding spectrum:
-- **Filesystem**: `fs_read`, `fs_write`, `fs_remove`, `fs_list`, `fs_stat`
-- **Inspection & Search**: `search_grep`, `search_symbol`, `search_path`
-- **Patch & Diff**: `patch_apply`, `patch_preview`, `diff_unified`
-- **Git & Shell**: `git_status`, `git_diff`, `git_log`, `shell_execute`
-- **Session & Memory**: `session_memory_store`, `session_memory_recall`, `session_vfs_status`, `session_vfs_commit`, `session_rollback`
-- **Skills & Swarm**: `skill_invoke`, `swarm_delegate`, `agent_status`
-
----
-
-## Surface 4: AppKit Native Desktop IDE (`native/`)
-
-The native macOS application provides calm, truthful oversight:
-- **Modular Window Extension Architecture**: Decomposed into 8 focused files conforming to Tier 1 Optimal (< 800 lines).
-- **Turn Scrubber Rail**: Vertical timeline with status dots reflecting active, error, and reviewed instructions.
-- **Docked Non-Blocking Approvals**: Action review card positioned above the composer without modal window sheets.
-- **Specialist Swarm Radar**: Real-time visualization of parallel agent roles and formation reconciliation.
-- **Multi-Project Pods Station**: Concurrent overview of multiple workspace repositories in a single native window.
+| Category | Tools |
+| :--- | :--- |
+| **Filesystem & VFS (`12` tools)** | `view_file`, `write_file`, `replace_file_content`, `multi_replace_file_content`, `edit_file_anchored`, `apply_unified_diff`, `delete_file`, `move_file`, `list_dir`, `find_files`, `file_info`, `directory_tree` |
+| **Search, Refactor & Git (`4` tools)** | `grep_search`, `search_symbols`, `batch_replace_regex`, `get_workspace_diff` |
+| **Execution & Rewind (`2` tools)** | `run_command`, `rollback_last_mutation` |
+| **Memory, Spill & Skills (`5` tools)** | `save_memory`, `search_memory`, `retrieve_spill_content`, `list_skills`, `use_skill` |
+| **Embodied CUA, Spatial, Vision & Swarm (`6` tools)** | `computer_use` (`capture`, `click`, `type`, `key`, `scroll`, `orchestrate`, `observe`, `interpret`, `consult_swarm`, `undo`, `redo`, `query_ledger`, `audit_health`), `spatial_interact` (`ground`, `execute`, `plan`, `execute_plan`, `query`, `reconcile`, `audit`, `orchestrate`), `browser_use`, `vision_inspect`, `skill_forge`, `engage_swarm` |
 
 ---
 
 ## Verification & Guardrails
 
-Run the verification suite:
 ```bash
-# 1. Verify all substrate unit and integration tests (8 suites)
+# 1. Verify all 49 Rust unit, spatial, computer-use & substrate tests
 cargo test
 
-# 2. Run the 5-scenario Agent Flight suite (19 assertion checks)
+# 2. Run the 5-scenario Agent Flight suite (FT-01..FT-05, 19 assertion checks)
 cargo run -- --flight
 
-# 3. Verify all native macOS AppKit tests (308 tests)
+# 3. Verify all 311 native macOS AppKit tests
 cd native && swift test && cd ..
 
-# 4. Run strict Joyzoning architectural audit
-node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --theme strict
+# 4. Run strict Joyzoning architectural audit & documentation check
+npm run joy-check
+npm run docs:check
 ```

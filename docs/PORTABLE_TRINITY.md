@@ -1,93 +1,76 @@
 <!-- [LAYER: UI] -->
-# Portable Substrate Primitives
+# Portable Substrate Primitives (`REWIND` · `BROCCOLI` · `COMPUTER USE` · `THE HARNESS`)
 
 <p align="center">
   <a href="README.md">Docs Hub</a> ·
+  <a href="../doc.md">Sovereign Charter (doc.md)</a> ·
   <a href="AGENT_STACK.md">Agent Stack</a> ·
   <a href="architecture/current.md">Architecture</a> ·
   <a href="api/public-api.md">Public API</a> ·
   <a href="wiki/rust-substrate-architecture.md">Substrate Wiki</a>
 </p>
 
-In **HEAV3NS-MICRO**, the operational substrate is anchored by three high-performance Rust primitives—our architectural trinity designed for extreme efficiency, deterministic execution, and sovereign spatial isolation:
+In **HEAV3NS-MICRO**, the operational substrate is anchored by four high-performance, deterministic Rust primitive families that power **[`HEAV3NS — The Sovereign Intelligence Architecture`](../doc.md)**:
 
-1. **`ArenaAllocator`**: Contiguous 16-MiB slab memory manager with $O(1)$ tick pointer rewinding.
-2. **`SessionVfs` & `TransactionJournal`**: Two-phase staged filesystem overlays with disk baseline hashing and atomic rollback.
-3. **`WaveScheduler` & `ToolGovernor`**: Dependency-aware topological execution wavefront partitioning read-parallelism and write-serialization.
+1. **`ArenaAllocator` (`REWIND`)**: Contiguous 16-MiB slab memory manager with $O(1)$ tick pointer rewinding.
+2. **`SessionVfs`, `TransactionJournal` & `BehavioralKnowledgeStore` (`REWIND` & `BROCCOLI`)**: Two-phase staged filesystem overlays with FNV-1a disk baseline hashing, atomic rollback, and empirical interaction learning.
+3. **`SpatialActionMediator` & `SpatialInteractionEngine` (`COMPUTER USE` & `SPIDER`)**: Double-Wrapped Spatial Action Mediation (`Wrapper A` Grounding in $\le 0.40\ \mu\text{s}$ + `Wrapper B` Execution Assurance) with automatic off-screen pre-scroll and multi-step `SpatialActionPlan` execution.
+4. **`WaveScheduler` & `ToolOutputGovernor` (`THE HARNESS`)**: Dependency-aware topological execution wavefront partitioning read-parallelism and write-serialization across 29 built-in tools.
 
 ---
 
-## The Substrate Trinity Overview
+## The Sovereign Substrate Overview
 
 ```mermaid
 flowchart LR
-  subgraph Trinity ["The Three Substrate Primitives"]
-    ARENA["1. Arena Allocator<br/>(16-MiB slab · O(1) rewind)"]
-    VFS["2. SessionVfs & Journal<br/>(Two-phase staging · Rollback)"]
-    WAVE["3. Wave Scheduler<br/>(DAG wavefront · Read-write partition)"]
+  subgraph Primitives ["The Four Sovereign Substrate Primitives"]
+    ARENA["1. ArenaAllocator (REWIND)<br/>(16-MiB slab · O(1) rewind)"]
+    VFS["2. SessionVfs & Broccoli Store<br/>(Two-phase staging · Confidence calibration)"]
+    SPATIAL["3. Double-Wrapped Spatial Mediator<br/>(Wrapper A Grounding · Wrapper B Assurance)"]
+    WAVE["4. Wave Scheduler & Governor<br/>(29 tools · Read/Write wavefronts)"]
   end
 
-  ARENA -->|"Slab memory for tokens & ASTs"| ENGINE["MicroAgentEngine (src/core/engine.rs)"]
-  VFS -->|"Safe atomic disk mutations"| ENGINE
-  WAVE -->|"Concurrent tool scheduling"| ENGINE
+  ARENA -->|"Zero-GC scratchpad"| ENGINE["AgentEngine & ComputerUseOrchestrator"]
+  VFS -->|"Reversible disk & learned patterns"| ENGINE
+  SPATIAL -->|"Sub-µs grounded UI/DOM agency"| ENGINE
+  WAVE -->|"Concurrent governed dispatch"| ENGINE
 ```
 
 ---
 
 ## 1. Contiguous Arena Allocator (`src/domain/arena.rs`)
 
-### Design Motivation
-Standard dynamic memory allocators incur synchronization overhead, memory fragmentation, and cache thrashing when thousands of small strings are allocated and discarded during streaming LLM generation. 
-
-### Operational Characteristics
 - **Pre-Allocated Memory Slab**: Default 16-MiB contiguous memory block (`DEFAULT_ARENA_CAPACITY_BYTES = 16 * 1024 * 1024`).
-- **Bump Pointer Allocation**: Allocations advance an internal offset pointer with 8-byte alignment.
-- **$O(1)$ Tick Rewinding**: At turn boundaries, scratch allocations are unwound by resetting the pointer to a recorded watermark (`rewind_to_checkpoint()`).
-- **Dynamic Compaction**: If session token depth threatens the watermark threshold, the [`CompactionEngine`](../src/domain/compaction.rs) compresses historical turns into deterministic semantic summaries ([ADR-0002](adr/0002-arena-allocator-and-o1-tick-rewind.md)).
+- **4-Byte Aligned Bump Pointer**: Allocations advance an internal offset pointer with deterministic alignment.
+- **$O(1)$ Tick Rewinding**: At turn boundaries, scratch allocations are unwound by resetting the pointer to a recorded `SlabBufferSnapshot` watermark ([ADR-0002](adr/0002-arena-allocator-and-o1-tick-rewind.md)).
 
 ---
 
-## 2. SessionVfs & TransactionJournal (`src/infrastructure/vfs_store.rs`, `src/infrastructure/transaction_journal.rs`)
+## 2. Two-Phase `SessionVfs`, `TransactionJournal` & `BehavioralKnowledgeStore`
 
-### Design Motivation
-Agent tool execution frequently mutates files on disk (`fs_write`, `patch_apply`). If multiple tools execute concurrently, or if an LLM hallucinates incorrect diff hunks, immediate disk writes can corrupt the host repository.
-
-### Operational Characteristics
-- **In-Memory Overlay Staging**: File creations, modifications, and deletions are staged in memory as [`VfsFileOverlay`](../src/domain/types/vfs_types.rs).
-- **Disk Baseline Hashing**: Each staged overlay captures the baseline FNV-1a 32-bit hash and byte count of the disk file at read time.
-- **Optimistic Concurrency Verification**: During commit ([`SessionVfs::commit_staged`](../src/infrastructure/vfs_store.rs)), disk contents are re-hashed. If an external edit occurred, commit fails safely rather than clobbering work.
-- **Atomic Rollback Journal**: Committed operations log reverse undo actions in the [`TransactionJournal`](../src/infrastructure/transaction_journal.rs), allowing instant rollback via `/rewind` or `session_rollback` ([ADR-0004](adr/0004-two-phase-vfs-staging-and-transaction-journal.md)).
+- **In-Memory Overlay Staging ([`SessionVfs`](../src/infrastructure/vfs_store.rs))**: File writes are staged in memory with FNV-1a 32-bit hash and byte-length baselines (`VfsDiskBaseline`). If an external edit occurs on disk before commit, `commit_staged` aborts safely ([ADR-0004](adr/0004-two-phase-vfs-staging-and-transaction-journal.md)).
+- **Atomic Rollback Journal ([`TransactionJournal`](../src/infrastructure/transaction_journal.rs))**: Every direct file mutation records a pre-mutation backup for instant restoration via `/rewind` or `rollback_last_mutation`.
+- **Durable Behavioral Knowledge ([`BehavioralKnowledgeStore`](../src/infrastructure/behavioral_store.rs))**: Tracks Laplace-smoothed confidence across UI interaction patterns, synthesizes reusable [`LearnedWorkflowProcedure`](../src/domain/types/learned_knowledge_types.rs) sequences, and reconciles layout epoch drift (`reconcile_state`).
 
 ---
 
-## 3. Wave Scheduler & Tool Governor (`src/core/tool_governor.rs`)
+## 3. Double-Wrapped Spatial Action Architecture (`src/domain/spatial_mediator.rs`, `src/core/spatial_engine.rs`)
 
-### Design Motivation
-When modern LLMs emit multiple tool calls in a single turn (e.g., searching three directories and reading four files simultaneously), sequential execution wastes time, while unconstrained concurrency risks race conditions.
-
-### Operational Characteristics
-- **Read/Write Partitioning**: Tools are categorized by execution side-effects:
-  - **Read-Only Tools** (`fs_read`, `search_grep`, `search_symbol`, `git_status`) have zero disk side-effects.
-  - **Mutating Tools** (`fs_write`, `patch_apply`, `shell_execute`) alter system state.
-- **Topological Wavefronts**: Safe read operations are grouped into a parallel execution wave. Mutating operations are placed into barrier waves executed in deterministic sequence.
-- **Authority Level Gates**: Each tool call checks the session [`ExecutionAuthorityLevel`](../src/domain/types/runtime.rs) (ReadOnly, WorkspaceWrite, ShellExecute, FullSovereign) before dispatch ([ADR-0005](adr/0005-dag-wave-scheduler-concurrency.md)).
+- **Wrapper A (Spatial Grounding Gate)**: Enforces `layout_epoch` freshness, multi-modal target resolution (`som_id`, `s{hex}:{id}`, label, normalized coordinates), exact 2D sweep-line occlusion union (`calculate_rectangles_union_area`), viewport visibility & automatic off-screen pre-scroll (`requires_scroll`), and 15% inset safe points in $\le 0.40\ \mu\text{s}$ ([ADR-0011](adr/0011-sovereign-intelligence-and-spatial-computer-use.md)).
+- **Wrapper B (Execution Assurance Gate)**: Enforces `TargetDisabled` and `ActionNotPermittedForRole` preconditions before execution, and verifies observable postconditions (`focus`, `value`, `frame_seq`, `scroll_offset`) after execution.
 
 ---
 
-## Substrate Invariants & Guardrails
+## 4. Wave Scheduler & Tool Governor (`src/core/tool_registry.rs`, `src/core/tool_governor.rs`)
 
-| Invariant | Enforcement Mechanism | Failure Diagnostic |
-| :--- | :--- | :--- |
-| Arena Memory Ceiling | Slab capacity check in `ArenaAllocator::allocate` | `ArenaOom` / [PB-02](playbooks/arena-exhaustion-and-oom-triage.md) |
-| Disk Reality Parity | FNV-1a hash baseline check in `SessionVfs::commit_staged` | `VfsConflict` / [PB-04](playbooks/vfs-commit-conflict-and-journal-rollback.md) |
-| Write Serialization | Mutating barrier partitioning in `WaveScheduler` | `WaveConflict` / [ADR-0005](adr/0005-dag-wave-scheduler-concurrency.md) |
-| Credential Redaction | Pattern matching in `DeterministicSecretRedactor` | `SecretSanitized` / [PB-05](playbooks/secret-leakage-and-security-interdiction.md) |
+- **Read/Write Wave Partitioning**: Groups read-only tools (`view_file`, `grep_search`, `search_symbols`) into concurrent `futures::future::join_all` waves while isolating mutating tools (`write_file`, `run_command`, `computer_use`, `spatial_interact`) behind serialized barriers ([ADR-0005](adr/0005-dag-wave-scheduler-concurrency.md)).
+- **Token-Budget Governor & Loop Breaker**: Truncates oversized outputs using a 65% head / 35% tail budget with disk spill (`retrieve_spill_content`) and halts repetitive tool loops (`ToolLoopBreaker`).
 
 ---
 
 ## Verification
 
 ```bash
-cargo test core::substrate_tests
+cargo test
 cargo run -- --bench
 ```

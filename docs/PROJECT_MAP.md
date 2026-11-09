@@ -1,47 +1,40 @@
 <!-- [LAYER: UI] -->
 # Project Map & Architecture (`HEAV3NS-MICRO`)
 
-This map reflects the actual layout and organization of the **HEAV3NS-MICRO** workspace (`/Users/bozoegg/Desktop/HEAV3NS-MICRO`), encompassing both the hyper-compressed Rust micro-runtime and the AppKit Native Desktop IDE client.
+This map reflects the complete layout and organization of the **HEAV3NS-MICRO** workspace (`/Users/bozoegg/Desktop/HEAV3NS-MICRO`), encompassing the 64-module Rust sovereign intelligence runtime and the AppKit Native Desktop IDE client (`HEAV3NS-CODE`).
 
 ## Workspace Overview
 
-| Directory / File | Architectural Zone | Role |
+| Directory / File | Architectural Zone | Sovereign Pillars & Role |
 | :--- | :--- | :--- |
-| **`src/plumbing/`** | `PLUMBING` | Stateless leaf primitives: `hash_and_math.rs` (`now_ms`, `fnv1a_32`, `levenshtein`), `text_tokens.rs` (`estimate_text_tokens`, `truncate_text_to_token_budget`, `render_unified_diff`, `encode_base64`, `canonical_tool_name`), `json_repair.rs` (`extract_json_roots`, `repair_json_string`, streaming tool-call deduplicators), `secret_redactor.rs` (`DeterministicSecretRedactor`, `SafetyPolicy`), `fuzzy_patch.rs` (`heal_fuzzy_patch`, `DeterministicPatchEngine`) |
-| **`src/domain/`** | `DOMAIN` | Pure domain models and state machines (`0%` I/O, `<= 3` structs/file): `arena.rs` (`ArenaAllocator`, `SlabBufferSnapshot`), `memory.rs` (`MemoryStore`, `MemoryEntry`, `GameStateSnapshot`), `compaction.rs` (`CompactionPolicy`, `CompactionReport`, `ContextBudgetInfo`), `swarm.rs` (`SwarmAssignment`, `SwarmItemReport`, `SwarmFormationResult`), `tool_parser.rs` (`ToolCallArgParser`) |
-| **`src/domain/interfaces/`** | `DOMAIN` | Formal Dependency Inversion traits (`mod.rs`): `ILlmProvider`, `IHttpProvider`, `IScriptedProvider`, `IToolExecutor`, `ISessionPersistence`, `IFileSessionPersistence`, `ISessionVfs`, `ISkillsIngestor`, `ITransactionJournal` |
-| **`src/domain/types/`** | `DOMAIN` | Pure domain value types (`<= 3` structs/file): `messages.rs`, `runtime.rs`, `progress.rs`, `tick_result.rs`, `vfs_types.rs`, `tool_types.rs`, `tool_schedule.rs`, `skill_types.rs` |
-| **`src/infrastructure/`** | `INFRASTRUCTURE` | Concrete I/O adapters implementing `domain/interfaces`: `http_provider.rs` (`HttpProvider`, `parse_sse_stream`), `scripted_provider.rs` (`ScriptedProvider`), `vfs_store.rs` (`SessionVfs`, `SkillsIngestor`, `FileSessionPersistence`, `workspace_revision`), `transaction_journal.rs` (`TransactionJournal`), `shell_runner.rs` (`execute_shell_command`), `fs_tools.rs` (`dispatch_fs_tool`), `search_tools.rs` (`resolve_workspace_path`, `suggest_nearby_files`, `execute_grep_search`, `extract_workspace_symbols`) |
-| **`src/core/`** | `CORE` | Use-case orchestration: `engine.rs` (`AgentEngine` ReAct loop), `slash_and_swarm.rs` (`run_swarm` & 10 slash commands), `session_store.rs` (`SessionStore`, `SessionCompactor`), `tool_governor.rs` (`ToolOutputGovernor`, `ToolLoopBreaker`, `ToolExecutionCache`), `tool_specs.rs` (23 built-in `ToolSpec` declarations), `tool_registry.rs` (`ToolRegistry` & wave scheduler), `request_queue.rs` (`RuntimeRequestQueue`, `PromptComposer`), `flight_runner.rs` (`FT-01..FT-05` Flight Test suite & micro-benchmarks), `substrate_tests.rs` (unit/integration test suite) |
-| **`src/ui/`** | `UI` | Presenters, protocol handlers, and dispatchers: `cli_presenter.rs` (CLI parser & interactive REPL), `stdio_worker.rs` (`v: 1` stdio JSON-RPC framing & transport), `rpc_dispatch.rs` (Desktop RPC method handlers) |
-| **`src/lib.rs`** | `UI` | Library Composition Root & backward-compatible public module facades (`engine`, `flight`, `parser`, `provider`, `session`, `tools`) |
-| **`src/main.rs`** | `UI` | Binary Composition Root dispatching `--flight`, `--bench`, `--smoke`, `--stdio`, `--desktop-worker`, `-p`, and interactive REPL modes |
-| **`native/Sources/Heav3nsCode/`** | `UI` / `PLUMBING` | Native macOS AppKit IDE client modularized under Tier 1 Optimal caps: `WorkspaceWindow.swift` (core lifecycle & layout), `WorkspaceAttachmentViews.swift` (tokens & composer), `WorkspaceWindow+Navigation.swift` (sidebar & navigator), `WorkspaceWindow+Inspection.swift` (diff/state/spider inspection), `WorkspaceWindow+Execution.swift` (drafts & queue), `WorkspaceWindow+Swarm.swift` (specialists & formations), `WorkspaceWindow+SwarmSettings.swift` (swarm recovery), `WorkspaceWindow+Events.swift` (runtime events & pods), `RuntimeClient.swift` & `ControlFrameReader.swift` (JSON-RPC transport), `OnDevicePlaygroundService.swift` (local Apple silicon inference) |
-| **`native/Tests/Heav3nsCodeTests/`** | `UI` | Comprehensive 308-test AppKit test suite: `RuntimeClientTestCase.swift`, `RuntimeClientTests.swift`, `RuntimeClientProtocolTests.swift`, `ActionPaletteTests.swift`, `SwarmRadarTests.swift`, `WorkspaceDraftTests.swift`, `WorkspaceViewportIntegrationTests.swift`, etc. |
-| **`docs/`** | `UI` / `DOMAIN` | Documentation hub (`README.md`, `PROJECT_MAP.md`, `CODE_TO_DOC_MAP.md`, `CONSTITUTION.md`, `CODEBASE_STANDARDS.md`, `architecture/current.md`, `adr/`) |
+| **`doc.md` & `ROADMAP.md`** | `UI` | Foundational charter of **HEAV3NS — The Sovereign Intelligence Architecture** (`THE ASCENDANT COMPUTATIONAL INTELLIGENCE`) and multi-horizon engineering roadmap |
+| **`src/plumbing/`** (`10` modules) | `PLUMBING` | Stateless leaf primitives (`0%` state, `0` upward imports): `hash_and_math.rs`, `text_tokens.rs`, `json_repair.rs`, `secret_redactor.rs`, `fuzzy_patch.rs`, `vision_and_dom.rs`, `spatial_geometry.rs`, `environmental_diff.rs`, `display_telemetry.rs`, `mod.rs` |
+| **`src/domain/`** (`10` modules) | `DOMAIN` | Pure domain models & state machines (`0%` I/O, `<= 3` structs/file): `arena.rs` (`REWIND`), `memory.rs` (`BROCCOLI`), `compaction.rs` (`HEAV3NS-MICRO`), `swarm.rs` (`SYNTHETIC SWARM`), `tool_parser.rs` (`HEAV3NS-MICRO`), `computer_use.rs` (`COMPUTER USE`), `skill_tree.rs` (`BROCCOLI`), `spatial_action.rs` & `spatial_mediator.rs` (`COMPUTER USE`), `mod.rs` |
+| **`src/domain/interfaces/`** (`1` module) | `DOMAIN` | `19` formal Dependency Inversion port traits (`mod.rs`): `ILlmProvider`, `IHttpProvider`, `IScriptedProvider`, `IToolExecutor`, `ISessionPersistence`, `IFileSessionPersistence`, `ISessionVfs`, `ISkillsIngestor`, `ITransactionJournal`, `ISpatialMediator`, `ISpatialGroundingGate`, `IExecutionAssuranceGate`, `IEnvironmentalObserver`, `IBehavioralKnowledgeStore`, `IBehavioralStore`, `ISwarmIntelligenceConsultant`, `IEnvironmentalDiffer`, `ISpatialGeometry`, `IComputerUseOrchestrator` |
+| **`src/domain/types/`** (`14` modules) | `DOMAIN` | Pure domain value & behavioral types (`20` entity `I<Name>` traits, `<= 3` structs/file): `messages.rs`, `runtime.rs`, `progress.rs`, `tick_result.rs`, `vfs_types.rs`, `tool_types.rs`, `tool_schedule.rs`, `skill_types.rs`, `computer_use_types.rs` (`UiElement`, `VirtualWindow`), `spatial_types.rs`, `environmental_types.rs`, `swarm_intelligence_types.rs`, `learned_knowledge_types.rs`, `mod.rs` |
+| **`src/infrastructure/`** (`9` modules) | `INFRASTRUCTURE` | Concrete I/O adapters implementing `domain/interfaces`: `http_provider.rs`, `scripted_provider.rs`, `vfs_store.rs` (`SessionVfs`, `SkillsIngestor`, `FileSessionPersistence`), `transaction_journal.rs` (`TransactionJournal`), `behavioral_store.rs` (`BehavioralKnowledgeStore`), `shell_runner.rs`, `fs_tools.rs`, `search_tools.rs`, `mod.rs` |
+| **`src/core/`** (`14` modules) | `CORE` | Use-case orchestration: `engine.rs` (`AgentEngine`), `computer_use_orchestrator.rs` (`ComputerUseOrchestrator` 9-stage closed loop), `spatial_engine.rs` (`SpatialInteractionEngine` Double-Wrapped dispatch, off-screen auto-scroll & `execute_plan`), `slash_and_swarm.rs` (`run_swarm` & 16 slash commands), `session_store.rs`, `tool_governor.rs`, `tool_specs.rs` (`29` built-in tools), `tool_registry.rs` (`ToolRegistry` & wave scheduler), `request_queue.rs`, `flight_runner.rs`, `substrate_tests.rs`, `spatial_tests.rs`, `computer_use_tests.rs`, `mod.rs` |
+| **`src/ui/` & Roots** (`6` modules) | `UI` | Presenters, protocol handlers, and Composition Roots: `ui/cli_presenter.rs`, `ui/stdio_worker.rs` (`"v": 1` JSON-RPC framing), `ui/rpc_dispatch.rs`, `ui/mod.rs`, `lib.rs`, `main.rs` |
+| **`native/Sources/Heav3nsCode/`** | `UI` / `PLUMBING` | Native macOS AppKit IDE client modularized under Tier 1 Optimal caps (`< 800` lines) with `dispose()` lifecycle hygiene across all 30 Swift classes |
+| **`native/Tests/Heav3nsCodeTests/`** | `UI` | Comprehensive `311`-test AppKit test suite (`0` failures) |
+| **`docs/`** | `UI` / `DOMAIN` | Diátaxis + Institutional Memory documentation hub (`README.md`, `papers/`, `adr/`, `playbooks/`, `postmortems/`, `wiki/`, `kb/`, `api/`) |
 
 ---
 
 ## Unified Execution Architecture
 
 ```
-native/Sources/Heav3nsCode/ (AppKit Native Desktop IDE)
+native/Sources/Heav3nsCode/ (AppKit Native Desktop IDE · 311 Tests)
   │
   │ stdio JSON-RPC (v: 1)
   ▼
-src/main.rs (Binary Composition Root)
-  └─ src/ui/stdio_worker.rs (Stream Framing, Version Tagging, Handshake)
-       └─ src/ui/rpc_dispatch.rs (Method Router: files, changes, spider, memory, task, swarm)
-            └─ src/core/engine.rs (AgentEngine::tick) & src/core/slash_and_swarm.rs (run_swarm)
-                 ├─ RuntimeRequestQueue & PromptComposer (src/core/request_queue.rs)
-                 ├─ SessionStore & SessionCompactor (src/core/session_store.rs)
-                 │    ├─ ArenaAllocator (src/domain/arena.rs)
-                 │    ├─ MemoryStore (src/domain/memory.rs)
-                 │    └─ SessionVfs & FileSessionPersistence (src/infrastructure/vfs_store.rs)
-                 ├─ ILlmProvider -> HttpProvider / ScriptedProvider (src/infrastructure/http_provider.rs)
-                 └─ ToolRegistry (src/core/tool_registry.rs)
-                      ├─ ToolCallArgParser (src/domain/tool_parser.rs -> src/plumbing/json_repair.rs)
-                      ├─ ToolOutputGovernor, ToolLoopBreaker, ToolExecutionCache (src/core/tool_governor.rs)
-                      ├─ TransactionJournal (src/infrastructure/transaction_journal.rs)
-                      └─ dispatch_fs_tool / search_tools / shell_runner (src/infrastructure/*)
+src/main.rs & src/lib.rs (Composition Roots)
+  └─ src/ui/stdio_worker.rs -> src/ui/rpc_dispatch.rs
+       ├─ src/core/engine.rs (AgentEngine::tick · HEAV3NS-MICRO)
+       ├─ src/core/computer_use_orchestrator.rs (9-Stage Closed-Loop · COMPUTER USE · SPIDER · SWARM)
+       │    ├─ src/core/spatial_engine.rs (SpatialInteractionEngine · Auto-Scroll · execute_plan)
+       │    │    └─ src/domain/spatial_mediator.rs (Wrapper A Grounding + Wrapper B Assurance)
+       │    └─ src/infrastructure/behavioral_store.rs (BehavioralKnowledgeStore · BROCCOLI · REWIND)
+       ├─ src/core/session_store.rs (ArenaAllocator · MemoryStore · SessionVfs · REWIND)
+       └─ src/core/tool_registry.rs (29 Native Tools · DAG Wave Scheduler · THE HARNESS)
 ```

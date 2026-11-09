@@ -54,6 +54,7 @@ final class SwarmRadarPillButton: NSButton {
         setAccessibilityLabel(title)
     }
 
+    func dispose() { NotificationCenter.default.removeObserver(self) }
     deinit {
         NotificationCenter.default.removeObserver(self)
     }

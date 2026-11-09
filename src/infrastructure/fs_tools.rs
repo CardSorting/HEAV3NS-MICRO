@@ -2,7 +2,7 @@
 use crate::infrastructure::search_tools::{batch_replace_regex_files, build_directory_tree, execute_grep_search, extract_workspace_symbols, resolve_workspace_path, suggest_nearby_files, walk_find_files};
 use crate::infrastructure::transaction_journal::TransactionJournal;
 use crate::infrastructure::vfs_store::SkillsIngestor;
-use crate::plumbing::fuzzy_patch::{heal_fuzzy_patch, DeterministicPatchEngine};
+use crate::plumbing::fuzzy_patch::{heal_fuzzy_patch, maybe_correct_escape_drift, DeterministicPatchEngine};
 use crate::plumbing::hash_and_math::fnv1a_32;
 use crate::plumbing::secret_redactor::SafetyPolicy;
 use serde_json::{json, Map, Value};
@@ -79,14 +79,15 @@ pub fn dispatch_fs_tool(
             }
             fs::write(&resolved, content.as_bytes())
                 .map_err(|e| format!("Failed to write '{}': {e}", resolved.display()))?;
-            Ok((
-                json!({
-                    "success": true,
-                    "path": resolved.to_string_lossy(),
-                    "bytesWritten": content.len()
-                }),
-                false,
-            ))
+            let mut out = json!({
+                "success": true,
+                "path": resolved.to_string_lossy(),
+                "bytesWritten": content.len()
+            });
+            if let Some(adv) = SafetyPolicy::check_protected_instruction_write(&resolved) {
+                out["governanceAdvisory"] = Value::String(adv);
+            }
+            Ok((out, false))
         }
         "replace_file_content" => {
             let raw_path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path'")?;
@@ -96,13 +97,15 @@ pub fn dispatch_fs_tool(
             SafetyPolicy::check_path(&resolved)?;
             let original =
                 fs::read_to_string(&resolved).map_err(|e| format!("Failed to read '{}': {e}", resolved.display()))?;
-            let (matched_target, confidence) = heal_fuzzy_patch(&original, target).ok_or_else(|| {
+            let (eff_target, eff_replacement, drift_kind) =
+                maybe_correct_escape_drift(target, replacement, &original)?;
+            let (matched_target, confidence) = heal_fuzzy_patch(&original, &eff_target).ok_or_else(|| {
                 format!("Target content not found in '{raw_path}' (even with whitespace-tolerant fuzzy matching)")
             })?;
             if let Ok(mut j) = journal.lock() {
                 j.record_mutation("replace_file_content", &resolved);
             }
-            let updated = original.replacen(&matched_target, replacement, 1);
+            let updated = original.replacen(&matched_target, &eff_replacement, 1);
             fs::write(&resolved, updated.as_bytes())
                 .map_err(|e| format!("Failed to write '{}': {e}", resolved.display()))?;
             Ok((
@@ -110,7 +113,8 @@ pub fn dispatch_fs_tool(
                     "success": true,
                     "path": resolved.to_string_lossy(),
                     "confidence": confidence,
-                    "autoHealed": confidence < 1.0
+                    "autoHealed": confidence < 1.0 || drift_kind.is_some(),
+                    "escapeDriftCorrected": drift_kind
                 }),
                 false,
             ))

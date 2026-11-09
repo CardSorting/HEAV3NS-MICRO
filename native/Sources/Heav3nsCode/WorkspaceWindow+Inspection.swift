@@ -356,6 +356,10 @@ extension WorkspaceWindow {
                 }
                 if method == "files.read", restore == nil { self.inspection.setSelectedRange(NSRange(location: 0, length: 0)) }
                 self.inspection.scrollToBeginningOfDocument(nil)
+                if let jump = self.pendingLineJump {
+                    self.pendingLineJump = nil
+                    self.goToLine(jump.line, column: jump.column)
+                }
                 if method == "files.read", data["binary"] as? Bool == false,
                    let branch = self.viewportBranch, let path = params["path"] as? String {
                     let kind: WorkspaceViewport.Kind = (path as NSString).pathExtension.lowercased() == "csv" ? .csv : .code
@@ -553,5 +557,22 @@ extension WorkspaceWindow {
             case .failure: self.walkthrough.showLoadError("Activity could not be loaded. Recorded work is unchanged.")
             }
         }
+    }
+
+    func goToLine(_ line: Int, column: Int = 1) {
+        guard !inspection.string.isEmpty else { return }
+        contextTabs.selectedSegment = 2; showingInspector = true; surfaces.selectedSegment = 1; adapt()
+        let text = inspection.string as NSString
+        let lines = text.components(separatedBy: "\n")
+        let targetLine = max(1, min(line, lines.count))
+        var charOffset = 0
+        for i in 0..<(targetLine - 1) { charOffset += lines[i].utf16.count + 1 }
+        let lineLength = lines[targetLine - 1].utf16.count
+        let colOffset = max(0, min(column - 1, lineLength))
+        let finalLocation = min(charOffset + colOffset, text.length)
+        let selRange = NSRange(location: finalLocation, length: min(lineLength - colOffset, 1))
+        inspection.setSelectedRange(selRange)
+        inspection.scrollRangeToVisible(selRange)
+        window?.makeFirstResponder(inspection)
     }
 }

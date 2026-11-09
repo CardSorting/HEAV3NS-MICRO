@@ -62,4 +62,5 @@ final class NativeUpdater: NSObject, SPUUpdaterDelegate, NSMenuItemValidation {
         DispatchQueue.main.async { [weak self] in self?.gate.postpone(installHandler) }
         return true
     }
+    func dispose() {}
 }

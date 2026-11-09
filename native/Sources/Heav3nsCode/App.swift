@@ -146,6 +146,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         newProject.keyEquivalentModifierMask = [.command, .shift]; newProject.target = self
         file.addItem(withTitle: "Open Workspace…", action: #selector(openFolder), keyEquivalent: "o").target = self
         file.addItem(withTitle: "Open File…", action: #selector(openFile), keyEquivalent: "p").target = self
+        file.addItem(withTitle: "Go to Line…", action: #selector(showGoToLine), keyEquivalent: "g").target = self
         file.addItem(withTitle: "Pods", action: #selector(showPods), keyEquivalent: "0").target = self
         file.addItem(withTitle: "Project Library", action: #selector(showProjectLibrary), keyEquivalent: "").target = self
         file.addItem(withTitle: "New Conversation", action: #selector(newConversation), keyEquivalent: "n").target = self
@@ -160,6 +161,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let viewItem = NSMenuItem(); viewItem.title = "Workspace"; let view = NSMenu(title: "Workspace")
         let palette = view.addItem(withTitle: "Actions…", action: #selector(actions), keyEquivalent: "p"); palette.keyEquivalentModifierMask = [.command, .shift]; palette.target = self
         let commandPalette = view.addItem(withTitle: "Command Palette…", action: #selector(actions), keyEquivalent: "k"); commandPalette.target = self
+        let goToSymbol = view.addItem(withTitle: "Go to Symbol in File…", action: #selector(showGoToSymbol), keyEquivalent: "o"); goToSymbol.keyEquivalentModifierMask = [.command, .shift]; goToSymbol.target = self
         view.addItem(withTitle: "Toggle Navigation", action: #selector(toggleNavigation), keyEquivalent: "b").target = self
         let models = view.addItem(withTitle: "Model & Provider…", action: #selector(showModels), keyEquivalent: "m")
         models.keyEquivalentModifierMask = [.command, .shift]; models.target = self
@@ -338,6 +340,8 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     @objc private func showModels() { current?.showModels() }
     @objc private func showChatGPTAccounts() { ChatGPTAccountsWindow.shared.present() }
     @objc private func openFile() { current?.showQuickOpen() }
+    @objc private func showGoToLine() { current?.showGoToLine() }
+    @objc private func showGoToSymbol() { current?.showGoToSymbol() }
     @objc private func showWalkthrough() { current?.showWalkthrough() }
     @objc private func showProjectRun() { current?.showProjectRun() }
     @objc private func showCheckpoints() { current?.showCheckpoints() }
@@ -393,6 +397,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         if menuItem.action == #selector(showProjectRun) { return current?.client.capabilities.contains("project-run-v1") == true }
         if menuItem.action == #selector(showCheckpoints) { return current?.client.capabilities.contains("checkpoints-v1") == true }
         if menuItem.action == #selector(openFile) { return current?.canOpenFile == true }
+        if [#selector(showGoToLine), #selector(showGoToSymbol)].contains(menuItem.action) { return current?.canOpenFile == true }
         if menuItem.action == #selector(newConversation) { return current?.canCreateConversation == true }
         if menuItem.action == #selector(inspectBack) { return current?.canInspectBack == true }
         if menuItem.action == #selector(inspectForward) { return current?.canInspectForward == true }

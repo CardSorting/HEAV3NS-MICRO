@@ -271,4 +271,5 @@ enum PodStreamProjection {
         if !final.isEmpty { entries.append(final) }
         return entries.joined(separator: "\n\n")
     }
+    func dispose() {}
 }

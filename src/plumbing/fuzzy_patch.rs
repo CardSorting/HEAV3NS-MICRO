@@ -3,13 +3,128 @@
 pub type FuzzyHealMatch = (String, f64);
 pub type PatchOperationList = Vec<PatchOperation>;
 
-/// Whitespace-tolerant fuzzy patch locator (`ToolErrorAutoHealer::healFuzzyPatch`).
+pub fn strip_quote_escapes(s: &str) -> String {
+    s.replace("\\\"", "\"").replace("\\'", "'")
+}
+
+pub fn has_even_backslash_runs(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            let start = i;
+            while i < bytes.len() && bytes[i] == b'\\' {
+                i += 1;
+            }
+            let run_len = i - start;
+            if run_len >= 2 && run_len % 2 == 0 {
+                return true;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    false
+}
+
+pub fn halve_even_backslash_runs(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            let mut count = 1usize;
+            while chars.peek() == Some(&'\\') {
+                chars.next();
+                count += 1;
+            }
+            let target_count = if count >= 2 && count % 2 == 0 { count / 2 } else { count };
+            for _ in 0..target_count {
+                out.push('\\');
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Content-verified auto-correction for LLM tool-call escape drift (`escape_drift_autocorrect`).
+/// Repairs spurious quote escapes (`\"`, `\'`) and doubled backslash runs (`\\`) when verified
+/// against `content`, while rejecting ambiguous replacement backslashes (`AmbiguousEscapeDriftError`).
+pub fn maybe_correct_escape_drift(
+    old_string: &str,
+    new_string: &str,
+    content: &str,
+) -> Result<(String, String, Option<String>), String> {
+    if old_string.is_empty() || content.contains(old_string) {
+        return Ok((old_string.to_string(), new_string.to_string(), None));
+    }
+
+    let old_q = strip_quote_escapes(old_string);
+    if old_q != old_string && content.contains(&old_q) {
+        let new_q = strip_quote_escapes(new_string);
+        if has_even_backslash_runs(&old_q) {
+            let old_qb = halve_even_backslash_runs(&old_q);
+            if old_qb != old_q && content.contains(&old_qb) {
+                if new_q.contains('\\') {
+                    return Err(
+                        "AmbiguousEscapeDriftError: old_string matches after quote+backslash unescape, but new_string contains backslashes that cannot be safely disambiguated"
+                            .to_string(),
+                    );
+                }
+                return Ok((old_qb, new_q, Some("quote_and_backslash_unescape".to_string())));
+            }
+        }
+        return Ok((old_q, new_q, Some("quote_unescape".to_string())));
+    }
+
+    if old_q != old_string && has_even_backslash_runs(&old_q) {
+        let old_qb = halve_even_backslash_runs(&old_q);
+        if old_qb != old_q && content.contains(&old_qb) {
+            let new_q = strip_quote_escapes(new_string);
+            if new_q.contains('\\') {
+                return Err(
+                    "AmbiguousEscapeDriftError: old_string matches after quote+backslash unescape, but new_string contains backslashes that cannot be safely disambiguated"
+                        .to_string(),
+                );
+            }
+            return Ok((old_qb, new_q, Some("quote_and_backslash_unescape".to_string())));
+        }
+    }
+
+    if has_even_backslash_runs(old_string) {
+        let old_b = halve_even_backslash_runs(old_string);
+        if old_b != old_string && content.contains(&old_b) {
+            if new_string.contains('\\') {
+                return Err(
+                    "AmbiguousEscapeDriftError: old_string matches after backslash-run halving, but new_string contains backslashes that cannot be safely disambiguated"
+                        .to_string(),
+                );
+            }
+            return Ok((old_b, new_string.to_string(), Some("backslash_halving".to_string())));
+        }
+    }
+
+    Ok((old_string.to_string(), new_string.to_string(), None))
+}
+
+/// Whitespace-tolerant and escape-drift-healing fuzzy patch locator (`ToolErrorAutoHealer::healFuzzyPatch`).
 pub fn heal_fuzzy_patch(file_content: &str, target_snippet: &str) -> Option<(String, f64)> {
     if file_content.is_empty() || target_snippet.is_empty() {
         return None;
     }
     if file_content.contains(target_snippet) {
         return Some((target_snippet.to_string(), 1.0));
+    }
+    let unescaped_q = strip_quote_escapes(target_snippet);
+    if unescaped_q != target_snippet && file_content.contains(&unescaped_q) {
+        return Some((unescaped_q, 0.98));
+    }
+    if has_even_backslash_runs(&unescaped_q) {
+        let halved = halve_even_backslash_runs(&unescaped_q);
+        if halved != unescaped_q && file_content.contains(&halved) {
+            return Some((halved, 0.97));
+        }
     }
     let file_lines: Vec<&str> = file_content.lines().collect();
     let target_lines: Vec<&str> = target_snippet.lines().filter(|l| !l.trim().is_empty()).collect();
