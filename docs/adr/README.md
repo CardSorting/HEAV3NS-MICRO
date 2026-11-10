@@ -36,6 +36,7 @@ flowchart TD
   ADR12["ADR-0012: Lean System Prompt, KV-Cache Prefixing & Sticky Tool Routing"]
   ADR13["ADR-0013: Shell Command Guard & Pipeline Anti-Starvation Defenses"]
   ADR14["ADR-0014: Codewhale Distillation — Posture, CAS, Seatbelt & Receipts"]
+  ADR15["ADR-0015: Auto-Refreshing 2026 Model Catalog & Billing Integrity"]
 
   ADR1 --> ADR7
   ADR1 --> ADR2
@@ -58,6 +59,7 @@ flowchart TD
   ADR10 --> ADR14
   ADR12 --> ADR14
   ADR13 --> ADR14
+  ADR14 --> ADR15
 ```
 
 ---
@@ -73,7 +75,7 @@ flowchart TD
 | [ADR-0004](0004-two-phase-vfs-staging-and-transaction-journal.md) | Two-Phase Staged VFS with Disk Baseline & Rollback Journal | **Accepted** | Filesystem Safety (`REWIND`) | `test_vfs_baseline_verification_and_snapshot_rewind` |
 | [ADR-0005](0005-dag-wave-scheduler-concurrency.md) | Topological Wave Scheduling for Concurrent Read/Write Tool Waves | **Accepted** | Tool Execution (`THE HARNESS`) | `test_wave_scheduler_partitioning` |
 | [ADR-0006](0006-stdio-jsonl-and-flight-test-harness.md) | Headless Stdio JSONL Worker Protocol & 5-Scenario Flight Test | **Accepted** | Agent Execution (`THE HARNESS`) | `test_agent_flight_suite_passes_100_percent` |
-| [ADR-0007](0007-contractual-sovereignty-and-i-interfaces.md) | Contractual Sovereignty via Pure `I<Name>` Port Interfaces | **Accepted** | Core Architecture (`39` traits) | `src/domain/interfaces/mod.rs` |
+| [ADR-0007](0007-contractual-sovereignty-and-i-interfaces.md) | Contractual Sovereignty via Pure `I<Name>` Port Interfaces | **Accepted** | Core Architecture (`64` traits) | `src/domain/interfaces/mod.rs` |
 | [ADR-0008](0008-secret-redaction-and-security-policy.md) | Deterministic Secret Redaction & Sensitive Path Interdiction | **Accepted** | Runtime Security (`THE HARNESS`) | `test_secret_redactor_and_sensitive_path_guard` |
 | [ADR-0009](0009-diataxis-documentation-and-knowledge-governance.md) | Diátaxis + Institutional Memory Documentation Architecture | **Accepted** | Documentation | `node bin/docs-check.mjs` |
 | [ADR-0010](0010-native-desktop-integration-and-rpc-protocol.md) | Native Desktop AppKit Integration, Modular UI Decomposition, and Stdio JSON-RPC Protocol | **Accepted** | Desktop IDE & IPC | `swift test` & `cargo test` |
@@ -81,6 +83,7 @@ flowchart TD
 | [ADR-0012](0012-lean-system-prompt-and-kv-cache-prefix-determinism.md) | Lean System Prompt Specification, KV-Cache Prefix Determinism & Sticky Dynamic Tool Routing | **Accepted** | Prompt Architecture (`HEAV3NS-MICRO`) | `test_prompt_cache_prefix_determinism_and_model_families` |
 | [ADR-0013](0013-shell-command-defenses-and-pipeline-sanitization.md) | Shell Command Guard, Heredoc File-Write Interdiction & Terminal File-Read Anti-Starvation | **Accepted** | Runtime Defenses (`THE HARNESS`) | `test_adr_0015_compound_multiline_and_closing_heredoc_defenses` |
 | [ADR-0014](0014-codewhale-distillation-posture-cas-and-receipts.md) | Codewhale Zenith Distillation — 5-Stop Execution Posture, Pure-Rust Workspace CAS, Seatbelt Sandboxing, KV-Cache Pinning & Turn Receipts | **Accepted** | Safety, Ergonomics & Desktop UX (`THE HARNESS`) | `cargo test core::codewhale_zenith_tests` & `swift test` |
+| [ADR-0015](0015-auto-refreshing-frontier-model-catalog.md) | Auto-Refreshing 2026 Frontier Model Catalog, Dynamic Capability Taxonomy & Zero-Cost Billing Integrity | **Accepted** | Model Intelligence & Billing (`HEAV3NS-MICRO`) | `cargo run -- models --refresh` & `cargo test` |
 
 ---
 

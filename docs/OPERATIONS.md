@@ -33,6 +33,9 @@ flowchart TD
 
 | Mode | Command | Use Case | Exit Codes |
 | :--- | :--- | :--- | :--- |
+| **Model Catalog** | `heav3ns-micro models [--refresh]` | Live 2026 frontier model rates, context windows, and providers | `0`: done |
+| **Receipts** | `heav3ns-micro receipts [--last]` | Inspect prose-free verification receipts (`heav3ns.receipt/v1`) | `0`: done |
+| **Request Preview** | `heav3ns-micro preview-request [--json]` | Inspect canonical byte sum and wire request payload before sending | `0`: done |
 | **Context HUD** | `heav3ns-micro context [--json]` | Token budget, KV-prefix, and tool routing inspection | `0`: done |
 | **Diagnostic Doctor** | `heav3ns-micro doctor` | Substrate health, credentials, and prompt audit | `0`: pass, `1`: action needed |
 | **Flight Benchmark** | `heav3ns-micro --flight` | CI/CD gate and post-build verification | `0`: all pass, `1`: failure |
@@ -52,10 +55,17 @@ When spawned by the native AppKit client (`native/Sources/Heav3nsCode/RuntimeCli
 1. **Protocol Framing (`v: 1`)**: Every outbound message on `stdout` is wrapped in single-line JSON with `"v": 1`.
 2. **Diagnostic Stderr Stream**: Diagnostic messages, panic traces, and trace logs are written exclusively to `stderr` to preserve stdout frame integrity.
 3. **Session Token Routing**: When `--desktop-account <ACCOUNT>` is passed, the worker initializes with the specific authenticated provider credentials configured by the user.
+4. **Multiplexed Async Task Execution**: Turns run in `tokio::spawn` tasks so incoming JSON-RPC calls (`posture.set`, `approval.resolve`, `turn.undo`, `task.stop`, `models.refresh`) are serviced immediately without blocking on model streaming.
 
 ### Desktop RPC Method Catalog
 - `initialize`: Capability negotiation and session initialization.
 - `snapshot`: Synchronizes active workspace state, transcripts, and run histories.
+- `posture.get` / `posture.set` / `posture.step`: 5-stop execution posture inspection and stepping (`Shift+Tab`).
+- `approval.resolve`: Resolves interactive tool permissions with 3 choices (`once`, `allow_session`, `deny`).
+- `turn.undo`: Safe, non-Git post-turn rollback via pure-Rust SHA-256 CAS with `WouldBlock` protection.
+- `receipts.list`: Renders verifiable `TurnReceipt` records (`heav3ns.receipt/v1`).
+- `request.preview`: Returns exact outbound request manifest with canonical byte sum.
+- `models.discover` / `models.refresh`: Live 2026 frontier model discovery and on-demand OpenRouter sync.
 - `files.list` / `files.read` / `files.readBinary`: Safe workspace exploration and chunked Base64 binary streaming.
 - `changes.read`: Renders unified diffs against Git working tree and staging.
 - `spider.check`: Static AST syntax, local imports, and cyclic dependency audits.

@@ -9,8 +9,8 @@ This guide defines the engineering standards enforced across **HEAV3NS-MICRO**.
 | :--- | :--- | :--- | :--- |
 | `src/plumbing/` | `PLUMBING` | `// [LAYER: PLUMBING]` | Stateless leaf helpers; 0 upward imports; `< 800` lines |
 | `src/domain/` | `DOMAIN` | `// [LAYER: DOMAIN]` | Pure entities, value objects, & `I<Name>` traits; 0% I/O; `<= 3` structs/file; `< 800` lines |
-| `src/infrastructure/` | `INFRASTRUCTURE` | `// [LAYER: INFRASTRUCTURE]` | Concrete HTTP, VFS, filesystem, ripgrep, and shell adapters implementing `domain/interfaces`; 0 `ui` imports; `< 800` lines |
-| `src/core/` | `CORE` | `// [LAYER: CORE]` | ReAct engine, swarm orchestrator, session store, tool registry, request queue, and Flight Test runner; 0 `ui` imports; `< 800` lines |
+| `src/infrastructure/` | `INFRASTRUCTURE` | `// [LAYER: INFRASTRUCTURE]` | Concrete HTTP, model pricing registry, VFS, CAS snapshots, filesystem, ripgrep, and shell adapters implementing `domain/interfaces`; 0 `ui` imports; `< 800` lines |
+| `src/core/` | `CORE` | `// [LAYER: CORE]` | ReAct engine, turn orchestrator, batch executor, swarm orchestrator, session store, tool registry, request queue, and Flight Test runner; 0 `ui` imports; `< 800` lines |
 | `src/ui/`, `src/lib.rs`, `src/main.rs` | `UI` | `// [LAYER: UI]` | CLI parser, stdio JSONL worker, and Composition Roots |
 
 ## 2. Rust + Joyzoning Conventions

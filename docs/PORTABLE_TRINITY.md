@@ -12,10 +12,10 @@
 
 In **HEAV3NS-MICRO**, the operational substrate is anchored by four high-performance, deterministic Rust primitive families that power **[`HEAV3NS — The Sovereign Intelligence Architecture`](../doc.md)**:
 
-1. **`ArenaAllocator` (`REWIND`)**: Contiguous 16-MiB slab memory manager with $O(1)$ tick pointer rewinding.
-2. **`SessionVfs`, `TransactionJournal` & `BehavioralKnowledgeStore` (`REWIND` & `BROCCOLI`)**: Two-phase staged filesystem overlays with FNV-1a disk baseline hashing, atomic rollback, and empirical interaction learning.
+1. **`ArenaAllocator` & `WorkspaceSnapshotCas` (`REWIND`)**: Contiguous 16-MiB slab memory manager with $O(1)$ tick pointer rewinding and pure-Rust SHA-256 CAS snapshots supporting safe non-destructive `/undo` with `WouldBlock` protection.
+2. **`SessionVfs`, `TransactionJournal`, `ModelPricingRegistry` & `BehavioralKnowledgeStore` (`REWIND` & `BROCCOLI`)**: Two-phase staged filesystem overlays with FNV-1a disk baseline hashing, atomic rollback, auto-refreshing 2026 frontier model registry, and empirical interaction learning.
 3. **`SpatialActionMediator` & `SpatialInteractionEngine` (`COMPUTER USE` & `SPIDER`)**: Double-Wrapped Spatial Action Mediation (`Wrapper A` Grounding in $\le 0.40\ \mu\text{s}$ + `Wrapper B` Execution Assurance) with automatic off-screen pre-scroll and multi-step `SpatialActionPlan` execution.
-4. **`WaveScheduler` & `ToolOutputGovernor` (`THE HARNESS`)**: Dependency-aware topological execution wavefront partitioning read-parallelism and write-serialization across 29 built-in tools.
+4. **`WaveScheduler` & `ToolOutputGovernor` (`THE HARNESS`)**: Dependency-aware topological execution wavefront partitioning read-parallelism and write-serialization across 31 built-in tools (`tool_search` 8-slot LRU + `execute_tools` 32-step batch).
 
 ---
 
@@ -24,14 +24,14 @@ In **HEAV3NS-MICRO**, the operational substrate is anchored by four high-perform
 ```mermaid
 flowchart LR
   subgraph Primitives ["The Four Sovereign Substrate Primitives"]
-    ARENA["1. ArenaAllocator (REWIND)<br/>(16-MiB slab · O(1) rewind)"]
-    VFS["2. SessionVfs & Broccoli Store<br/>(Two-phase staging · Confidence calibration)"]
+    ARENA["1. ArenaAllocator & Workspace CAS (REWIND)<br/>(16-MiB slab · O(1) rewind · SHA-256 CAS)"]
+    VFS["2. SessionVfs, Model Catalog & Broccoli Store<br/>(Two-phase staging · Auto-refresh pricing)"]
     SPATIAL["3. Double-Wrapped Spatial Mediator<br/>(Wrapper A Grounding · Wrapper B Assurance)"]
-    WAVE["4. Wave Scheduler & Governor<br/>(29 tools · Read/Write wavefronts)"]
+    WAVE["4. Wave Scheduler & Governor<br/>(31 tools · Read/Write wavefronts)"]
   end
 
-  ARENA -->|"Zero-GC scratchpad"| ENGINE["AgentEngine & ComputerUseOrchestrator"]
-  VFS -->|"Reversible disk & learned patterns"| ENGINE
+  ARENA -->|"Zero-GC scratchpad & safe undo"| ENGINE["AgentEngine & ComputerUseOrchestrator"]
+  VFS -->|"Reversible disk & live model costs"| ENGINE
   SPATIAL -->|"Sub-µs grounded UI/DOM agency"| ENGINE
   WAVE -->|"Concurrent governed dispatch"| ENGINE
 ```

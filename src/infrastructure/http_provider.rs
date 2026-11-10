@@ -199,8 +199,12 @@ impl HttpProvider {
             || model_lower.starts_with("o3")
             || model_lower.starts_with("o4");
         let is_reasoning_or_modern = is_o_series
+            || model_lower.starts_with("gpt-6")
             || model_lower.starts_with("gpt-5")
             || model_lower.contains("terra")
+            || model_lower.contains("sol")
+            || model_lower.contains("luna")
+            || model_lower.contains("astra")
             || model_lower.contains("reasoning");
 
         let mut payload = json!({
@@ -220,7 +224,10 @@ impl HttpProvider {
         if !req.tools.is_empty() {
             payload["tools"] = Value::Array(req.tools.clone());
             payload["tool_choice"] = Value::String("auto".to_string());
-            if model_lower.contains("terra") || model_lower.starts_with("gpt-5") {
+            if model_lower.contains("terra")
+                || model_lower.starts_with("gpt-6")
+                || model_lower.starts_with("gpt-5")
+            {
                 payload["reasoning_effort"] = Value::String("none".to_string());
             }
         }

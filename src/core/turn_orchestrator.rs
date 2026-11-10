@@ -1,8 +1,9 @@
 // [LAYER: CORE]
 use crate::core::engine::AgentEngine;
 use crate::core::session_store::SessionStore;
-use crate::domain::interfaces::{IWorkspaceSnapshotCas, ProgressCallback};
-use crate::domain::pricing_and_taxonomy::{compute_retry_delay_ms, resolve_compatible_fallback_model, BillingMetering, ErrorCategory, ErrorEnvelope, ProviderTokenUsage};
+use crate::domain::interfaces::{IModelPricingRegistry, IWorkspaceSnapshotCas, ProgressCallback};
+use crate::domain::types::model_catalog::ModelPricingCatalog;
+use crate::domain::pricing_and_taxonomy::{compute_retry_delay_ms, resolve_compatible_fallback_model_with_catalog, select_auto_routed_model_with_catalog, AutoRouteDecision, BillingMetering, ErrorCategory, ErrorEnvelope, ProviderTokenUsage};
 use crate::domain::turn_receipt::{CommandRunReceipt, FileChangeReceipt, TurnReceipt};
 use crate::domain::types::messages::{Role, SessionMessage};
 use crate::domain::types::posture_types::RepoConstitution;
@@ -10,6 +11,7 @@ use crate::domain::types::progress::{EngineProgressMetadata, EngineProgressPhase
 use crate::domain::types::runtime::{AgentConfig, CancellationToken, EngineTickOutcome, ExecutionPosture};
 use crate::domain::types::tick_result::{ProviderError, ProviderRequest, ProviderResponse};
 use crate::infrastructure::http_provider::{probe_local_ollama_model, HttpProvider};
+use crate::infrastructure::pricing_updater::global_pricing_registry;
 use crate::plumbing::hash_and_math::now_ms;
 use crate::plumbing::text_tokens::{canonical_tool_name, estimate_text_tokens};
 use serde_json::{json, Value};
@@ -98,6 +100,26 @@ impl AgentEngine {
 
     pub async fn probe_ollama_default_model() -> Option<String> {
         probe_local_ollama_model().await
+    }
+
+    pub fn model_catalog_snapshot() -> ModelPricingCatalog {
+        global_pricing_registry().snapshot_catalog()
+    }
+
+    pub fn trigger_model_catalog_auto_refresh() {
+        global_pricing_registry().ensure_fresh_background();
+    }
+
+    pub async fn refresh_model_catalog() -> Result<ModelPricingCatalog, String> {
+        global_pricing_registry().refresh_now().await
+    }
+
+    pub fn route_turn_model(provider: &str, configured_model: &str, prompt: &str) -> AutoRouteDecision {
+        if !provider.eq_ignore_ascii_case("scripted") {
+            global_pricing_registry().ensure_fresh_background();
+        }
+        let catalog = global_pricing_registry().snapshot_catalog();
+        select_auto_routed_model_with_catalog(provider, configured_model, prompt, &catalog)
     }
 
     /// Hot-swaps the active provider, model, endpoint, and API key on `AgentEngine` while preserving KV-pin accounting.
@@ -255,10 +277,12 @@ impl AgentEngine {
         for attempt in 1..=max_attempts {
             let conn_id = format!("provider-r{round}-a{attempt}");
             if attempt >= 2 && !*is_fallback_model {
-                if let Some(fb) = resolve_compatible_fallback_model(
+                let catalog = global_pricing_registry().snapshot_catalog();
+                if let Some(fb) = resolve_compatible_fallback_model_with_catalog(
                     &cfg.provider,
                     active_model,
                     cfg.fallback_model.as_deref(),
+                    &catalog,
                 ) {
                     *active_model = fb;
                     *is_fallback_model = true;
@@ -475,7 +499,8 @@ impl AgentEngine {
         }
 
         let approvals = self.tools().turn_approvals.lock().unwrap().clone();
-        let billing = BillingMetering::evaluate(provider_name, active_model, api_endpoint, &usage);
+        let catalog = global_pricing_registry().snapshot_catalog();
+        let billing = BillingMetering::evaluate_with_catalog(provider_name, active_model, api_endpoint, &usage, &catalog);
         let outcome_slug = match outcome {
             EngineTickOutcome::Completed => "completed",
             EngineTickOutcome::Cancelled => "cancelled",

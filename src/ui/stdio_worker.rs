@@ -122,7 +122,12 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>) {
                 let seq = event_seq.fetch_add(1, Ordering::SeqCst) + 1;
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id, "runtime": "heav3ns-micro", "seq": seq, "type": "models.changed", "payload": catalog }));
             }
-            "models.discover" => {
+            "models.discover" | "models.refresh" => {
+                if method == "models.refresh" || params.get("refresh").and_then(|v| v.as_bool()) == Some(true) {
+                    let _ = AgentEngine::refresh_model_catalog().await;
+                } else {
+                    AgentEngine::trigger_model_catalog_auto_refresh();
+                }
                 let prov = {
                     let st = state.lock().unwrap();
                     params.get("provider").and_then(|v| v.as_str()).unwrap_or(&st.active_provider).to_string()

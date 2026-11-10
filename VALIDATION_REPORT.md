@@ -11,11 +11,11 @@ This document records the verification evidence, 5-zone architectural decomposit
 
 - **Target Root**: `/Users/bozoegg/Desktop/HEAV3NS-MICRO`
 - **Theme**: `strict` (`scanAgentConfig: true`)
-- **Total Files Scanned**: `307` (`100%` `[LAYER]` tagged across Rust, Swift, and documentation)
-- **Rust Substrate Zone Distribution (`src/` — 80 Rust modules)**:
+- **Total Files Scanned**: `309` (`100%` `[LAYER]` tagged across Rust, Swift, and documentation)
+- **Rust Substrate Zone Distribution (`src/` — 82 Rust modules)**:
   - `PLUMBING` (`src/plumbing/`): `12` modules (`hash_and_math.rs`, `text_tokens.rs`, `json_repair.rs`, `secret_redactor.rs`, `seatbelt_profile.rs`, `shell_guard.rs`, `fuzzy_patch.rs`, `vision_and_dom.rs`, `spatial_geometry.rs`, `environmental_diff.rs`, `display_telemetry.rs`, `mod.rs`)
-  - `DOMAIN` (`src/domain/`): `30` modules (`interfaces/mod.rs`, `types/messages.rs`, `types/runtime.rs`, `types/posture_types.rs`, `types/progress.rs`, `types/tick_result.rs`, `types/vfs_types.rs`, `types/tool_types.rs`, `types/tool_schedule.rs`, `types/skill_types.rs`, `types/computer_use_types.rs`, `types/spatial_types.rs`, `types/environmental_types.rs`, `types/swarm_intelligence_types.rs`, `types/learned_knowledge_types.rs`, `types/mod.rs`, `prompt_spec.rs`, `pricing_and_taxonomy.rs`, `prefix_and_manifest.rs`, `turn_receipt.rs`, `arena.rs`, `memory.rs`, `compaction.rs`, `swarm.rs`, `tool_parser.rs`, `computer_use.rs`, `skill_tree.rs`, `spatial_action.rs`, `spatial_mediator.rs`, `mod.rs`)
-  - `INFRASTRUCTURE` (`src/infrastructure/`): `10` modules (`http_provider.rs`, `scripted_provider.rs`, `vfs_store.rs`, `workspace_cas.rs`, `transaction_journal.rs`, `behavioral_store.rs`, `shell_runner.rs`, `fs_tools.rs`, `search_tools.rs`, `mod.rs`)
+  - `DOMAIN` (`src/domain/`): `31` modules (`interfaces/mod.rs`, `types/model_catalog.rs`, `types/messages.rs`, `types/runtime.rs`, `types/posture_types.rs`, `types/progress.rs`, `types/tick_result.rs`, `types/vfs_types.rs`, `types/tool_types.rs`, `types/tool_schedule.rs`, `types/skill_types.rs`, `types/computer_use_types.rs`, `types/spatial_types.rs`, `types/environmental_types.rs`, `types/swarm_intelligence_types.rs`, `types/learned_knowledge_types.rs`, `types/mod.rs`, `prompt_spec.rs`, `pricing_and_taxonomy.rs`, `prefix_and_manifest.rs`, `turn_receipt.rs`, `arena.rs`, `memory.rs`, `compaction.rs`, `swarm.rs`, `tool_parser.rs`, `computer_use.rs`, `skill_tree.rs`, `spatial_action.rs`, `spatial_mediator.rs`, `mod.rs`)
+  - `INFRASTRUCTURE` (`src/infrastructure/`): `11` modules (`http_provider.rs`, `pricing_updater.rs`, `scripted_provider.rs`, `vfs_store.rs`, `workspace_cas.rs`, `transaction_journal.rs`, `behavioral_store.rs`, `shell_runner.rs`, `fs_tools.rs`, `search_tools.rs`, `mod.rs`)
   - `CORE` (`src/core/`): `20` modules (`engine.rs`, `turn_orchestrator.rs`, `batch_executor.rs`, `context_inspector.rs`, `computer_use_orchestrator.rs`, `spatial_engine.rs`, `slash_and_swarm.rs`, `session_store.rs`, `tool_governor.rs`, `tool_specs.rs`, `tool_registry.rs`, `request_queue.rs`, `flight_runner.rs`, `benchmark_runner.rs`, `substrate_tests.rs`, `spatial_tests.rs`, `computer_use_tests.rs`, `zenith_tests.rs`, `codewhale_zenith_tests.rs`, `mod.rs`)
   - `UI` (`src/ui/`, `src/lib.rs`, `src/main.rs`): `8` Rust modules (`ui/cli_presenter.rs`, `ui/onboarding.rs`, `ui/stdio_worker.rs`, `ui/worker_handlers.rs`, `ui/rpc_dispatch.rs`, `ui/mod.rs`, `lib.rs`, `main.rs`) + Native macOS AppKit IDE (`native/`)
 - **Blocking Violations**: `0`
@@ -24,7 +24,7 @@ This document records the verification evidence, 5-zone architectural decomposit
 - **Fat Module Warnings (`> 800` lines, `SPI-203`)**: `0` (max `.rs`/`.swift` module length: `768` lines)
 - **Domain Class Density Warnings (`> 3` structs/file, `SPI-203`)**: `0`
 - **Cross-Zone Symbol Resonance (`SPI-106`)**: `0`
-- **Implicit Interface Breaches (`SPI-107`)**: `0` (backed by `41` formal `I<Name>` traits in `src/domain/`)
+- **Implicit Interface Breaches (`SPI-107`)**: `0` (backed by `64` formal `I<Name>` traits across `src/`)
 - **Orphaned Modules (`SPI-204`)**: `0`
 - **Stability Index ($SI$)**: **`100% — SOVEREIGN`**
 - **Build Health**: **`100% [Grade: A+ — SOVEREIGN]`** (`Architectural Optimizations: None required. Graph is in optimal equilibrium.`)

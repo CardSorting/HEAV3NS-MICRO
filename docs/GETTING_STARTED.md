@@ -50,7 +50,7 @@ cargo run -- --smoke
 
 Expected output:
 ```text
-running 8 tests
+running 77 tests
 test core::substrate_tests::tests::test_arena_allocator_alignment_and_o1_rewind ... ok
 test core::substrate_tests::tests::test_wave_scheduler_partitioning ... ok
 test core::substrate_tests::tests::test_self_healing_parser_and_streaming_dedup ... ok
@@ -59,8 +59,12 @@ test core::substrate_tests::tests::test_skills_ingestor_and_topological_swarm_ex
 test core::substrate_tests::tests::test_secret_redactor_and_sensitive_path_guard ... ok
 test core::substrate_tests::tests::test_deterministic_patch_engine_v4a_fuzzy_heal_and_symbols ... ok
 test core::substrate_tests::tests::test_agent_flight_suite_passes_100_percent ... ok
+test core::codewhale_zenith_tests::tests::test_seatbelt_sbpl_generation_and_credential_scopes ... ok
+test core::codewhale_zenith_tests::tests::test_execution_posture_and_constitution_plan_enforcement ... ok
+test core::codewhale_zenith_tests::tests::test_pure_rust_cas_undo_and_would_block ... ok
+test core::codewhale_zenith_tests::tests::test_tool_search_lru_and_declarative_batch_execution ... ok
 
-test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 77 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 ---
@@ -97,7 +101,7 @@ cd ..
 Expected output:
 ```text
 Test Suite 'All tests' passed at ...
-	 Executed 315 tests, with 6 tests skipped and 0 failures (0 unexpected)
+	 Executed 321 tests, with 0 failures (0 unexpected)
 ```
 
 ---
@@ -116,13 +120,19 @@ Or start the interactive REPL:
 cargo run
 ```
 
-Inside the REPL, you can explore the 19 built-in slash commands:
+Inside the REPL, explore the 35 built-in slash commands:
 - `/help`: Show command documentation
+- `/mode` or `/posture`: Cycle through the 5 execution postures (`Ask -> AcceptEdits -> Plan -> AutoReview -> FullAccess`)
+- `/preview-request`: Inspect exact canonical byte sum and outbound request manifest
+- `/receipts`: Inspect auditable verification receipts (`heav3ns.receipt/v1`) from recent turns
+- `/models`: View live frontier model catalog and pricing (`cargo run -- models --refresh`)
 - `/status`: Display session token count, arena memory usage, and authority level
 - `/context`: Visual 20-cell token budget HUD and tool routing breakdown
 - `/prompt`: Inspect deterministic KV-cached static prefix or profile outputs
 - `/tools`: Display active core vs. on-demand specialist tools and token savings
 - `/vfs`: List staged virtual file system overlays
+- `/undo`: Safe, non-Git post-turn undo backed by pure-Rust SHA-256 CAS
+- `/diff`: Renders non-destructive diff against pre-turn CAS snapshot
 - `/commit`: Commit staged VFS overlays to disk
 - `/rewind`: Roll back the last recorded file transaction
 - `/compact`: Trigger explicit session memory compaction

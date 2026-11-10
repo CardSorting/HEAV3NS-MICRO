@@ -1,15 +1,16 @@
 <!-- [LAYER: UI] -->
-# Tool System & Execution Wavefront (`29` Native Tools)
+# Tool System & Execution Wavefront (`31` Native Tools)
 
 <p align="center">
   <a href="README.md">Wiki Hub</a> ·
   <a href="../api/cli.md">CLI Reference</a> ·
   <a href="../PORTABLE_TRINITY.md">Substrate Primitives</a> ·
   <a href="../adr/0005-dag-wave-scheduler-concurrency.md">ADR-0005</a> ·
-  <a href="../adr/0011-sovereign-intelligence-and-spatial-computer-use.md">ADR-0011</a>
+  <a href="../adr/0011-sovereign-intelligence-and-spatial-computer-use.md">ADR-0011</a> ·
+  <a href="../adr/0014-codewhale-distillation-posture-cas-and-receipts.md">ADR-0014</a>
 </p>
 
-Architecture of the **29 native agent tools** declared in [`src/core/tool_specs.rs`](../../src/core/tool_specs.rs) and the concurrency wavefront managed by [`ToolRegistry::partition_waves`](../../src/core/tool_registry.rs).
+Architecture of the **31 native agent tools** declared in [`src/core/tool_specs.rs`](../../src/core/tool_specs.rs) and the concurrency wavefront managed by [`ToolRegistry::partition_waves`](../../src/core/tool_registry.rs).
 
 ---
 
@@ -36,7 +37,7 @@ sequenceDiagram
 
 ---
 
-## 2. The 29 Native Tools Catalog (`src/core/tool_specs.rs`)
+## 2. The 31 Native Tools Catalog (`src/core/tool_specs.rs`)
 
 ### A. Filesystem & VFS Operations (`12` Tools)
 1. `view_file`: Read file contents with line range pagination. (ReadOnly)
@@ -59,7 +60,7 @@ sequenceDiagram
 16. `get_workspace_diff`: Unified diff of current workspace changes. (ReadOnly)
 
 ### C. Shell Execution & Journal Rewind (`2` Tools)
-17. `run_command`: Execute shell command with timeout, PTY ANSI responder, and `ShellCommandGuard` / `SafetyPolicy` defenses (`ADR-0015` compound heredoc file-write blocks and `ADR-0016` terminal file dump blocks with UTF-8 preservation). (Mutating)
+17. `run_command`: Execute shell command with timeout, PTY ANSI responder, and `ShellCommandGuard` / `SafetyPolicy` defenses (`ADR-0013` compound heredoc file-write blocks and `ADR-0013` terminal file dump blocks with UTF-8 preservation). (Mutating)
 18. `rollback_last_mutation`: Undo the most recent file mutation via `TransactionJournal`. (Mutating)
 
 ### D. Memory, Spill Recovery & Skills (`5` Tools)
@@ -69,20 +70,24 @@ sequenceDiagram
 22. `list_skills`: Discover workspace `SKILL.md` manifests. (ReadOnly)
 23. `use_skill`: Load full instructions for a named skill. (ReadOnly)
 
-### E. Embodied Computer Use, Spatial Mediation, Vision & Swarm (`6` Tools)
-24. `computer_use`: Set-of-Marks GUI interaction (`capture`, `click`, `type`, `key`, `scroll`, `orchestrate` 9-stage closed loop, `observe`, `interpret`, `consult_swarm`, `undo`, `redo`, `query_ledger`, `audit_health`). (Mutating)
-25. `browser_use`: Zero-trust DOM snapshotter (`snapshot`, `navigate` with SSRF/IMDSv2 guard, `click`, `type`, `evaluate`). (Mutating)
-26. `vision_inspect`: Binary image header codec (`PNG`, `JPEG`, `GIF`, `WebP`, `BMP`, `SVG`) and synthetic SVG/BMP generator. (ReadOnly)
-27. `skill_forge`: Evolutionary Skill Tree & Soul Drop Vault (`list_dag`, `forge`, `apply_pack`, `clone`, `lint`, `autofix`, `sync_vault`, `export`, `ingest`, `soul_status`). (Mutating)
-28. `engage_swarm`: `The Legion` 7-specialist topological task classifier (`classify_task_for_legion`). (ReadOnly)
-29. `spatial_interact`: First-class Double-Wrapped Spatial Action engine (`ground`, `execute` with off-screen auto-scroll, `plan`, `execute_plan`, `query` directional relationships, `reconcile` DOM+SoM, `audit`, `orchestrate`). (Mutating)
+### E. Dynamic Discovery & Batching (`2` Tools)
+24. `tool_search`: Fuzzy search and unlock deferred specialist tool schemas with an 8-slot LRU bound (`MAX_UNLOCKED_DEFERRED_TOOLS = 8`). (ReadOnly)
+25. `execute_tools`: Declarative multi-tool batch execution with sequential execution up to 32 steps (`MAX_DECLARATIVE_BATCH_STEPS = 32`). (Mutating)
+
+### F. Embodied Computer Use, Spatial Mediation, Vision & Swarm (`6` Tools)
+26. `computer_use`: Set-of-Marks GUI interaction (`capture`, `click`, `type`, `key`, `scroll`, `orchestrate` 9-stage closed loop, `observe`, `interpret`, `consult_swarm`, `undo`, `redo`, `query_ledger`, `audit_health`). (Mutating)
+27. `browser_use`: Zero-trust DOM snapshotter (`snapshot`, `navigate` with SSRF/IMDSv2 guard, `click`, `type`, `evaluate`). (Mutating)
+28. `vision_inspect`: Binary image header codec (`PNG`, `JPEG`, `GIF`, `WebP`, `BMP`, `SVG`) and synthetic SVG/BMP generator. (ReadOnly)
+29. `skill_forge`: Evolutionary Skill Tree & Soul Drop Vault (`list_dag`, `forge`, `apply_pack`, `clone`, `lint`, `autofix`, `sync_vault`, `export`, `ingest`, `soul_status`). (Mutating)
+30. `engage_swarm`: `The Legion` 7-specialist topological task classifier (`classify_task_for_legion`). (ReadOnly)
+31. `spatial_interact`: First-class Double-Wrapped Spatial Action engine (`ground`, `execute` with off-screen auto-scroll, `plan`, `execute_plan`, `query` directional relationships, `reconcile` DOM+SoM, `audit`, `orchestrate`). (Mutating)
 
 ---
 
 ## 3. Sticky Dynamic Tool Schema Routing & Token Optimization
 
-Rather than transmitting all 29 tool schemas (`~4,278` tokens) unconditionally on every turn, [`ToolRegistry::select_tool_schemas_for`](../../src/core/tool_registry.rs) partitions tools into **Core Active** and **On-Demand Specialist** sets:
+Rather than transmitting all 31 tool schemas unconditionally on every turn, [`ToolRegistry::select_tool_schemas_for`](../../src/core/tool_registry.rs) partitions tools into **Core Active** and **On-Demand Specialist** sets:
 - **Core Active Subset (`15` tools, `~1,510` tokens)**: `view_file`, `write_file`, `replace_file_content`, `multi_replace_file_content`, `apply_unified_diff`, `delete_file`, `list_dir`, `find_files`, `grep_search`, `search_symbols`, `run_command`, `rollback_last_mutation`, `save_memory`, `search_memory`, `retrieve_spill_content`.
-- **On-Demand Specialist Subset (`14` tools)**: `edit_file_anchored`, `move_file`, `file_info`, `directory_tree`, `batch_replace_regex`, `get_workspace_diff`, `list_skills`, `use_skill`, `computer_use`, `browser_use`, `vision_inspect`, `skill_forge`, `engage_swarm`, `spatial_interact`.
-- **Sticky Session Retention**: Specialist tools unlock automatically when user prompts or prior turns reference GUI, browser, vision, skills, or swarm capabilities, and remain unlocked for the duration of the task so multi-step workflows never suffer amnesia. This saves **`2,768` tokens (`64.7%`)** per coding turn.
+- **On-Demand Specialist Subset (`16` tools)**: `edit_file_anchored`, `move_file`, `file_info`, `directory_tree`, `batch_replace_regex`, `get_workspace_diff`, `list_skills`, `use_skill`, `tool_search`, `execute_tools`, `computer_use`, `browser_use`, `vision_inspect`, `skill_forge`, `engage_swarm`, `spatial_interact`.
+- **Sticky Session Retention**: Specialist tools unlock automatically when user prompts or prior turns reference GUI, browser, vision, skills, or swarm capabilities, and remain unlocked for the duration of the task so multi-step workflows never suffer amnesia.
 - **Specialist Scope Isolation**: When executing subagent tasks in `The Legion` swarm, `engage_swarm` is automatically stripped from exposed schemas and blocked by [`AgentEngine::without_swarm_delegation`](../../src/core/engine.rs) to prevent runaway recursive delegation.

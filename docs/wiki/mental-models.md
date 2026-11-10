@@ -62,11 +62,29 @@ Intelligence emerges from the interplay of perception, memory, and collective de
 
 ---
 
-## 7. The Five Sovereign Rooms (Joyzoning)
+## 7. The 5-Stop Posture Dial & KV-Cache Pinning (`THE HARNESS`)
+
+Toggling an agent between planning and execution shouldn't reset the model's memory or discard the prompt's KV cache.
+- The 5-stop dial (`Ask -> AcceptEdits -> Plan -> AutoReview -> FullAccess`, stepped with `Shift+Tab`) acts as a central execution gate inside `evaluate_tool_posture`.
+- In `Plan` mode, mutating tool calls are blocked at the engine layer *without* mutating the wire `tools[]` schema.
+- System prompt updates are appended as `<context_update>` blocks rather than mutating `Role::System`. The static prefix remains 100% bit-for-bit identical (`PrefixStabilityTracker`), guaranteeing full cache hits on provider hardware.
+
+---
+
+## 8. The Content-Addressable Undo Time Capsule (`REWIND`)
+
+When the agent completes a turn, pure-Rust SHA-256 [`WorkspaceSnapshotCas`](../../src/infrastructure/workspace_cas.rs) captures the repository's exact state:
+- If the operator wants to rewind changes, `/undo` checks disk files against the post-turn snapshot.
+- If the operator made manual edits after the turn, `/undo` returns `WouldBlock` rather than blindly destroying work.
+- It operates completely independently of Git, providing instant diffing and rollback in any workspace directory.
+
+---
+
+## 9. The Five Sovereign Rooms (Joyzoning)
 
 The repository is partitioned into five rooms with strict one-way doors:
-1. **`PLUMBING`** (`10` modules): Stateless leaf algorithms. Reaches into nothing.
-2. **`DOMAIN`** (`25` modules): Pure entities, behavioral models (`UiElement`, `VirtualWindow`), and `39` formal `I<Name>` traits. Zero I/O.
-3. **`INFRASTRUCTURE`** (`9` modules): Concrete HTTP, VFS, Journal, and Broccoli Store adapters.
-4. **`CORE`** (`14` modules): Orchestrators (`AgentEngine`, `ComputerUseOrchestrator`, `SpatialInteractionEngine`, `ToolRegistry`).
-5. **`UI`** (`6` Rust modules + `native/` AppKit IDE): CLI, `"v": 1` stdio JSON-RPC worker, and `HEAV3NS-CODE` desktop station.
+1. **`PLUMBING`** (`12` modules): Stateless leaf algorithms. Reaches into nothing.
+2. **`DOMAIN`** (`31` modules): Pure entities, behavioral models, auto-refreshing model catalog, and `64` formal `I<Name>` traits. Zero I/O.
+3. **`INFRASTRUCTURE`** (`11` modules): Concrete HTTP, ModelPricingRegistry, VFS, WorkspaceSnapshotCas, Journal, and Broccoli Store adapters.
+4. **`CORE`** (`20` modules): Orchestrators (`AgentEngine`, `ComputerUseOrchestrator`, `SpatialInteractionEngine`, `ToolRegistry`, `TurnOrchestrator`).
+5. **`UI`** (`8` Rust modules + `native/` AppKit IDE): CLI, `"v": 1` multiplexed stdio JSON-RPC worker, and `HEAV3NS-CODE` desktop station.

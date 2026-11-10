@@ -491,6 +491,33 @@ impl AgentEngine {
                 serde_json::to_string(&sess.compact_session(self.compactor(), &policy)).unwrap_or_default()
             }
             "/model" => self.inspect_or_switch_model(arg),
+            "/models" => {
+                AgentEngine::trigger_model_catalog_auto_refresh();
+                let cat = AgentEngine::model_catalog_snapshot();
+                let prov = self.config_snapshot().provider;
+                let filter = arg.to_ascii_lowercase();
+                let items: Vec<Value> = if !filter.is_empty() && filter != "refresh" {
+                    cat.entries
+                        .values()
+                        .filter(|e| e.id.contains(&filter))
+                        .take(15)
+                        .map(|e| json!({ "id": e.id, "ctx": e.context_length, "inPerM": e.input_per_million, "outPerM": e.output_per_million, "cachePerM": e.cached_per_million }))
+                        .collect()
+                } else {
+                    cat.newest_models_for_provider(&prov, 10)
+                        .into_iter()
+                        .map(|e| json!({ "id": e.id, "ctx": e.context_length, "inPerM": e.input_per_million, "outPerM": e.output_per_million, "cachePerM": e.cached_per_million }))
+                        .collect()
+                };
+                serde_json::to_string_pretty(&json!({
+                    "source": cat.source,
+                    "fetchedAtMs": cat.fetched_at_ms,
+                    "totalModels": cat.entries.len(),
+                    "provider": prov,
+                    "models": items
+                }))
+                .unwrap_or_default()
+            }
             "/snapshot" => {
                 let snap = self.create_snapshot();
                 format!(

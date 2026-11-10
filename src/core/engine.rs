@@ -6,7 +6,7 @@ use crate::domain::compaction::CompactionPolicy;
 use crate::domain::interfaces::{ILlmProvider, IWorkspaceSnapshotCas, ProgressCallback};
 use crate::domain::memory::{GameStateSnapshot, MemoryStore};
 use crate::domain::prefix_and_manifest::{PrefixFingerprint, PrefixStabilityTracker};
-use crate::domain::pricing_and_taxonomy::{select_auto_routed_model, ProviderTokenUsage, CREDENTIAL_REJECTED_UNSENT_CODE};
+use crate::domain::pricing_and_taxonomy::{ProviderTokenUsage, CREDENTIAL_REJECTED_UNSENT_CODE};
 use crate::domain::turn_receipt::TurnReceipt;
 use crate::domain::types::messages::{Role, SessionMessage};
 use crate::domain::types::progress::{EngineProgressEvent, EngineProgressMetadata, EngineProgressPhase, EngineProgressStatus, ToolExecutionRecord};
@@ -366,7 +366,7 @@ impl AgentEngine {
             .ok();
 
         let max_rounds = cfg.max_tool_rounds.unwrap_or(32).max(1);
-        let auto_decision = select_auto_routed_model(&cfg.provider, &cfg.model_name, &input.prompt);
+        let auto_decision = Self::route_turn_model(&cfg.provider, &cfg.model_name, &input.prompt);
         let mut active_model = auto_decision.selected_model;
         let mut is_fallback_model = false;
         let mut all_tool_results: Vec<ToolExecutionRecord> = Vec::new();

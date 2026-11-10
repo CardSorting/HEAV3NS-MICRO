@@ -17,12 +17,12 @@ Use this lookup table whenever you modify code in `src/` or `native/` to locate 
 | `src/plumbing/environmental_diff.rs` | [`doc.md`](../doc.md) (`SPIDER`) · [`docs/papers/ascendant-intelligence.md`](papers/ascendant-intelligence.md) |
 | `src/plumbing/display_telemetry.rs` | [`docs/architecture/current.md`](architecture/current.md) · [`docs/PROJECT_MAP.md`](PROJECT_MAP.md) |
 
-## Domain & Contracts (`src/domain/` — 30 Modules)
+## Domain & Contracts (`src/domain/` — 31 Modules)
 
 | Source | Documentation |
 | :--- | :--- |
 | `src/domain/interfaces/mod.rs` | [`docs/CONSTITUTION.md`](CONSTITUTION.md) · [`docs/adr/0007-contractual-sovereignty-and-i-interfaces.md`](adr/0007-contractual-sovereignty-and-i-interfaces.md) · [`docs/api/public-api.md`](api/public-api.md) |
-| `src/domain/types/*.rs` (`15` modules incl. `posture_types.rs`) | [`docs/PROJECT_MAP.md`](PROJECT_MAP.md) · [`docs/adr/0014-codewhale-distillation-posture-cas-and-receipts.md`](adr/0014-codewhale-distillation-posture-cas-and-receipts.md) |
+| `src/domain/types/*.rs` (`16` modules incl. `model_catalog.rs` & `posture_types.rs`) | [`docs/PROJECT_MAP.md`](PROJECT_MAP.md) · [`docs/adr/0014-codewhale-distillation-posture-cas-and-receipts.md`](adr/0014-codewhale-distillation-posture-cas-and-receipts.md) |
 | `src/domain/prompt_spec.rs`, `prefix_and_manifest.rs`, `pricing_and_taxonomy.rs`, `turn_receipt.rs` | [`docs/adr/0012-lean-system-prompt-and-kv-cache-prefix-determinism.md`](adr/0012-lean-system-prompt-and-kv-cache-prefix-determinism.md) · [`docs/adr/0014-codewhale-distillation-posture-cas-and-receipts.md`](adr/0014-codewhale-distillation-posture-cas-and-receipts.md) |
 | `src/domain/arena.rs` | [`doc.md`](../doc.md) (`REWIND`) · [`docs/adr/0002-arena-allocator-and-o1-tick-rewind.md`](adr/0002-arena-allocator-and-o1-tick-rewind.md) |
 | `src/domain/memory.rs` | [`doc.md`](../doc.md) (`BROCCOLI`) · [`docs/kb/knowledge-handling-architecture.md`](kb/knowledge-handling-architecture.md) |
@@ -33,11 +33,11 @@ Use this lookup table whenever you modify code in `src/` or `native/` to locate 
 | `src/domain/skill_tree.rs` | [`doc.md`](../doc.md) (`BROCCOLI`) · [`docs/papers/ascendant-intelligence.md`](papers/ascendant-intelligence.md) |
 | `src/domain/spatial_action.rs` & `spatial_mediator.rs` | [`docs/papers/whitepaper.md`](papers/whitepaper.md) · [`docs/adr/0011-sovereign-intelligence-and-spatial-computer-use.md`](adr/0011-sovereign-intelligence-and-spatial-computer-use.md) |
 
-## Infrastructure Adapters (`src/infrastructure/` — 10 Modules)
+## Infrastructure Adapters (`src/infrastructure/` — 11 Modules)
 
 | Source | Documentation |
 | :--- | :--- |
-| `src/infrastructure/http_provider.rs` | [`docs/architecture/current.md`](architecture/current.md) · [`README.md`](../README.md) |
+| `src/infrastructure/http_provider.rs` & `pricing_updater.rs` | [`docs/architecture/current.md`](architecture/current.md) · [`docs/adr/0014-codewhale-distillation-posture-cas-and-receipts.md`](adr/0014-codewhale-distillation-posture-cas-and-receipts.md) |
 | `src/infrastructure/scripted_provider.rs` | [`VALIDATION_REPORT.md`](../VALIDATION_REPORT.md) · [`docs/adr/0006-stdio-jsonl-and-flight-test-harness.md`](adr/0006-stdio-jsonl-and-flight-test-harness.md) |
 | `src/infrastructure/vfs_store.rs` & `workspace_cas.rs` | [`doc.md`](../doc.md) (`REWIND`) · [`docs/adr/0004-two-phase-vfs-staging-and-transaction-journal.md`](adr/0004-two-phase-vfs-staging-and-transaction-journal.md) · [`docs/adr/0014-codewhale-distillation-posture-cas-and-receipts.md`](adr/0014-codewhale-distillation-posture-cas-and-receipts.md) |
 | `src/infrastructure/transaction_journal.rs` | [`doc.md`](../doc.md) (`REWIND`) · [`docs/playbooks/vfs-commit-conflict-and-journal-rollback.md`](playbooks/vfs-commit-conflict-and-journal-rollback.md) |

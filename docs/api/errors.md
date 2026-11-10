@@ -39,21 +39,27 @@ flowchart TD
 
 ---
 
-## 3. Provider Errors (`src/domain/types/tick_result.rs`)
+## 3. Provider Errors & Error Taxonomy (`src/domain/pricing_and_taxonomy.rs`)
 
 | Code / Variant | Description | Remediation |
 | :--- | :--- | :--- |
+| `ErrorCategory::Budget` | HTTP 402 / `insufficient_quota`. Marked non-recoverable with 0 retries. | Refill provider account credits or switch to economy/local model. |
+| `ErrorCategory::RateLimit` | HTTP 429 status. Evaluated with jittered exponential backoff delay. | Wait for backoff window or switch model tier. |
+| `llm_auth_rejected_unsent` (`CREDENTIAL_REJECTED_UNSENT_CODE`) | Request blocked prior to sending due to missing or invalid credentials. | Reconnect provider API key in AppKit composer or export environment variable. |
 | `ProviderError::Authentication` | Invalid or missing API key in environment (`OPENAI_API_KEY`, etc.). | Export the required credential variable. |
-| `ProviderError::RateLimited` | Provider responded with HTTP 429 status. | Exponential backoff is triggered automatically; adjust quota or switch providers. |
 | `ProviderError::MalformedResponse` | Upstream provider emitted non-JSON or unsupported envelope. | Handled automatically by self-healing parser; inspect raw debug logs. |
 | `ProviderError::Timeout` | Provider request exceeded configured timeout duration. | Check network connectivity or provider service status. |
 
 ---
 
-## 4. VFS & Staging Errors (`src/infrastructure/vfs_store.rs`)
+## 4. CAS Undo, VFS & Staging Errors (`src/infrastructure/workspace_cas.rs`, `src/infrastructure/vfs_store.rs`)
 
 | Code / Variant | Description | Remediation |
 | :--- | :--- | :--- |
+| `UndoError::WouldBlock` | User or external process modified workspace file after turn finished. | Safe guard against clobbering user work. Review manual diff or pass `--force`. |
+| `UndoError::NoSnapshots` | No pre/post turn CAS trees found for the active session. | Ensure turn was executed and recorded in `.heav3ns/cas/`. |
+| `FileReadTracker::ReadBeforeWrite` | Mutating tool attempted write to file without reading current contents. | Read file before editing to ensure context coherence. |
+| `FileReadTracker::StaleExternalModification` | File modified on disk externally after initial read. | Re-read file to synchronize external edits before writing. |
 | `VfsBaselineMismatch` | Target file was modified on disk by an external process between staging and commit. | Review conflicting changes; re-read target file and re-stage overlay. See [PB-04](../playbooks/vfs-commit-conflict-and-journal-rollback.md). |
 | `StagingConflict` | Multiple mutating tools staged conflicting hunks for the same file in the same turn. | Ensure wave scheduler partitions conflicting write tools. |
 | `JournalRollbackFailed` | The reverse patch could not be applied cleanly during transaction rollback. | Inspect file manually or restore from git snapshot. |

@@ -234,7 +234,7 @@ impl Default for AgentConfig {
         Self {
             provider: "openai".to_string(),
             model_name: "gpt-5.6-terra".to_string(),
-            fallback_model: Some("gpt-4o-mini".to_string()),
+            fallback_model: Some("gpt-6-luna".to_string()),
             system_prompt: DEFAULT_SYSTEM_PROMPT.to_string(),
             max_turns: 40,
             max_tool_rounds: Some(32),

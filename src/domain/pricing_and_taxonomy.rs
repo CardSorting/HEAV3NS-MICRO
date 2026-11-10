@@ -1,4 +1,5 @@
 // [LAYER: DOMAIN]
+use crate::domain::types::model_catalog::ModelPricingCatalog;
 use crate::plumbing::hash_and_math::fnv1a_32;
 use serde::{Deserialize, Serialize};
 
@@ -50,7 +51,21 @@ pub enum BillingMetering {
 }
 
 impl BillingMetering {
+    /// Evaluates token billing against the embedded 2026 frontier baseline (pure zero-I/O entrypoint).
     pub fn evaluate(provider: &str, model: &str, endpoint: &str, usage: &ProviderTokenUsage) -> Self {
+        let baseline = ModelPricingCatalog::embedded_baseline();
+        Self::evaluate_with_catalog(provider, model, endpoint, usage, &baseline)
+    }
+
+    /// Evaluates token billing against a live/cached [`ModelPricingCatalog`] (`https://openrouter.ai/api/v1/models`).
+    /// Unrecognized models strictly return [`BillingMetering::Unknown`] (`"unknown"`), never `$0.0000`.
+    pub fn evaluate_with_catalog(
+        provider: &str,
+        model: &str,
+        endpoint: &str,
+        usage: &ProviderTokenUsage,
+        catalog: &ModelPricingCatalog,
+    ) -> Self {
         let p = provider.trim().to_ascii_lowercase();
         let m = model.trim().to_ascii_lowercase();
         let ep = endpoint.trim().to_ascii_lowercase();
@@ -58,8 +73,7 @@ impl BillingMetering {
         if p == "ollama"
             || p.contains("apple")
             || m.starts_with("apple-")
-            || m.starts_with("llama")
-            || m.starts_with("qwen")
+            || m.ends_with(":local")
             || ep.contains("127.0.0.1:11434")
             || ep.contains("localhost:11434")
         {
@@ -69,37 +83,13 @@ impl BillingMetering {
             return Self::Subscription;
         }
 
-        let quote: Option<(f64, f64, f64)> = if m.contains("gpt-4o-mini") || m.contains("gpt-4.1-mini") {
-            Some((0.15, 0.60, 0.075))
-        } else if m.contains("gpt-4.1-nano") {
-            Some((0.10, 0.40, 0.025))
-        } else if m.contains("gpt-4o") || m.contains("gpt-4.1") || m.contains("gpt-5") {
-            Some((2.50, 10.00, 1.25))
-        } else if m.starts_with("o3-mini") || m.starts_with("o4-mini") {
-            Some((1.10, 4.40, 0.275))
-        } else if m.starts_with("o1") || m.starts_with("o3") {
-            Some((10.00, 40.00, 2.50))
-        } else if m.contains("claude-opus") {
-            Some((15.00, 75.00, 1.50))
-        } else if m.contains("claude-sonnet") || m.contains("claude-3-5-sonnet") || m.contains("claude-3-7-sonnet") || m.contains("claude-4-sonnet") {
-            Some((3.00, 15.00, 0.30))
-        } else if m.contains("claude-haiku") || m.contains("claude-3-5-haiku") {
-            Some((0.80, 4.00, 0.08))
-        } else if m.contains("deepseek-reasoner") || m.contains("deepseek-r1") {
-            Some((0.55, 2.19, 0.14))
-        } else if m.contains("deepseek") {
-            Some((0.27, 1.10, 0.07))
-        } else if m.contains("gemini-2.5-pro") || m.contains("gemini-1.5-pro") {
-            Some((1.25, 10.00, 0.31))
-        } else if m.contains("gemini") && m.contains("flash") {
-            Some((0.15, 0.60, 0.0375))
-        } else {
-            None
-        };
-
-        let Some((in_rate, out_rate, cache_rate)) = quote else {
+        let Some(entry) = catalog.lookup(provider, model) else {
             return Self::Unknown;
         };
+
+        let in_rate = entry.input_per_million;
+        let out_rate = entry.output_per_million;
+        let cache_rate = entry.cached_per_million;
 
         let uncached_in = usage.prompt_tokens.saturating_sub(usage.cached_prompt_tokens);
         let raw_usd = (uncached_in as f64 * in_rate / 1_000_000.0)
@@ -274,33 +264,63 @@ pub struct AutoRouteDecision {
     pub reason: String,
 }
 
-/// Resolves a safe fallback model strictly compatible with the active provider so Anthropic/Gemini/Ollama
-/// never fail by sending OpenAI's default `"gpt-4o-mini"` model ID!
-pub fn resolve_compatible_fallback_model(provider: &str, primary_model: &str, configured_fallback: Option<&str>) -> Option<String> {
+/// Resolves a safe fallback model strictly compatible with the active provider using the embedded baseline.
+pub fn resolve_compatible_fallback_model(
+    provider: &str,
+    primary_model: &str,
+    configured_fallback: Option<&str>,
+) -> Option<String> {
+    let baseline = ModelPricingCatalog::embedded_baseline();
+    resolve_compatible_fallback_model_with_catalog(provider, primary_model, configured_fallback, &baseline)
+}
+
+/// Resolves a safe fallback model strictly compatible with the active provider using the live/cached [`ModelPricingCatalog`].
+pub fn resolve_compatible_fallback_model_with_catalog(
+    provider: &str,
+    primary_model: &str,
+    configured_fallback: Option<&str>,
+    catalog: &ModelPricingCatalog,
+) -> Option<String> {
     let p = provider.trim().to_ascii_lowercase();
-    if p == "scripted" {
-        return configured_fallback.filter(|f| *f != primary_model).map(String::from);
+    if p == "scripted" || p == "ollama" {
+        return configured_fallback
+            .filter(|f| *f != primary_model && p == "scripted")
+            .map(String::from);
     }
     if let Some(fb) = configured_fallback {
         let fb_low = fb.to_ascii_lowercase();
         let cross_provider_mismatch = (p.contains("anthropic") && !fb_low.contains("claude"))
             || ((p.contains("gemini") || p == "google") && !fb_low.contains("gemini"))
             || (p == "deepseek" && !fb_low.contains("deepseek"))
-            || (p == "ollama" && (fb_low.starts_with("gpt-") || fb_low.contains("claude") || fb_low.contains("gemini")));
+            || ((p == "xai" || p == "x-ai") && !fb_low.contains("grok"));
         if !cross_provider_mismatch && fb != primary_model {
             return Some(fb.to_string());
         }
     }
-    match p.as_str() {
-        "anthropic" => Some("claude-3-5-haiku-latest".to_string()).filter(|m| m != primary_model),
-        "gemini" | "google" => Some("gemini-2.5-flash".to_string()).filter(|m| m != primary_model),
-        "deepseek" => Some("deepseek-chat".to_string()).filter(|m| m != primary_model),
-        _ => None,
+    let (fast, strong) = catalog.recommend_tiers(provider);
+    if fast != primary_model {
+        Some(fast)
+    } else if strong != primary_model {
+        Some(strong)
+    } else {
+        None
     }
 }
 
-/// Evaluates `/model auto` routing within the active provider family.
+/// Evaluates `/model auto` routing within the active provider family using the embedded baseline.
 pub fn select_auto_routed_model(provider: &str, configured_model: &str, prompt: &str) -> AutoRouteDecision {
+    let baseline = ModelPricingCatalog::embedded_baseline();
+    select_auto_routed_model_with_catalog(provider, configured_model, prompt, &baseline)
+}
+
+/// Evaluates `/model auto` routing dynamically against the live/refreshed [`ModelPricingCatalog`],
+/// automatically selecting the newest fast or strong frontier model for the active provider.
+pub fn select_auto_routed_model_with_catalog(
+    provider: &str,
+    configured_model: &str,
+    prompt: &str,
+    catalog: &ModelPricingCatalog,
+) -> AutoRouteDecision {
     if !configured_model.eq_ignore_ascii_case("auto") {
         return AutoRouteDecision {
             selected_model: configured_model.to_string(),
@@ -308,7 +328,6 @@ pub fn select_auto_routed_model(provider: &str, configured_model: &str, prompt: 
             reason: "Explicitly configured model".to_string(),
         };
     }
-    let p = provider.trim().to_ascii_lowercase();
     let lower = prompt.to_ascii_lowercase();
     let needs_deep = prompt.len() > 600
         || lower.contains("architect")
@@ -318,25 +337,19 @@ pub fn select_auto_routed_model(provider: &str, configured_model: &str, prompt: 
         || lower.contains("security")
         || lower.contains("implement");
 
-    let (fast, strong) = match p.as_str() {
-        "anthropic" => ("claude-3-5-haiku-latest", "claude-sonnet-4-20250514"),
-        "gemini" | "google" => ("gemini-2.5-flash", "gemini-2.5-pro"),
-        "deepseek" => ("deepseek-chat", "deepseek-reasoner"),
-        "ollama" => ("llama3.2", "llama3.2"),
-        _ => ("gpt-4o-mini", "gpt-4o"),
-    };
+    let (fast, strong) = catalog.recommend_tiers(provider);
 
     if needs_deep {
         AutoRouteDecision {
-            selected_model: strong.to_string(),
+            selected_model: strong,
             tier: "strong".to_string(),
-            reason: "Multi-step engineering/audit complexity detected".to_string(),
+            reason: format!("Multi-step engineering/audit complexity routed via {}", catalog.source),
         }
     } else {
         AutoRouteDecision {
-            selected_model: fast.to_string(),
+            selected_model: fast,
             tier: "fast".to_string(),
-            reason: "Direct lightweight query routed to fast tier".to_string(),
+            reason: format!("Direct lightweight query routed to fast tier via {}", catalog.source),
         }
     }
 }

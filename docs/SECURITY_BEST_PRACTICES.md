@@ -27,32 +27,38 @@ When autonomous agents execute tools on a developer machine or CI runner, potent
 ```mermaid
 flowchart TD
   ATTACK["Potential Attack Surface"] --> GATES{"Security Gates"}
-  GATES -->|"Credentials & Tokens"| REDACT["1. Deterministic Secret Redactor"]
-  GATES -->|"Filesystem Access"| VFS["2. Two-Phase SessionVfs & Baseline Verification"]
-  GATES -->|"Execution Authority"| AUTH["3. Tiered Execution Authority Levels"]
-  GATES -->|"Memory Exhaustion"| ARENA["4. Bounded 16-MiB Memory Arena"]
+  GATES -->|"Credentials & Tokens"| REDACT["1. Deterministic Secret Redactor & Dual-Scope Denylist"]
+  GATES -->|"Filesystem Access"| VFS["2. Pure-Rust CAS, Two-Phase SessionVfs & Rollback"]
+  GATES -->|"Execution Authority & Posture"| AUTH["3. 5-Stop Execution Posture & Fail-Closed Constitution"]
+  GATES -->|"Subprocess Sandbox"| SEATBELT["4. Parameterized macOS Seatbelt SBPL & Process Kill"]
+  GATES -->|"Memory Exhaustion"| ARENA["5. Bounded 16-MiB Memory Arena"]
 ```
 
-### 1. Deterministic Secret Redactor (`src/plumbing/secret_redactor.rs`)
+### 1. Deterministic Secret Redactor & Dual-Scope Denylist (`src/plumbing/secret_redactor.rs`)
 All text routed to progress events, session JSONL persistence, or tool outputs is inspected by the [`DeterministicSecretRedactor`](../src/plumbing/secret_redactor.rs):
-- Matches high-entropy tokens: OpenAI API keys (`sk-...`), GitHub PATs (`ghp_...`), AWS credentials (`AKIA...`), and generic bearer authorization headers.
+- Matches high-entropy tokens: OpenAI API keys (`sk-...`), Anthropic keys, GitHub PATs (`ghp_...`), AWS credentials (`AKIA...`), and generic bearer authorization headers.
 - Replaces matches with cryptographic placeholders (`[REDACTED_API_KEY]`) before emission.
-- Interdicts access to sensitive system paths (`~/.ssh`, `~/.aws`, `~/.gnupg`, `/etc/shadow`) ([ADR-0008](adr/0008-secret-redaction-and-security-policy.md)).
+- Enforces `CredentialDenyScope`: `.env*` files, `.ssh/id_rsa`, `.aws/credentials`, `.kube/config`, `.gnupg`, `.netrc`, `.git-credentials` are strictly blocked in model context while allowing non-sensitive templates like `.env.example` and `.env.template` ([ADR-0008](adr/0008-secret-redaction-and-security-policy.md), [ADR-0014](adr/0014-codewhale-distillation-posture-cas-and-receipts.md)).
 
-### 2. Two-Phase VFS Isolation
-Tools cannot write directly to physical disk without passing through [`SessionVfs`](../src/infrastructure/vfs_store.rs):
-- Mutations are staged in memory.
+### 2. Pure-Rust Workspace CAS & Two-Phase VFS Isolation
+Tools cannot write directly to physical disk without passing through safety layers:
+- Mutations are staged in memory via [`SessionVfs`](../src/infrastructure/vfs_store.rs).
 - Pre-mutation baseline disk hashes (`VfsDiskBaseline`) prevent overwriting files altered by outside processes.
-- Unwanted mutations can be undone via [`TransactionJournal`](../src/infrastructure/transaction_journal.rs).
+- Unwanted mutations can be undone via [`TransactionJournal`](../src/infrastructure/transaction_journal.rs) or pure-Rust SHA-256 [`WorkspaceSnapshotCas`](../src/infrastructure/workspace_cas.rs) with `WouldBlock` protection.
 
-### 3. Tiered Execution Authority Levels
-Agent sessions operate under explicit authority levels ([`ExecutionAuthorityLevel`](../src/domain/types/runtime.rs)):
-- **`ReadOnly`**: Can only invoke read-only inspection tools (`fs_read`, `search_grep`, `git_status`).
-- **`WorkspaceWrite`**: Can stage and commit file modifications inside the repository.
-- **`ShellExecute`**: Permitted to run arbitrary shell commands (`shell_execute`).
-- **`FullSovereign`**: Unrestricted agent execution.
+### 3. 5-Stop Execution Posture & Fail-Closed Constitution
+Agent sessions operate under a 5-stop execution posture ([`ExecutionPosture`](../src/domain/types/posture_types.rs)):
+- **`Ask`**: Every mutating tool call prompts the operator.
+- **`AcceptEdits`**: Allows bounded file mutations without prompting; commands still prompt.
+- **`Plan`**: Enforces strict read-only execution at the governor level without altering wire tool schemas.
+- **`AutoReview`**: Executes edits and verifies changes against automated checks.
+- **`FullAccess`**: Unrestricted agent execution for autonomous runs.
+- **Fail-Closed Governance**: Repository constitutions (`.heav3ns/constitution.json`) are strictly validated via `RepoConstitution::parse_strict`. Any syntax or parsing error defaults to `AuthorizationVerdict::AskUser`.
 
-### 4. Bounded Memory Slab
+### 4. Parameterized macOS Seatbelt Sandbox & Process-Group Termination
+Subprocess execution (`execute_shell_command_sandboxed`) generates dynamic SBPL profiles (`/usr/bin/sandbox-exec`) blocking writes to `.git/hooks`, `.git/config`, `~/.ssh`, `~/.aws`, `~/.gnupg`, and system binaries. Processes run with Unix `.process_group(0)` and terminate via `SIGKILL` to `-pgid` on timeout or cancellation, with concurrent stdout/stderr draining to prevent pipe deadlock.
+
+### 5. Bounded Memory Slab
 The 16-MiB memory arena enforces a strict physical ceiling on runtime memory consumption, preventing rogue prompts from inducing system-wide Out-Of-Memory thrashing.
 
 ---

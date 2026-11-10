@@ -6,8 +6,9 @@ mod tests {
     use crate::core::flight_runner::TempWorkspace;
     use crate::core::tool_governor::{FileReadTracker, ToolOutputGovernor};
     use crate::domain::interfaces::IWorkspaceSnapshotCas;
+    use crate::domain::types::model_catalog::ModelPricingCatalog;
     use crate::domain::prefix_and_manifest::{format_append_only_context_update, PrefixFingerprint, PrefixPinStatus, PrefixStabilityTracker, RequestManifest};
-    use crate::domain::pricing_and_taxonomy::{compute_retry_delay_ms, BillingMetering, ErrorCategory, ErrorEnvelope, ProviderTokenUsage, CREDENTIAL_REJECTED_UNSENT_CODE};
+    use crate::domain::pricing_and_taxonomy::{compute_retry_delay_ms, select_auto_routed_model_with_catalog, BillingMetering, ErrorCategory, ErrorEnvelope, ProviderTokenUsage, CREDENTIAL_REJECTED_UNSENT_CODE};
     use crate::domain::types::messages::{Role, SessionMessage, ToolCall, ToolCallFunction};
     use crate::domain::types::posture_types::{evaluate_tool_posture, AuthorizationVerdict, RepoConstitution};
     use crate::domain::types::runtime::{AgentConfig, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel, ExecutionPosture};
@@ -355,6 +356,59 @@ mod tests {
         // Unsent 401 carries CREDENTIAL_REJECTED_UNSENT_CODE for composer rescue
         let env_401 = ErrorEnvelope::classify_http(401, "invalid api key", false);
         assert_eq!(env_401.code.as_deref(), Some(CREDENTIAL_REJECTED_UNSENT_CODE));
+
+        // 2026 frontier baseline models resolve accurately (including cloud Qwen vs local Ollama)
+        let gpt6 = BillingMetering::evaluate("openai", "gpt-6.1-terra", "https://api.openai.com/v1", &usage);
+        assert!(matches!(gpt6, BillingMetering::Metered { input_per_million, .. } if (input_per_million - 1.0).abs() < 1e-6));
+        let claude55 = BillingMetering::evaluate("anthropic", "claude-sonnet-5.5", "https://api.anthropic.com/v1", &usage);
+        assert!(matches!(claude55, BillingMetering::Metered { input_per_million, .. } if (input_per_million - 2.0).abs() < 1e-6));
+        let gemini4 = BillingMetering::evaluate("gemini", "gemini-4-carbon", "https://generativelanguage.googleapis.com/v1beta", &usage);
+        assert!(matches!(gemini4, BillingMetering::Metered { input_per_million, .. } if (input_per_million - 2.0).abs() < 1e-6));
+        let cloud_qwen = BillingMetering::evaluate("openrouter", "qwen/qwen3.8-max-prime", "https://openrouter.ai/api/v1", &usage);
+        assert!(matches!(cloud_qwen, BillingMetering::Metered { .. }));
+
+        // Live OpenRouter catalog JSON auto-refresh ingests newly released models & promotes `/model auto` tiers
+        let live_payload = json!({
+            "data": [
+                {
+                    "id": "openrouter/auto",
+                    "context_length": 2_000_000,
+                    "created": 1_850_000_000u64,
+                    "pricing": { "prompt": "-1", "completion": "-1" }
+                },
+                {
+                    "id": "openai/gpt-7.0-hyperion",
+                    "name": "OpenAI: GPT-7.0 Hyperion",
+                    "context_length": 2_000_000,
+                    "created": 1_850_000_001u64,
+                    "pricing": { "prompt": "0.000003", "completion": "0.000012", "input_cache_read": "0.0000003" }
+                },
+                {
+                    "id": "openai/gpt-7.0-hyperion:batch",
+                    "context_length": 2_000_000,
+                    "created": 1_850_000_001u64,
+                    "pricing": { "prompt": "0.0000015", "completion": "0.000006" }
+                },
+                {
+                    "id": "openai/gpt-7.0-spark",
+                    "name": "OpenAI: GPT-7.0 Spark",
+                    "context_length": 1_000_000,
+                    "created": 1_850_000_002u64,
+                    "pricing": { "prompt": "0.0000002", "completion": "0.0000008", "input_cache_read": "0.00000002" }
+                }
+            ]
+        })
+        .to_string();
+        let refreshed = ModelPricingCatalog::parse_openrouter_models_json(&live_payload, 1_850_000_500_000).unwrap();
+        assert_eq!(refreshed.source, "live_openrouter_v1");
+        assert!(refreshed.lookup("openrouter", "openrouter/auto").is_none());
+        let hyperion = BillingMetering::evaluate_with_catalog("openai", "gpt-7.0-hyperion", "https://api.openai.com/v1", &usage, &refreshed);
+        assert!(matches!(hyperion, BillingMetering::Metered { input_per_million, .. } if (input_per_million - 3.0).abs() < 1e-6));
+
+        let auto_strong = select_auto_routed_model_with_catalog("openai", "auto", "Architect and implement a multi-file refactor", &refreshed);
+        assert_eq!(auto_strong.selected_model, "gpt-7.0-hyperion");
+        let auto_fast = select_auto_routed_model_with_catalog("openai", "auto", "hi", &refreshed);
+        assert_eq!(auto_fast.selected_model, "gpt-7.0-spark");
     }
 
     #[tokio::test]

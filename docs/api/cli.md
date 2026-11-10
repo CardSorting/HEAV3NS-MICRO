@@ -27,6 +27,7 @@ USAGE:
 | *(none)* | *(default)* | Starts an interactive pair-programming REPL session in the terminal. |
 | `context` | `context [--json]` | Displays the visual Context & Prompt Inspector HUD (or JSON telemetry). |
 | `preview-request` | `preview-request [--json]` | Emits the outbound `RequestManifest` (`heav3ns.request_manifest/v1`) byte breakdown & KV-cache pin status without calling a provider. |
+| `models` | `models [--refresh]` | Lists or force-refreshes the live auto-updating model pricing & context-window catalog (`~/.heav3ns/pricing_catalog.json`). |
 | `receipts` | `receipts [--json]` | Lists auditable `TurnReceipt` (`heav3ns.receipt/v1`) records from `.heav3ns/receipts.jsonl`. |
 | `doctor` | `doctor` | Runs comprehensive diagnostic audit across credentials, SLA, and substrate. |
 | `init` | `init` | Interactive credential and provider onboarding wizard. |
@@ -60,6 +61,13 @@ USAGE:
 | `OPENAI_API_KEY` | Authentication bearer token for OpenAI provider calls. | *(none)* |
 | `ANTHROPIC_API_KEY` | Authentication token for Anthropic Claude provider calls. | *(none)* |
 | `GEMINI_API_KEY` | Authentication token for Google Gemini provider calls. | *(none)* |
+| `DEEPSEEK_API_KEY` | Authentication token for DeepSeek provider calls. | *(none)* |
+| `OPENROUTER_API_KEY` | Authentication token for OpenRouter provider calls. | *(none)* |
+| `XAI_API_KEY` | Authentication token for xAI Grok provider calls. | *(none)* |
+| `GROQ_API_KEY` | Authentication token for Groq provider calls. | *(none)* |
+| `HEAV3NS_PRICING_TTL_SECS` | TTL duration in seconds for `~/.heav3ns/pricing_catalog.json` cache before auto-refreshing. | `43200` (12h) |
+| `HEAV3NS_OFFLINE_PRICING` | Set to `1` to disable all background network fetches to OpenRouter `/models`. | *(none)* |
+| `HEAV3NS_MODEL_CATALOG_URL` | Custom endpoint URL override for fetching remote model metadata. | `https://openrouter.ai/api/v1/models` |
 | `HEAV3NS_ARENA_CAPACITY_BYTES` | Override default 16-MiB arena capacity in bytes. | `16777216` |
 | `HEAV3NS_AUTHORITY` | Override execution authority (`ReadOnly`, `WorkspaceWrite`, etc.). | `WorkspaceWrite` |
 

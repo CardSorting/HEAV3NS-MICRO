@@ -71,7 +71,7 @@ impl ModelPromptFamily {
             Self::Gemini
         } else if m.contains("claude") || p.contains("anthropic") || p.contains("claude") {
             Self::Anthropic
-        } else if m.contains("gpt-5") || m.starts_with("o1") || m.starts_with("o3") || m.starts_with("o4") {
+        } else if m.contains("gpt-6") || m.contains("gpt-5") || m.starts_with("o1") || m.starts_with("o3") || m.starts_with("o4") {
             Self::OpenAiReasoning
         } else {
             Self::General

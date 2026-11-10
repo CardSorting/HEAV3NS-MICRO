@@ -126,6 +126,12 @@ pub trait IToolExecutor: Send + Sync {
     ) -> BoxFuture<'a, Vec<ToolExecutionRecord>>;
 }
 
+/// Contractual sovereignty interface for live auto-refreshing model pricing & capability catalogs.
+pub trait IModelPricingRegistry: Send + Sync {
+    fn snapshot_catalog(&self) -> crate::domain::types::model_catalog::ModelPricingCatalog;
+    fn is_stale(&self, now_ms: u64) -> bool;
+}
+
 /// Contractual sovereignty interface for LLM completion providers (`I<Name>` convention).
 pub trait ILlmProvider: Send + Sync {
     fn provider_name(&self) -> &str;

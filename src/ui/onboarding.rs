@@ -298,10 +298,10 @@ pub fn run_init_wizard(cwd: &Path) -> io::Result<()> {
     println!();
 
     println!("{}", bold("Select your primary AI provider:"));
-    println!("  1. OpenAI (Default: gpt-5.6-terra, gpt-4o)");
-    println!("  2. Google Gemini (Default: gemini-2.0-flash)");
-    println!("  3. Anthropic Claude (Default: claude-3-5-sonnet-20241022)");
-    println!("  4. Ollama (Local AI / Zero API key needed / llama3.2)");
+    println!("  1. OpenAI (Default: gpt-5.6-terra, gpt-6.1-terra, gpt-6-luna)");
+    println!("  2. Google Gemini (Default: gemini-4-carbon, gemini-3.8-flash)");
+    println!("  3. Anthropic Claude (Default: claude-sonnet-5.5, claude-fable-5.2)");
+    println!("  4. Ollama (Local AI / Zero API key needed / qwen2.5-coder:14b)");
     println!("  5. Custom OpenAI-compatible endpoint (Groq, vLLM, LM Studio, OpenRouter)");
     println!();
 
@@ -312,9 +312,9 @@ pub fn run_init_wizard(cwd: &Path) -> io::Result<()> {
     let choice = choice.trim();
 
     let (provider, default_model, default_endpoint) = match choice {
-        "2" => ("gemini", "gemini-2.0-flash", "https://generativelanguage.googleapis.com/v1beta"),
-        "3" => ("anthropic", "claude-3-5-sonnet-20241022", "https://api.anthropic.com/v1"),
-        "4" => ("ollama", "llama3.2", "http://localhost:11434/v1"),
+        "2" => ("gemini", "gemini-4-carbon", "https://generativelanguage.googleapis.com/v1beta"),
+        "3" => ("anthropic", "claude-sonnet-5.5", "https://api.anthropic.com/v1"),
+        "4" => ("ollama", "qwen2.5-coder:14b", "http://localhost:11434/v1"),
         "5" => ("openai", "custom-model", "http://localhost:8000/v1"),
         _ => ("openai", "gpt-5.6-terra", "https://api.openai.com/v1"),
     };

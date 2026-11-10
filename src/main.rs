@@ -41,6 +41,8 @@ async fn build_engine(opts: &CliOptions) -> (Arc<AgentEngine>, AgentConfig) {
         cfg.provider = "deepseek".to_string();
     }
 
+    AgentEngine::trigger_model_catalog_auto_refresh();
+    let catalog = AgentEngine::model_catalog_snapshot();
     let prov_lower = cfg.provider.to_ascii_lowercase();
     if let Some(ref m) = opts.model {
         cfg.model_name = m.clone();
@@ -48,13 +50,11 @@ async fn build_engine(opts: &CliOptions) -> (Arc<AgentEngine>, AgentConfig) {
         cfg.model_name = m.clone();
     } else {
         cfg.model_name = match prov_lower.as_str() {
-            "gemini" | "google" => "gemini-2.0-flash".to_string(),
-            "anthropic" => "claude-3-5-sonnet-20241022".to_string(),
-            "openrouter" => "anthropic/claude-3.7-sonnet".to_string(),
-            "deepseek" => "deepseek-chat".to_string(),
+            "gemini" | "google" | "anthropic" | "openrouter" | "deepseek" | "xai" => {
+                catalog.recommend_tiers(&prov_lower).1
+            }
             "groq" => "llama-3.3-70b-versatile".to_string(),
-            "xai" => "grok-2-latest".to_string(),
-            "ollama" => "llama3.2".to_string(),
+            "ollama" => "qwen2.5-coder:14b".to_string(),
             _ => cfg.model_name,
         };
     }
@@ -140,6 +140,46 @@ async fn main() {
             let (engine, _) = build_engine(&opts).await;
             let fmt = if opts.format.eq_ignore_ascii_case("json") { "json" } else { "" };
             println!("{}", engine.render_request_manifest(fmt));
+        }
+        RunMode::Models { refresh } => {
+            let cat = if refresh {
+                match AgentEngine::refresh_model_catalog().await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("Live model catalog refresh failed ({e}); using cached/embedded catalog.");
+                        AgentEngine::model_catalog_snapshot()
+                    }
+                }
+            } else {
+                AgentEngine::model_catalog_snapshot()
+            };
+            let prov = opts.provider.as_deref().unwrap_or("openrouter");
+            let top: Vec<Value> = cat
+                .newest_models_for_provider(prov, 25)
+                .into_iter()
+                .map(|e| {
+                    json!({
+                        "id": e.id,
+                        "name": e.display_name,
+                        "contextLength": e.context_length,
+                        "inputPerMillion": e.input_per_million,
+                        "outputPerMillion": e.output_per_million,
+                        "cachedPerMillion": e.cached_per_million,
+                        "createdUnix": e.created_unix
+                    })
+                })
+                .collect();
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "source": cat.source,
+                    "fetchedAtMs": cat.fetched_at_ms,
+                    "totalModels": cat.entries.len(),
+                    "provider": prov,
+                    "models": top
+                }))
+                .unwrap_or_default()
+            );
         }
         RunMode::Receipts => {
             let (engine, _) = build_engine(&opts).await;

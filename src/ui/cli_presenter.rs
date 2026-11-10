@@ -113,6 +113,7 @@ pub enum RunMode {
     Context,
     Receipts,
     PreviewRequest,
+    Models { refresh: bool },
     Init,
     Demo,
     Tools,
@@ -159,6 +160,15 @@ pub fn parse_args_from(args: Vec<String>) -> CliOptions {
             }
             "preview-request" | "--preview-request" => {
                 opts.mode = RunMode::PreviewRequest;
+            }
+            "models" | "--models" => {
+                let refresh = args.iter().any(|a| a == "--refresh" || a == "refresh");
+                opts.mode = RunMode::Models { refresh };
+            }
+            "--refresh" => {
+                if let RunMode::Models { ref mut refresh } = opts.mode {
+                    *refresh = true;
+                }
             }
             "--last" => {
                 opts.last_only = true;

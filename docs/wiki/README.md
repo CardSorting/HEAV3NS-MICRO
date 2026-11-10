@@ -22,21 +22,21 @@ Welcome to the **HEAV3NS-MICRO Engineering Wiki**—the concept-first encycloped
 ```mermaid
 flowchart LR
   subgraph S1 ["1. Spatial Sovereignty (Joyzoning)"]
-    Z["5 Canonical Zones (70 Rust Modules)<br/>DOMAIN · CORE · INFRA · PLUMBING · UI"]
+    Z["5 Canonical Zones (82 Rust Modules)<br/>DOMAIN · CORE · INFRA · PLUMBING · UI"]
     P["Principle of Geographic Alignment"]
-    C["39 Formal I* Traits in src/domain/"]
+    C["64 Formal I* Traits across src/"]
   end
 
-  subgraph S2 ["2. REWIND, BROCCOLI & Parsing"]
-    A["16-MiB Arena Slab Allocator<br/>Bump pointer + O(1) tick rewind"]
+  subgraph S2 ["2. REWIND, BROCCOLI & Substrate"]
+    A["16-MiB Arena & Workspace CAS<br/>O(1) tick rewind + Pure-Rust CAS"]
     J["3-Stage Self-Healing JSON Parser<br/>Bracket balancing + Streaming dedup"]
-    B["BehavioralKnowledgeStore & SkillDAG<br/>Confidence calibration + Procedures"]
+    B["Model Catalog & Behavioral Store<br/>Auto-refresh pricing + Confidence"]
   end
 
   subgraph S3 ["3. SPIDER, SWARM, CUA & THE HARNESS"]
     M["Double-Wrapped Spatial Mediator<br/>Wrapper A Grounding + Wrapper B Assurance"]
     V["SessionVfs & TransactionJournal<br/>FNV-1a baseline + Atomic rollback"]
-    W["DAG Wave Scheduler<br/>29 native tools · Read/Write wavefronts"]
+    W["DAG Wave Scheduler & Posture Gate<br/>31 native tools · 5-stop ExecutionPosture"]
   end
 
   S1 --> S2 --> S3

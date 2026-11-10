@@ -101,7 +101,25 @@ pub fn build_model_selection(provider: &str, model: &str, reasoning: &str, revis
     })
 }
 
+fn catalog_slugs(provider: &str, keep_vendor: bool, limit: usize) -> Vec<String> {
+    AgentEngine::model_catalog_snapshot()
+        .newest_models_for_provider(provider, limit)
+        .into_iter()
+        .map(|e| {
+            if keep_vendor {
+                e.id.clone()
+            } else {
+                e.id.split_once('/').map(|(_, s)| s.to_string()).unwrap_or_else(|| e.id.clone())
+            }
+        })
+        .collect()
+}
+
 pub fn build_model_catalog(provider: &str, model: &str, reasoning: &str, revision: i64) -> Value {
+    let openai_models = catalog_slugs("openai", false, 6);
+    let claude_models = catalog_slugs("anthropic", false, 6);
+    let openrouter_models = catalog_slugs("openrouter", true, 8);
+    let gemini_models = catalog_slugs("gemini", false, 6);
     json!({
         "provider": provider,
         "model": model,
@@ -111,42 +129,12 @@ pub fn build_model_catalog(provider: &str, model: &str, reasoning: &str, revisio
         "busy": false,
         "blocked": null,
         "providers": [
-            {
-                "id": "openai-codex",
-                "label": "OpenAI Codex",
-                "detail": "Primary reasoning and multi-wave tool execution engine",
-                "models": ["gpt-5.6-terra", "gpt-5-turbo", "o3-mini"]
-            },
-            {
-                "id": "claude-subscription-directsdk-experimental",
-                "label": "Claude Code",
-                "detail": "Anthropic architectural synthesis and code editing",
-                "models": ["claude-4-sonnet", "claude-4-opus"]
-            },
-            {
-                "id": "openrouter",
-                "label": "OpenRouter",
-                "detail": "Unified multi-provider model gateway",
-                "models": ["openai/gpt-5.6-terra", "anthropic/claude-4-sonnet", "deepseek/deepseek-chat"]
-            },
-            {
-                "id": "gemini",
-                "label": "Google Gemini",
-                "detail": "High-context multimodal and rapid code synthesis",
-                "models": ["gemini-2.5-pro", "gemini-2.0-flash"]
-            },
-            {
-                "id": "ollama",
-                "label": "Local Ollama (Zero-Key)",
-                "detail": "100% local private inference on localhost:11434",
-                "models": ["llama3.2", "qwen2.5-coder:14b", "deepseek-r1:14b"]
-            },
-            {
-                "id": "apple-playground",
-                "label": "On this Mac (Playground)",
-                "detail": "Local Apple Foundation Models on-device inference",
-                "models": ["apple-on-device-default"]
-            }
+            { "id": "openai-codex", "label": "OpenAI Codex", "detail": "Primary reasoning and multi-wave tool execution engine", "models": openai_models },
+            { "id": "claude-subscription-directsdk-experimental", "label": "Claude Code", "detail": "Anthropic architectural synthesis and code editing", "models": claude_models },
+            { "id": "openrouter", "label": "OpenRouter", "detail": "Live auto-refreshed multi-provider model gateway", "models": openrouter_models },
+            { "id": "gemini", "label": "Google Gemini", "detail": "High-context multimodal and rapid code synthesis", "models": gemini_models },
+            { "id": "ollama", "label": "Local Ollama (Zero-Key)", "detail": "100% local private inference on localhost:11434", "models": ["qwen2.5-coder:14b", "deepseek-r1:14b", "llama3.2"] },
+            { "id": "apple-playground", "label": "On this Mac (Playground)", "detail": "Local Apple Foundation Models on-device inference", "models": ["apple-on-device-default"] }
         ],
         "recent": []
     })
@@ -157,32 +145,38 @@ pub fn build_model_discovery(provider: &str) -> Value {
         "openai-codex" | "claude-subscription-directsdk-experimental" | "gemini" | "deepseek" | "ollama" | "openrouter" | "cline-pass" | "nous" | "opencode" | "apple-playground" => provider,
         _ => "openai-codex",
     };
+    let cat = AgentEngine::model_catalog_snapshot();
     let models = match valid_provider {
-        "claude-subscription-directsdk-experimental" => vec![
-            json!({ "id": "claude-4-sonnet", "label": "Claude 4 Sonnet", "detail": "Balanced speed and deep code reasoning" }),
-            json!({ "id": "claude-4-opus", "label": "Claude 4 Opus", "detail": "Maximum architectural depth" }),
-        ],
-        "gemini" => vec![
-            json!({ "id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro", "detail": "Deep architectural reasoning with 1M context" }),
-            json!({ "id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash", "detail": "Sub-second iterative verification" }),
-        ],
         "ollama" => vec![
-            json!({ "id": "llama3.2", "label": "Llama 3.2 (Local)", "detail": "Zero-key local Ollama inference" }),
             json!({ "id": "qwen2.5-coder:14b", "label": "Qwen 2.5 Coder 14B", "detail": "Local code specialist" }),
+            json!({ "id": "llama3.2", "label": "Llama 3.2 (Local)", "detail": "Zero-key local Ollama inference" }),
         ],
         "apple-playground" => vec![
             json!({ "id": "apple-on-device-default", "label": "Apple On-Device Model", "detail": "Local macOS Foundation Models adapter" }),
         ],
-        _ => vec![
-            json!({ "id": "gpt-5.6-terra", "label": "GPT-5.6 Terra", "detail": "Default high-velocity agentic model" }),
-            json!({ "id": "gpt-5-turbo", "label": "GPT-5 Turbo", "detail": "Fast iterative code generation" }),
-            json!({ "id": "o3-mini", "label": "o3-mini", "detail": "Compact formal verification model" }),
-        ],
+        _ => {
+            let keep_vendor = valid_provider == "openrouter";
+            cat.newest_models_for_provider(valid_provider, 8)
+                .into_iter()
+                .map(|e| {
+                    let id = if keep_vendor {
+                        e.id.clone()
+                    } else {
+                        e.id.split_once('/').map(|(_, s)| s.to_string()).unwrap_or_else(|| e.id.clone())
+                    };
+                    json!({
+                        "id": id,
+                        "label": e.display_name,
+                        "detail": format!("{}k ctx · ${:.2}/${:.2} per MTok", e.context_length / 1000, e.input_per_million, e.output_per_million)
+                    })
+                })
+                .collect()
+        }
     };
     json!({
         "provider": valid_provider,
         "state": "ready",
-        "source": "HEAV3NS-MICRO Runtime Catalog",
+        "source": format!("HEAV3NS-MICRO Catalog ({})", cat.source),
         "message": "Available reasoning and code orchestration models verified.",
         "checkedAt": now_ms() as f64,
         "limited": false,
