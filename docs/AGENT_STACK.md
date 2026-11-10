@@ -13,13 +13,13 @@
 
 The **HEAV3NS-MICRO Agent Stack** is the concrete engineering realization of **[`HEAV3NS — The Sovereign Intelligence Architecture`](../doc.md)**. Rather than treating an AI agent as a fragile dynamic wrapper around an LLM endpoint, it organizes cooperating intelligence across **Seven Sovereign Pillars** and **Five Canonical Joyzoning Surfaces**:
 
-1. **`HEAV3NS-MICRO` (The Distilled Intelligence Runtime)**: Multi-turn ReAct engine, 3-stage self-healing JSON tool parser, and multi-provider failover.
+1. **`HEAV3NS-MICRO` (The Distilled Intelligence Runtime)**: Multi-turn ReAct engine, KV-cache-deterministic `SystemPromptSpec` (`400t` static prefix, `fnv1a` fingerprint), 3-stage self-healing JSON tool parser, `/context` token HUD, and multi-provider failover.
 2. **`SPIDER` (Structural Perception & Environmental Understanding)**: Viewport region partitioning, UI affordance classification, relational graph synthesis, and static AST dependency checks.
 3. **`REWIND` (Temporal Cognition, Continuity & Recoverability)**: 16-MiB `ArenaAllocator` ($O(1)$ pointer rewind), two-phase `SessionVfs` (`VfsDiskBaseline` parity), `TransactionJournal` rollback, 32-deep display undo/redo, and epoch drift reconciliation.
 4. **`BROCCOLI` (Persistent Knowledge, Memory & Historical Evolution)**: `BehavioralKnowledgeStore` (Laplace confidence calibration & workflow procedure synthesis), hybrid TF-IDF `MemoryStore`, and Kahn-verified `SkillTreeCatalog` DAG & Soul Drop Vault.
-5. **`SYNTHETIC SWARM` (Distributed Collective Intelligence)**: 5-specialist parallel cognitive consultation (`VisualPerceiver`, `StructuralAnalyst`, `WorkflowNavigator`, `RiskAssessor`, `RecoverySpecialist` + `ConflictResolver`) and 7-specialist `Legion` topological task formations.
+5. **`SYNTHETIC SWARM` (Distributed Collective Intelligence)**: 5-specialist parallel cognitive consultation (`VisualPerceiver`, `StructuralAnalyst`, `WorkflowNavigator`, `RiskAssessor`, `RecoverySpecialist` + `ConflictResolver`) and 7-specialist `Legion` topological task formations with exclusive file reservations & bounded handoffs.
 6. **`COMPUTER USE` (Embodied Agency)**: 9-stage closed-loop `ComputerUseOrchestrator`, Double-Wrapped Spatial Action Mediation (`Wrapper A` Grounding + `Wrapper B` Execution Assurance), automatic off-screen pre-scroll, multi-step `execute_plan`, and SSRF-guarded `browser_use`.
-7. **`THE HARNESS` (The Sovereign Computational Substrate)**: 5-Zone Joyzoning (`64` Rust modules, `39` `I<Name>` traits), `29` native tools with DAG wave scheduling, `ToolOutputGovernor`, `DeterministicSecretRedactor`, `"v": 1` stdio JSON-RPC bridge, and Native macOS AppKit IDE (`HEAV3NS-CODE`).
+7. **`THE HARNESS` (The Sovereign Computational Substrate)**: 5-Zone Joyzoning (`70` Rust modules, `39` `I<Name>` traits), `29` native tools with sticky dynamic schema routing (`15` core active / `14` on-demand), `ShellCommandGuard` (`ADR-0015`/`0016`), `ToolOutputGovernor`, `DeterministicSecretRedactor`, `"v": 1` stdio JSON-RPC bridge, and Native macOS AppKit IDE (`HEAV3NS-CODE`).
 
 ---
 
@@ -28,9 +28,9 @@ The **HEAV3NS-MICRO Agent Stack** is the concrete engineering realization of **[
 ```mermaid
 flowchart TD
   subgraph Surface1 ["Surface 1: Spatial Sovereignty (Joyzoning)"]
-    ZONES["5 Canonical Zones (64 Rust Modules + Native AppKit · 280+ Files)"]
+    ZONES["5 Canonical Zones (70 Rust Modules + Native AppKit · 280+ Files)"]
     CONTRACTS["39 Formal I<Name> Contracts (src/domain/interfaces/mod.rs & src/domain/*)"]
-    HEADER["Top-of-File [LAYER: <ZONE>] Enforcement (100% SI · E_S = 0.0038)"]
+    HEADER["Top-of-File [LAYER: <ZONE>] Enforcement (100% SI · E_S = 0.0041)"]
   end
 
   subgraph Surface2 ["Surface 2: REWIND, BROCCOLI & Substrate Runtime"]
@@ -44,7 +44,7 @@ flowchart TD
     ORCH["9-Stage Closed-Loop ComputerUseOrchestrator (src/core/computer_use_orchestrator.rs)"]
     SPATIAL["Double-Wrapped SpatialActionMediator (Wrapper A Grounding + Wrapper B Assurance)"]
     SWARM_C["5-Specialist Swarm Consultant & 7-Specialist Legion Classifier"]
-    TOOLS["29 Native Built-In Tools & 16 Interactive Slash Commands"]
+    TOOLS["29 Native Built-In Tools & 19 Interactive Slash Commands"]
   end
 
   subgraph Surface4 ["Surface 4: AppKit Native Desktop IDE (HEAV3NS-CODE)"]
@@ -73,16 +73,16 @@ flowchart TD
 ## Verification & Guardrails
 
 ```bash
-# 1. Verify all 49 Rust unit, spatial, computer-use & substrate tests
+# 1. Verify all 66 Rust unit, spatial, computer-use, zenith & substrate tests
 cargo test
 
 # 2. Run the 5-scenario Agent Flight suite (FT-01..FT-05, 19 assertion checks)
 cargo run -- --flight
 
-# 3. Verify all 311 native macOS AppKit tests
+# 3. Verify all 315 native macOS AppKit tests
 cd native && swift test && cd ..
 
 # 4. Run strict Joyzoning architectural audit & documentation check
-npm run joy-check
-npm run docs:check
+node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --theme strict
+node bin/docs-check.mjs
 ```

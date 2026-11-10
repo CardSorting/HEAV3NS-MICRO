@@ -56,6 +56,8 @@ const REQUIRED_WORKSPACE_DOCS = [
   "docs/adr/0009-diataxis-documentation-and-knowledge-governance.md",
   "docs/adr/0010-native-desktop-integration-and-rpc-protocol.md",
   "docs/adr/0011-sovereign-intelligence-and-spatial-computer-use.md",
+  "docs/adr/0012-lean-system-prompt-and-kv-cache-prefix-determinism.md",
+  "docs/adr/0013-shell-command-defenses-and-pipeline-sanitization.md",
   "docs/playbooks/README.md", "docs/playbooks/architectural-violation-remediation.md",
   "docs/playbooks/arena-exhaustion-and-oom-triage.md",
   "docs/playbooks/flight-test-failures-and-parser-desync.md",

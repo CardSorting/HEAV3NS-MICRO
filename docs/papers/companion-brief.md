@@ -20,19 +20,19 @@ _Companion to [The Ascendant Computational Intelligence](ascendant-intelligence.
 | Crate version | **0.1.0** (`2021` edition) | [`Cargo.toml`](../../Cargo.toml) |
 | Sovereign Intelligence Pillars | **7** (`HEAV3NS-MICRO`, `SPIDER`, `REWIND`, `BROCCOLI`, `SYNTHETIC SWARM`, `COMPUTER USE`, `THE HARNESS`) | [`doc.md`](../../doc.md) · [`ascendant-intelligence.md`](ascendant-intelligence.md) |
 | Canonical architectural zones | **5** (`PLUMBING`, `DOMAIN`, `INFRASTRUCTURE`, `CORE`, `UI`) | [`stability.config.json`](../../stability.config.json) |
-| Rust source modules (`src/`) | **64** (`10` Plumbing · `25` Domain · `9` Infra · `14` Core · `6` UI, all `< 800` lines Tier 1 Optimal) | [`docs/PROJECT_MAP.md`](../PROJECT_MAP.md) |
-| Total Joyzoning-audited workspace files | **280+** files (`329` local dependency edges) | [`VALIDATION_REPORT.md`](../../VALIDATION_REPORT.md) |
+| Rust source modules (`src/`) | **70** (`11` Plumbing · `26` Domain · `9` Infra · `17` Core · `7` UI/roots, all `< 800` lines Tier 1 Optimal) | [`docs/PROJECT_MAP.md`](../PROJECT_MAP.md) |
+| Total Joyzoning-audited workspace files | **280+** files (`394` local dependency edges) | [`VALIDATION_REPORT.md`](../../VALIDATION_REPORT.md) |
 | Formal `I<Name>` domain interfaces | **39** traits (`19` port interfaces + `20` entity contracts) | [`src/domain/interfaces/mod.rs`](../../src/domain/interfaces/mod.rs) |
-| Built-in native agent tools | **29** tools | [`src/core/tool_specs.rs`](../../src/core/tool_specs.rs) |
-| Interactive slash commands | **16** commands | [`src/core/slash_and_swarm.rs`](../../src/core/slash_and_swarm.rs) |
+| Built-in native agent tools | **29** tools (`15` core active / `14` on-demand) | [`src/core/tool_specs.rs`](../../src/core/tool_specs.rs) |
+| Interactive slash commands | **19** commands | [`src/core/slash_and_swarm.rs`](../../src/core/slash_and_swarm.rs) |
 | Default memory arena slab | **16 MiB** contiguous buffer with $O(1)$ rewind | [`src/domain/arena.rs`](../../src/domain/arena.rs) |
 | Spatial grounding throughput | **$\le 0.40\ \mu\text{s}$** per operation (`> 240,000` ops/sec) | [`src/core/spatial_tests.rs`](../../src/core/spatial_tests.rs) |
-| Rust unit & integration tests | **49** passed (`0` failed) across substrate, spatial, and computer-use suites | `cargo test` |
+| Rust unit & integration tests | **66** passed (`0` failed) across substrate, spatial, computer-use, and prompt/shell-guard zenith suites | `cargo test` |
 | Agent Flight Test scenarios | **5** (`FT-01..FT-05`, `19/19` checks passing) | [`src/core/flight_runner.rs`](../../src/core/flight_runner.rs) |
-| Native macOS AppKit Tests | **311** passed (`0` failed) | [`native/Tests/Heav3nsCodeTests/`](../../native/Tests/Heav3nsCodeTests/) |
-| Joyzoning Stability Index ($SI$) | **100% (`SOVEREIGN`, $E_S = 0.0038$)** | [`VALIDATION_REPORT.md`](../../VALIDATION_REPORT.md) |
+| Native macOS AppKit Tests | **315** passed (`0` failed) | [`native/Tests/Heav3nsCodeTests/`](../../native/Tests/Heav3nsCodeTests/) |
+| Joyzoning Stability Index ($SI$) | **100% (`SOVEREIGN`, $E_S = 0.0041$)** | [`VALIDATION_REPORT.md`](../../VALIDATION_REPORT.md) |
 | Joyzoning Build Health | **100% (`Grade: A+ — SOVEREIGN`, `0` violations, `0` advisories)** | [`VALIDATION_REPORT.md`](../../VALIDATION_REPORT.md) |
-| Architecture Decision Records (ADRs) | **11** + template (`ADR-0001..0011`) | [`docs/adr/README.md`](../adr/README.md) |
+| Architecture Decision Records (ADRs) | **13** + template (`ADR-0001..0013`) | [`docs/adr/README.md`](../adr/README.md) |
 | Operational Playbooks & Postmortems | **6** playbooks · **5** postmortems | [`docs/playbooks/README.md`](../playbooks/README.md) · [`docs/postmortems/README.md`](../postmortems/README.md) |
 | Concept Wiki & Knowledge Base Articles | **4** wiki guides · **3** KB articles · **4** papers | [`docs/wiki/README.md`](../wiki/README.md) · [`docs/kb/README.md`](../kb/README.md) |
 
@@ -56,7 +56,7 @@ Autonomous coding and computer-use agents frequently suffer from runtime bloat, 
 ## Architecture at a glance
 
 ```text
-Native macOS AppKit IDE (native/Sources/Heav3nsCode/ · 311 tests) / CLI REPL
+Native macOS AppKit IDE (native/Sources/Heav3nsCode/ · 315 tests) / CLI REPL
          ↕ (stdio JSON-RPC 2.0 · "v": 1 framing)
 UI: cli_presenter.rs · stdio_worker.rs · rpc_dispatch.rs · lib.rs · main.rs
          ↕

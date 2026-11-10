@@ -97,7 +97,7 @@ cd ..
 Expected output:
 ```text
 Test Suite 'All tests' passed at ...
-	 Executed 308 tests, with 6 tests skipped and 0 failures (0 unexpected)
+	 Executed 315 tests, with 6 tests skipped and 0 failures (0 unexpected)
 ```
 
 ---
@@ -116,14 +116,17 @@ Or start the interactive REPL:
 cargo run
 ```
 
-Inside the REPL, you can explore the 10 built-in slash commands:
+Inside the REPL, you can explore the 19 built-in slash commands:
 - `/help`: Show command documentation
 - `/status`: Display session token count, arena memory usage, and authority level
+- `/context`: Visual 20-cell token budget HUD and tool routing breakdown
+- `/prompt`: Inspect deterministic KV-cached static prefix or profile outputs
+- `/tools`: Display active core vs. on-demand specialist tools and token savings
 - `/vfs`: List staged virtual file system overlays
 - `/commit`: Commit staged VFS overlays to disk
 - `/rewind`: Roll back the last recorded file transaction
 - `/compact`: Trigger explicit session memory compaction
-- `/doctor`: Perform runtime self-check and diagnostic inspection
+- `/doctor`: Perform runtime self-check, prompt hygiene, and diagnostic inspection
 
 ---
 

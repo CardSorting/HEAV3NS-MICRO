@@ -33,6 +33,8 @@ flowchart TD
   ADR9["ADR-0009: Diátaxis Docs & Automated Guardrails"]
   ADR10["ADR-0010: Native Desktop AppKit Integration & RPC"]
   ADR11["ADR-0011: Sovereign Intelligence, Spatial Mediation & Closed-Loop CUA"]
+  ADR12["ADR-0012: Lean System Prompt, KV-Cache Prefixing & Sticky Tool Routing"]
+  ADR13["ADR-0013: Shell Command Guard & Pipeline Anti-Starvation Defenses"]
 
   ADR1 --> ADR7
   ADR1 --> ADR2
@@ -48,6 +50,10 @@ flowchart TD
   ADR5 --> ADR11
   ADR7 --> ADR11
   ADR8 --> ADR11
+  ADR3 --> ADR12
+  ADR7 --> ADR12
+  ADR8 --> ADR13
+  ADR5 --> ADR13
 ```
 
 ---
@@ -68,6 +74,8 @@ flowchart TD
 | [ADR-0009](0009-diataxis-documentation-and-knowledge-governance.md) | Diátaxis + Institutional Memory Documentation Architecture | **Accepted** | Documentation | `node bin/docs-check.mjs` |
 | [ADR-0010](0010-native-desktop-integration-and-rpc-protocol.md) | Native Desktop AppKit Integration, Modular UI Decomposition, and Stdio JSON-RPC Protocol | **Accepted** | Desktop IDE & IPC | `swift test` & `cargo test` |
 | [ADR-0011](0011-sovereign-intelligence-and-spatial-computer-use.md) | Sovereign Intelligence Architecture, Double-Wrapped Spatial Mediation & Closed-Loop Computer Use | **Accepted** | `SPIDER` · `BROCCOLI` · `SWARM` · `COMPUTER USE` | `cargo test core::spatial_tests` & `computer_use_tests` |
+| [ADR-0012](0012-lean-system-prompt-and-kv-cache-prefix-determinism.md) | Lean System Prompt Specification, KV-Cache Prefix Determinism & Sticky Dynamic Tool Routing | **Accepted** | Prompt Architecture (`HEAV3NS-MICRO`) | `test_prompt_cache_prefix_determinism_and_model_families` |
+| [ADR-0013](0013-shell-command-defenses-and-pipeline-sanitization.md) | Shell Command Guard, Heredoc File-Write Interdiction & Terminal File-Read Anti-Starvation | **Accepted** | Runtime Defenses (`THE HARNESS`) | `test_adr_0015_compound_multiline_and_closing_heredoc_defenses` |
 
 ---
 

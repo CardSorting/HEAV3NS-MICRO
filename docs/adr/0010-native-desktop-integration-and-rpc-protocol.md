@@ -38,6 +38,7 @@ We executed a comprehensive three-pillar architectural integration:
   - `changes.read` (generating unified diffs against Git working tree and staging).
   - `spider.check` (performing syntax, import, and circular dependency checks).
   - `memory.list`, `memory.save`, and `memory.remove` (binding directly to `src/domain/memory.rs`).
+  - `context.inspect` and `prompt.inspect` (token budget HUD and KV-cache prefix telemetry).
   - `task.submit`, `task.stop`, and `task.lookup` (safe non-blocking submission reconciliation).
   - `swarm.plan`, `swarm.next`, and `swarm.report` (topological specialist graph execution).
 
@@ -50,7 +51,7 @@ We executed a comprehensive three-pillar architectural integration:
   - `WorkspaceWindow+Navigation.swift` (308 lines): Chats switcher, file tree, Git diff navigation.
   - `WorkspaceWindow+Inspection.swift` (557 lines): Inspection viewports (diff, state, spider, context).
   - `WorkspaceWindow+Execution.swift` (515 lines): Draft persistence, instruction queue, checkpoints.
-  - `WorkspaceWindow+Events.swift` (764 lines): Runtime event stream, action palette, Pod snapshots.
+  - `WorkspaceWindow+Events.swift` (776 lines): Runtime event stream, action palette, Pod snapshots.
 - Decomposed test harness into `RuntimeClientTestCase.swift`, `RuntimeClientTests.swift`, and `RuntimeClientProtocolTests.swift`.
 
 ### 3. Resource Lifecycle & Dispose Protocols (`SPI-110`)
@@ -63,7 +64,7 @@ We executed a comprehensive three-pillar architectural integration:
 ### Positive
 - **Zero Monolithic Debt**: 100% of Swift and Rust files in the repository now satisfy Tier 1 Optimal (< 800 lines).
 - **Sub-Millisecond IPC Latency**: Direct stdio JSON-RPC transport bypasses socket buffers and network stack overhead.
-- **Flawless Test Suite**: All 308 native AppKit tests and all 8 Rust substrate tests pass cleanly with zero failures.
+- **Flawless Test Suite**: All 315 native AppKit tests and all 66 Rust substrate tests pass cleanly with zero failures.
 - **Architectural Health**: `joy-check` verifies 100% Stability Index and 0 blocking Joyzoning violations across both layers.
 
 ### Negative / Trade-Offs

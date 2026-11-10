@@ -57,7 +57,7 @@ We elevate **HEAV3NS-MICRO** into the runtime substrate of **HEAV3NS — The Sov
   - Modal dialogs, disabled elements, and suspected no-ops are caught deterministically with structured recovery guidance.
   - Behavioral patterns and multi-step recovery procedures are learned and retained across turns.
 - **Trade-offs**:
-  - Adds 20 specialized modules across `PLUMBING`, `DOMAIN`, `INFRASTRUCTURE`, and `CORE` (bringing the crate to 64 modules and 29 built-in tools), all strictly maintained under Tier 1 Optimal (`< 800` lines) with a `100%` Joyzoning Stability Index ($E_S = 0.0038$).
+  - Adds specialized modules across `PLUMBING`, `DOMAIN`, `INFRASTRUCTURE`, and `CORE` (bringing the crate to 70 modules and 29 built-in tools), all strictly maintained under Tier 1 Optimal (`< 800` lines) with a `100%` Joyzoning Stability Index ($E_S = 0.0041$).
 
 ---
 

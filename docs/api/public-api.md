@@ -39,6 +39,9 @@ pub trait ITransactionJournal: Send + Sync {
     fn record_file_mutation(&mut self, tool_name: &str, target_path: &Path) -> String;
     fn rollback_last_mutation(&mut self) -> RollbackResult;
 }
+pub trait IWorkspacePromptProbe: Send + Sync {
+    fn probe(workspace_root: &Path) -> WorkspacePromptFacts;
+}
 pub trait IToolExecutor: Send + Sync {
     fn execute_batch_contract<'a>(&'a self, calls: &'a [ScheduledToolCall], cwd: &'a Path, authority: ExecutionAuthorityLevel, cancel_token: Option<&'a CancellationToken>) -> BoxFuture<'a, Vec<ToolExecutionRecord>>;
 }
@@ -79,11 +82,16 @@ pub trait IComputerUseOrchestrator: Send + Sync {
 ## 2. Core Engines & Orchestrators (`src/core/`)
 
 ### `AgentEngine` (`src/core/engine.rs`)
-The central multi-turn ReAct state machine orchestrating agent turns, context compaction, tool dispatch, and streaming progress events.
+The central multi-turn ReAct state machine orchestrating agent turns, context compaction, sticky tool dispatch, and streaming progress events.
 - `AgentEngine::with_defaults(workspace_root)`
 - `AgentEngine::tick(&self, input: EngineTickInput) -> EngineTickResult`
 - `AgentEngine::ask_side_question(&self, question: &str) -> Result<String, ProviderError>`
-- `AgentEngine::handle_slash_command(&self, input: &str) -> Option<String>` (`16` slash commands)
+- `AgentEngine::without_swarm_delegation(&self) -> AgentEngine` (blocks recursive Legion delegation)
+- `AgentEngine::inspect_context_snapshot(&self, current_prompt: &str) -> ContextInspectionSnapshot`
+- `AgentEngine::render_context_hud(&self, arg: &str) -> String`
+- `AgentEngine::render_prompt_inspector(&self, arg: &str) -> String`
+- `AgentEngine::render_tools_status(&self, filter: &str) -> String`
+- `AgentEngine::handle_slash_command(&self, input: &str) -> Option<String>` (`19` slash commands)
 - `AgentEngine::run_swarm(&self, goal: &str) -> SwarmFormationResult`
 - `AgentEngine::create_snapshot(&self) -> GameStateSnapshot` & `rewind_to_snapshot(&self, index: usize)`
 
@@ -105,5 +113,5 @@ The 9-stage closed-loop embodied agency orchestrator (`OBSERVE -> ORIENT -> INTE
 
 ## 3. UI & IPC Dispatch (`src/ui/`)
 
-- **`run_stdio_worker` (`src/ui/stdio_worker.rs`)**: Runs the `"v": 1` JSON-RPC 2.0 loop over standard I/O.
-- **`RpcDispatcher` (`src/ui/rpc_dispatch.rs`)**: Routes desktop requests (`files.*`, `changes.read`, `spider.check`, `memory.*`, `task.*`, `swarm.*`, `checkpoint.*`, `spatial.*`, `cua.*`).
+- **`run_stdio_worker` (`src/ui/stdio_worker.rs`)**: Runs the `"v": 1` JSON-RPC 2.0 loop over standard I/O with `"prompt-inspect-v1"` negotiation.
+- **`RpcDispatcher` (`src/ui/rpc_dispatch.rs`)**: Routes desktop requests (`files.*`, `changes.read`, `spider.check`, `memory.*`, `context.inspect`, `prompt.inspect`, `task.*`, `swarm.*`, `checkpoint.*`, `spatial.*`, `cua.*`).

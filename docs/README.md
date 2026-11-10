@@ -45,19 +45,19 @@ Workspace-verified figures from [papers/companion-brief.md](papers/companion-bri
 | Crate version | **0.1.0** (`2021` edition) | [`Cargo.toml`](../Cargo.toml) |
 | Sovereign Intelligence Pillars | **7** (`HEAV3NS-MICRO`, `SPIDER`, `REWIND`, `BROCCOLI`, `SYNTHETIC SWARM`, `COMPUTER USE`, `THE HARNESS`) | [`doc.md`](../doc.md) · [`papers/ascendant-intelligence.md`](papers/ascendant-intelligence.md) |
 | Canonical architectural zones | **5** (`PLUMBING`, `DOMAIN`, `INFRASTRUCTURE`, `CORE`, `UI`) | [`stability.config.json`](../stability.config.json) |
-| Rust source modules (`src/`) | **64** (`10` Plumbing · `25` Domain · `9` Infra · `14` Core · `6` UI, all `< 800` lines Tier 1 Optimal) | [`docs/PROJECT_MAP.md`](PROJECT_MAP.md) |
-| Total Joyzoning-audited workspace files | **280+** files (`329` local dependency edges) | [`VALIDATION_REPORT.md`](../VALIDATION_REPORT.md) |
+| Rust source modules (`src/`) | **70** (`11` Plumbing · `26` Domain · `9` Infra · `17` Core · `7` UI/roots, all `< 800` lines Tier 1 Optimal) | [`docs/PROJECT_MAP.md`](PROJECT_MAP.md) |
+| Total Joyzoning-audited workspace files | **280+** files (`394` local dependency edges) | [`VALIDATION_REPORT.md`](../VALIDATION_REPORT.md) |
 | Formal `I<Name>` domain interfaces | **39** traits (`19` port traits in `src/domain/interfaces/mod.rs` + `20` entity contracts) | [`src/domain/interfaces/mod.rs`](../src/domain/interfaces/mod.rs) |
-| Built-in agent tools | **29** native tools | [`src/core/tool_specs.rs`](../src/core/tool_specs.rs) & [`src/core/tool_registry.rs`](../src/core/tool_registry.rs) |
-| Interactive slash commands | **16** commands (`/help`, `/status`, `/compact`, `/clear`, `/memory`, `/vfs`, `/commit`, `/skills`, `/rewind`, `/doctor`, `/cua`, `/browser`, `/vision`, `/forge`, `/soul`, `/legion`) | [`src/core/slash_and_swarm.rs`](../src/core/slash_and_swarm.rs) |
+| Built-in agent tools | **29** native tools (`15` core active / `14` on-demand) | [`src/core/tool_specs.rs`](../src/core/tool_specs.rs) & [`src/core/tool_registry.rs`](../src/core/tool_registry.rs) |
+| Interactive slash commands | **19** commands (`/help`, `/status`, `/context`, `/prompt`, `/tools`, `/compact`, `/clear`, `/memory`, `/vfs`, `/commit`, `/skills`, `/rewind`, `/doctor`, `/cua`, `/browser`, `/vision`, `/forge`, `/soul`, `/legion`) | [`src/core/slash_and_swarm.rs`](../src/core/slash_and_swarm.rs) |
 | Memory arena default slab | **16 MiB** contiguous buffer with $O(1)$ unwinding | [`src/domain/arena.rs`](../src/domain/arena.rs) |
 | Spatial grounding throughput | **$\le 0.40\ \mu\text{s}$** per operation (`> 240,000` ops/sec) | [`src/core/spatial_tests.rs`](../src/core/spatial_tests.rs) |
-| Rust unit & integration tests | **49** passed (`0` failures) across substrate, spatial, and computer-use suites | `cargo test` |
+| Rust unit & integration tests | **66** passed (`0` failures) across substrate, spatial, computer-use, and prompt/shell-guard zenith suites | `cargo test` |
 | Agent Flight Test scenarios | **5** (`FT-01..FT-05`, `19/19` checks passing) | [`src/core/flight_runner.rs`](../src/core/flight_runner.rs) |
-| Native macOS AppKit Tests | **311** tests passing (`0` failures) | [`native/Tests/Heav3nsCodeTests/`](../native/Tests/Heav3nsCodeTests/) |
-| Joyzoning Stability Index ($SI$) | **100% (`SOVEREIGN`, $E_S = 0.0038$)** | [`VALIDATION_REPORT.md`](../VALIDATION_REPORT.md) |
+| Native macOS AppKit Tests | **315** tests passing (`0` failures) | [`native/Tests/Heav3nsCodeTests/`](../native/Tests/Heav3nsCodeTests/) |
+| Joyzoning Stability Index ($SI$) | **100% (`SOVEREIGN`, $E_S = 0.0041$)** | [`VALIDATION_REPORT.md`](../VALIDATION_REPORT.md) |
 | Joyzoning Build Health | **100% (`Grade: A+ — SOVEREIGN`, `0` violations, `0` advisories)** | [`VALIDATION_REPORT.md`](../VALIDATION_REPORT.md) |
-| Architecture Decision Records (ADRs) | **11** + template (`ADR-0001..0011`) | [`docs/adr/README.md`](adr/README.md) |
+| Architecture Decision Records (ADRs) | **13** + template (`ADR-0001..0013`) | [`docs/adr/README.md`](adr/README.md) |
 | Operational Playbooks | **6** runbooks (`PB-01..06`) | [`docs/playbooks/README.md`](playbooks/README.md) |
 | Blameless Engineering Postmortems | **5** + template (`PM-001..005`) | [`docs/postmortems/README.md`](postmortems/README.md) |
 | Concept Wiki, KB & Papers | **4** wiki guides · **3** KB articles · **4** papers | [`docs/wiki/README.md`](wiki/README.md) · [`docs/kb/README.md`](kb/README.md) · [`docs/papers/README.md`](papers/README.md) |
@@ -68,13 +68,13 @@ Workspace-verified figures from [papers/companion-brief.md](papers/companion-bri
 
 | Pillar | Role | Primary Docs & Papers |
 | :--- | :--- | :--- |
-| **`HEAV3NS-MICRO`** | Distilled intelligence runtime, self-healing parser, and multi-provider ReAct engine | [Whitepaper](papers/whitepaper.md) · [ADR-0003](adr/0003-self-healing-tool-call-parser.md) |
+| **`HEAV3NS-MICRO`** | Distilled intelligence runtime, self-healing parser, and multi-provider ReAct engine | [Whitepaper](papers/whitepaper.md) · [ADR-0003](adr/0003-self-healing-tool-call-parser.md) · [ADR-0012](adr/0012-lean-system-prompt-and-kv-cache-prefix-determinism.md) |
 | **`SPIDER`** | Structural perception of UI regions/affordances and static AST dependency graphs | [Ascendant Intelligence](papers/ascendant-intelligence.md) · [ADR-0011](adr/0011-sovereign-intelligence-and-spatial-computer-use.md) |
 | **`REWIND`** | Temporal continuity across Arena ($O(1)$), VFS baselines, TransactionJournal, and Display snapshots | [Portable Trinity](PORTABLE_TRINITY.md) · [ADR-0002](adr/0002-arena-allocator-and-o1-tick-rewind.md) · [ADR-0004](adr/0004-two-phase-vfs-staging-and-transaction-journal.md) |
 | **`BROCCOLI`** | Durable behavioral knowledge store, confidence calibration, TF-IDF memory, and evolutionary skill DAG | [Knowledge Handling](kb/knowledge-handling-architecture.md) · [ADR-0011](adr/0011-sovereign-intelligence-and-spatial-computer-use.md) |
-| **`SYNTHETIC SWARM`** | 5-specialist parallel cognitive consultation (`ConflictResolver`) & 7-specialist Legion formations | [Ascendant Intelligence](papers/ascendant-intelligence.md) · [Agent Stack](AGENT_STACK.md) |
+| **`SYNTHETIC SWARM`** | 5-specialist parallel cognitive consultation (`ConflictResolver`) & 7-specialist Legion formations | [Ascendant Intelligence](papers/ascendant-intelligence.md) · [Agent Stack](AGENT_STACK.md) · [ADR-0012](adr/0012-lean-system-prompt-and-kv-cache-prefix-determinism.md) |
 | **`COMPUTER USE`** | 9-stage closed-loop embodied agency & Double-Wrapped Spatial Action Mediation (`Wrapper A` + `B`) | [Ascendant Intelligence](papers/ascendant-intelligence.md) · [Whitepaper](papers/whitepaper.md) · [ADR-0011](adr/0011-sovereign-intelligence-and-spatial-computer-use.md) |
-| **`THE HARNESS`** | 5-Zone Joyzoning substrate, DAG Wave Scheduler, Secret Redactor, and AppKit `HEAV3NS-CODE` IDE | [Architecture (Current)](architecture/current.md) · [ADR-0005](adr/0005-dag-wave-scheduler-concurrency.md) · [ADR-0010](adr/0010-native-desktop-integration-and-rpc-protocol.md) |
+| **`THE HARNESS`** | 5-Zone Joyzoning substrate, DAG Wave Scheduler, Secret Redactor, and AppKit `HEAV3NS-CODE` IDE | [Architecture (Current)](architecture/current.md) · [ADR-0005](adr/0005-dag-wave-scheduler-concurrency.md) · [ADR-0010](adr/0010-native-desktop-integration-and-rpc-protocol.md) · [ADR-0013](adr/0013-shell-command-defenses-and-pipeline-sanitization.md) |
 
 ---
 
@@ -86,7 +86,7 @@ Workspace-verified figures from [papers/companion-brief.md](papers/companion-bri
 | **2. Playbooks (Task / Incident)** | Step-by-step incident triage (`PB-01..06`) & runtime recovery runbooks | [Playbooks Hub](playbooks/README.md) · [Operations Runbook](OPERATIONS.md) |
 | **3. Reference (Information)** | Rust traits (`39`), CLI flags, `29` tool specifications, and typed error catalogs | [API & CLI Hub](api/README.md) · [Public API](api/public-api.md) |
 | **4. Wiki & Papers (Explanation)** | Foundational charter, mental models, memory arena layout, spatial mediation, and whitepapers | [Engineering Wiki](wiki/README.md) · [Papers Hub](papers/README.md) · [Ascendant Intelligence](papers/ascendant-intelligence.md) |
-| **5. ADRs (Decision Provenance)** | Immutable MADR records (`ADR-0001..0011`) explaining *why* each architectural choice was made | [ADR Registry](adr/README.md) |
+| **5. ADRs (Decision Provenance)** | Immutable MADR records (`ADR-0001..0013`) explaining *why* each architectural choice was made | [ADR Registry](adr/README.md) |
 | **6. Postmortems (Reliability Memory)** | Blameless SRE postmortems (`PM-001..005`) linking edge cases to code guards & regression tests | [Postmortems Hub](postmortems/README.md) |
 | **7. Knowledge Base (Symptom & Heuristic Memory)** | Symptom-to-fix matrix, technical FAQ, & 3-tier runtime knowledge handling | [Knowledge Base Hub](kb/README.md) |
 
@@ -116,7 +116,7 @@ flowchart TB
     MAP["PROJECT_MAP.md & CODE_TO_DOC_MAP.md"]
     API["api/ (Public API · CLI & Stdio · Errors)"]
   end
-  subgraph code ["src/ (64 Modules) & native/ — 5-Zone Sovereign Architecture"]
+  subgraph code ["src/ (70 Modules) & native/ — 5-Zone Sovereign Architecture"]
     DOM["src/domain/ (arena · computer_use · spatial_mediator · skill_tree · memory · interfaces · types)"]
     CORE["src/core/ (engine · computer_use_orchestrator · spatial_engine · tool_registry · tool_governor)"]
     INFRA["src/infrastructure/ (http_provider · vfs_store · behavioral_store · transaction_journal)"]
@@ -168,7 +168,7 @@ flowchart TB
 
 ## ADRs, Playbooks, Wiki, Postmortems, & Knowledge Base
 
-- **[ADRs (`docs/adr/`)](adr/README.md)**: Architectural decisions (`ADR-0001..0011`) recorded in MADR format with formal verification commands.
+- **[ADRs (`docs/adr/`)](adr/README.md)**: Architectural decisions (`ADR-0001..0013`) recorded in MADR format with formal verification commands.
 - **[Playbooks (`docs/playbooks/`)](playbooks/README.md)**: Diagnostic runbooks (`PB-01..06`) with triage cards, Mermaid trees, and mitigation steps.
 - **[Wiki (`docs/wiki/`)](wiki/README.md)**: Conceptual mental models, execution wave geometry, and memory layouts.
 - **[Postmortems (`docs/postmortems/`)](postmortems/README.md)**: Retrospectives (`PM-001..005`) tracing failures to code guards, regression tests, and ADRs.
@@ -197,20 +197,20 @@ flowchart TB
 ## Local development
 
 ```bash
-# 1. Run all 49 Rust unit, spatial, computer-use & integration tests
+# 1. Run all 66 Rust unit, spatial, computer-use, zenith & integration tests
 cargo test
 
 # 2. Run the 5-scenario Agent Flight suite (FT-01..FT-05)
 cargo run -- --flight
 
-# 3. Run all 311 Native macOS AppKit tests
+# 3. Run all 315 Native macOS AppKit tests
 cd native && swift test && cd ..
 
 # 4. Verify Joyzoning architectural sovereignty (100% SI, Grade A+)
-npm run joy-check
+node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --theme strict
 
 # 5. Verify documentation links, structure, and metrics
-npm run docs:check
+node bin/docs-check.mjs
 ```
 
 ---
@@ -221,4 +221,4 @@ npm run docs:check
 2. **Emergent Systems Intelligence**: Cooperation across `HEAV3NS-MICRO`, `SPIDER`, `REWIND`, `BROCCOLI`, `SYNTHETIC SWARM`, `COMPUTER USE`, and `THE HARNESS`.
 3. **Deterministic Memory & Reversibility**: Contiguous 16-MiB arena allocation with $O(1)$ rewind per tick and baseline-verified two-phase VFS staging.
 4. **Grounded Embodied Agency**: Double-Wrapped Spatial Action Mediation (`Wrapper A` Grounding + `Wrapper B` Execution Assurance).
-5. **Verifiability**: 100% test pass rate (`49` Rust + `311` AppKit tests) and automated documentation parity across the workspace.
+5. **Verifiability**: 100% test pass rate (`66` Rust + `315` AppKit tests) and automated documentation parity across the workspace.

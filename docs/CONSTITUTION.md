@@ -31,4 +31,4 @@ Long-lived controllers and processes must release resources deterministically.
 
 ## VII. The Law of Proof-Before-Mutation
 No architectural or runtime change is complete without automated empirical verification.
-- **Rule**: Every change must pass `cargo test` (`49` suites), `cd native && swift test` (`311` suites), `heav3ns-micro --flight` (`FT-01..FT-05`), `joy-check --theme strict` (`100%` Stability Index, `0` violations, `0` advisories), and `node bin/docs-check.mjs`.
+- **Rule**: Every change must pass `cargo test` (`66` suites), `cd native && swift test` (`315` suites), `heav3ns-micro --flight` (`FT-01..FT-05`), `joy-check --theme strict` (`100%` Stability Index, `0` violations, `0` advisories), and `node bin/docs-check.mjs`.

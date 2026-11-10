@@ -93,16 +93,33 @@ Located in [`src/plumbing/json_repair.rs`](../../src/plumbing/json_repair.rs):
 
 ---
 
-## 4. Standard I/O Inter-Process Communication Engine
+## 4. Shell Command Guard & Pipeline Parser (`src/plumbing/shell_guard.rs`)
+
+Located in [`src/plumbing/shell_guard.rs`](../../src/plumbing/shell_guard.rs), [`ShellCommandGuard`](../../src/plumbing/shell_guard.rs) provides quote-, escape-, and UTF-8-aware defensive parsing for `run_command`:
+- **Top-Level Heredoc Defenses (`ADR-0015`)**: Detects multiline compound heredocs, pre-heredoc redirections, `sudo tee`, and closing-delimiter redirects (`EOF > file`), while ignoring quoted `<<`, bitshifts (`$((1 << 8))`), and interpreter stdin (`python3 - << 'PY'`).
+- **Terminal File Dump Defenses (`ADR-0016`)**: Tokenizes pipelines and compound statements (`;`, `&&`, `||`, `\n`, `$(...)`), unwraps `env`/`command`/`sudo`/full paths, distinguishes `2>/dev/null` from stdout redirects, and intercepts `xargs cat`, `find -exec head`, and interactive `cat > file` deadlocks without false positives on filter pipelines (`| rg`, `| jq`, `| wc`) or `/proc/`, `/sys/`, `/dev/` reads.
+
+---
+
+## 5. KV-Cache Deterministic Prompt Architecture (`src/domain/prompt_spec.rs`)
+
+Located in [`src/domain/prompt_spec.rs`](../../src/domain/prompt_spec.rs), [`SystemPromptSpec`](../../src/domain/prompt_spec.rs) maximizes provider prompt-cache hit rates:
+- **Static Prefix Split**: The constitutional mandate, tool rules, untrusted data fences, and authority directives are rendered into an immutable `static_prefix` (~400 tokens) with an 8-character FNV-1a hex fingerprint (`cache_prefix_fingerprint`), ensuring 100% byte identity across distinct workspaces.
+- **Dynamic Suffix**: Workspace environment details, Joyzoning architecture summaries, active `SoulProfile` axioms, and sanitized governance rules (`SOUL.md`, `.cursorrules`) are appended dynamically in `dynamic_suffix`.
+- **Model Family Optimization**: Provides tailored execution hints for OpenAI reasoning, Gemini, Anthropic, and compact local models without inflating prompt token budgets.
+
+---
+
+## 6. Standard I/O Inter-Process Communication Engine
 
 Located in [`src/ui/stdio_worker.rs`](../../src/ui/stdio_worker.rs) and [`src/ui/rpc_dispatch.rs`](../../src/ui/rpc_dispatch.rs):
 - **Stream Isolation**: JSON-RPC control and data frames flow across standard output (`stdout`), while diagnostic logging, metrics, and panic traces flow across standard error (`stderr`).
-- **Control Frame Invariant**: All outbound frames incorporate a `"v": 1` version token to guarantee backward-compatible protocol negotiation.
+- **Control Frame Invariant**: All outbound frames incorporate a `"v": 1` version token to guarantee backward-compatible protocol negotiation, including `"prompt-inspect-v1"` capability exchange.
 - **Asynchronous Task Disconnect Tolerance**: In-flight prompts survive client disconnects; unconfirmed submissions are checked via `task.lookup` without duplicate tool execution.
 
 ---
 
-## 5. Multi-State Snapshot Topology (`GameStateSnapshot`)
+## 7. Multi-State Snapshot Topology (`GameStateSnapshot`)
 
 The substrate maintains atomic multi-state snapshots across four independent subsystems:
 1. **Transcript History**: User prompts, assistant messages, and tool activity records.
@@ -114,10 +131,10 @@ Invoking `AgentEngine::rewind_to_snapshot` restores all four dimensions simultan
 
 ---
 
-## 6. Architectural Boundaries (Joyzoning Isolation)
+## 8. Architectural Boundaries (Joyzoning Isolation)
 
-The Rust module hierarchy strictly enforces Joyzoning:
-- `src/domain/interfaces/mod.rs` acts as the port interface boundary.
+The Rust module hierarchy strictly enforces Joyzoning across 70 modules:
+- `src/domain/interfaces/mod.rs` acts as the port interface boundary (`39` formal `I<Name>` traits).
 - `src/infrastructure/` modules never import from `src/ui/`.
 - `src/core/` interacts with persistence, VFS, and HTTP solely through traits.
 - All source files remain under **Tier 1 Optimal (< 800 lines, `SPI-203`)**.

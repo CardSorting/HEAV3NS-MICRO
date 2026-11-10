@@ -15,20 +15,23 @@ Guidelines, automated guardrails, and quality checklists for maintainers of **HE
 
 ## 1. Quality Gates & Enforcement Commands
 
-Before merging any pull request or cutting a release, maintainers must verify that all four local verification gates exit with code `0`:
+Before merging any pull request or cutting a release, maintainers must verify that all five local verification gates exit with code `0`:
 
 ```bash
-# Gate 1: Rust compilation & test suite (8 tests)
+# Gate 1: Rust compilation & test suite (66 tests)
 cargo test
 
 # Gate 2: 5-scenario Agent Flight suite (19 checks)
 cargo run -- --flight
 
-# Gate 3: Joyzoning spatial sovereignty audit (100% SI)
-npm run joy-check
+# Gate 3: Native macOS AppKit suite (315 tests)
+cd native && swift test && cd ..
 
-# Gate 4: Diátaxis documentation guardrails (zero broken links)
-npm run docs:check
+# Gate 4: Joyzoning spatial sovereignty audit (100% SI, Grade A+)
+node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --theme strict
+
+# Gate 5: Diátaxis documentation guardrails (zero broken links)
+node bin/docs-check.mjs
 ```
 
 ---

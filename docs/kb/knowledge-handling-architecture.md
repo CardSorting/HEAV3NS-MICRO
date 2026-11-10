@@ -31,7 +31,7 @@ Knowledge in **HEAV3NS — The Sovereign Intelligence Architecture** operates ac
 - **Lifecycle**: High-confidence patterns ($\ge 0.80$) in `BehavioralKnowledgeStore` automatically synchronize into `MemoryStore`, while reusable capabilities are forged and linted (`SkillDoctor`) in `SkillTreeCatalog`.
 
 ### Tier 4: Institutional Git-Versioned Knowledge
-- **Location**: `doc.md`, `ROADMAP.md`, `docs/papers/`, `docs/adr/` (`ADR-0001..0011`), `docs/playbooks/` (`PB-01..06`), `docs/postmortems/` (`PM-001..005`).
+- **Location**: `doc.md`, `ROADMAP.md`, `docs/papers/`, `docs/adr/` (`ADR-0001..0013`), `docs/playbooks/` (`PB-01..06`), `docs/postmortems/` (`PM-001..005`).
 - **Lifecycle**: Permanent, version-controlled, and continuously verified by `node bin/docs-check.mjs`.
 
 ---
@@ -44,7 +44,7 @@ flowchart TD
   FILTER --> T1["Tier 1: Arena Scratchpad & SpatialScene"]
   T1 --> T2["Tier 2: BehavioralKnowledgeStore (Confidence Calibration & Procedures)"]
   T2 -->|"Confidence >= 0.80"| T3["Tier 3: Hybrid TF-IDF MemoryStore & SkillTreeCatalog DAG"]
-  T3 --> T4["Tier 4: Git-Tracked Papers, ADRs (0001..0011) & Playbooks (PB-01..06)"]
+  T3 --> T4["Tier 4: Git-Tracked Papers, ADRs (0001..0013) & Playbooks (PB-01..06)"]
   T4 --> AGENTS["Distilled into doc.md, AGENTS.md & SOUL.md"]
   AGENTS --> RAW
 ```

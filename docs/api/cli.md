@@ -20,11 +20,15 @@ USAGE:
   heav3ns-micro [OPTIONS] [PROMPT]
 ```
 
-### Execution Modes
+### Execution Modes & Subcommands
 
-| Flag | Long Flag | Description |
+| Flag / Subcommand | Long Flag / Form | Description |
 | :--- | :--- | :--- |
 | *(none)* | *(default)* | Starts an interactive pair-programming REPL session in the terminal. |
+| `context` | `context [--json]` | Displays the visual Context & Prompt Inspector HUD (or JSON telemetry). |
+| `doctor` | `doctor` | Runs comprehensive diagnostic audit across credentials, SLA, and substrate. |
+| `init` | `init` | Interactive credential and provider onboarding wizard. |
+| `demo` | `demo` | Runs offline guided tour and substrate self-test. |
 | `-p` | `--prompt <TEXT>` | Executes a single agent turn with the given prompt and exits cleanly. |
 | *(none)* | `--flight` / `--benchmark-flight` | Runs the 5-scenario Agent Flight benchmark suite (`FT-01..FT-05`). |
 | *(none)* | `--bench` | Runs substrate micro-benchmarks along with the flight suite. |
@@ -67,6 +71,9 @@ When running in interactive REPL mode, commands starting with `/` execute determ
 | :--- | :--- | :--- |
 | `/help` | *(none)* | Displays available commands and runtime shortcuts. |
 | `/status` | *(none)* | Prints current session state, transcript length, context budget, and arena memory usage. |
+| `/context` | `[json]` | Displays the visual 20-cell token bar HUD, KV-cache prefix fingerprint, and tool routing. |
+| `/prompt` | `[prefix\|compact\|specialist\|side\|json]` | Inspects deterministic static prompt prefix, full prompt, or profile outputs. |
+| `/tools` | `[NAME]` | Displays active core vs. on-demand specialist tools, unlocked tools, and token savings. |
 | `/compact` | `[RATIO]` | Triggers deterministic transcript compaction (default threshold: 75%). |
 | `/clear` | *(none)* | Clears active conversation memory while preserving VFS baseline. |
 | `/memory` | `[KEY] [VAL]` | Inspects, sets, or lists entries in the persistent `MemoryStore`. |
@@ -74,7 +81,13 @@ When running in interactive REPL mode, commands starting with `/` execute determ
 | `/commit` | *(none)* | Atomically flushes staged VFS edits to disk with conflict detection. |
 | `/skills` | *(none)* | Ingests and lists available `.agents/skills/` capabilities. |
 | `/rewind` | `[TICKS]` | Performs $O(1)$ multi-state rewind using `SlabBufferSnapshot`. |
-| `/doctor` | *(none)* | Executes architectural self-diagnostics and health checks. |
+| `/doctor` | *(none)* | Executes architectural self-diagnostics, prompt hygiene, and health checks. |
+| `/cua` | *(none)* | Inspects virtual display state and Set-of-Marks layout. |
+| `/browser` | *(none)* | Inspects zero-trust browser session and DOM navigation state. |
+| `/vision` | `[PATH]` | Inspects image metadata or generates synthetic test SVG/BMP assets. |
+| `/forge` | `[CMD]` | Interacts with the evolutionary Skill DAG and Soul Drop Vault. |
+| `/soul` | *(none)* | Inspects active `SoulProfile` axioms and operational directives. |
+| `/legion` | `[TASK]` | Classifies task into a 7-specialist topological swarm formation. |
 
 ---
 
@@ -110,6 +123,7 @@ The host client then performs an initialization call to negotiate capabilities:
       "task-continuation-v1",
       "project-repair-v1",
       "checkpoints-v1",
+      "prompt-inspect-v1",
       "run-details",
       "queue-edit",
       "queue-remove"
@@ -132,6 +146,7 @@ The host client then performs an initialization call to negotiate capabilities:
       "task-continuation-v1",
       "project-repair-v1",
       "checkpoints-v1",
+      "prompt-inspect-v1",
       "run-details",
       "queue-edit",
       "queue-remove"
@@ -145,6 +160,13 @@ The host client then performs an initialization call to negotiate capabilities:
 ---
 
 ## 5. Desktop RPC Method Catalog
+
+### Context & Prompt Telemetry (`context.inspect` & `prompt.inspect`)
+Inspects active token budgets, KV-cache prefix fingerprint, dynamic workspace facts, and tool routing breakdowns.
+- **Request**: `{"jsonrpc": "2.0", "id": 2, "method": "context.inspect", "params": {}}`
+- **Result**: `{"profile": "standard", "modelName": "gpt-5.6-terra", "modelFamily": "openai_reasoning", "cachePrefixHash": "c88ab3c9", "activeTools": 15, "totalTools": 29, "governanceSources": ["SOUL.md"]}`
+- **Request**: `{"jsonrpc": "2.0", "id": 3, "method": "prompt.inspect", "params": {"view": "prefix"}}`
+- **Result**: `{"view": "prefix", "content": "..."}`
 
 ### Snapshot & Synchronization (`snapshot`)
 Requests complete snapshot of workspace state, active runs, and transcript history.

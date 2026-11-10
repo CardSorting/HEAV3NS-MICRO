@@ -18,9 +18,9 @@ HEAV3NS-MICRO enforces an uncompromising 5-pillar continuous integration pipelin
 
 ```mermaid
 flowchart LR
-  PR["Pull Request / Commit"] --> TEST["1. Cargo Test (8 unit suites)"]
+  PR["Pull Request / Commit"] --> TEST["1. Cargo Test (66 unit suites)"]
   PR --> FLIGHT["2. Agent Flight (5 benchmark scenarios)"]
-  PR --> SWIFT["3. Native Swift Test (308 AppKit tests)"]
+  PR --> SWIFT["3. Native Swift Test (315 AppKit tests)"]
   PR --> JOY["4. Joyzoning Strict Audit (0 violations)"]
   PR --> DOCS["5. Docs Check (0 broken links)"]
   TEST --> GATE["Pass All Gates -> Merge Approved"]
@@ -102,4 +102,7 @@ node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --theme strict
 
 # 5. StabilityDoctor architectural health check
 node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --doctor
+
+# 6. Documentation guardrails & link verification
+node bin/docs-check.mjs
 ```

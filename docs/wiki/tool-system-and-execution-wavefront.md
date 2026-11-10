@@ -59,7 +59,7 @@ sequenceDiagram
 16. `get_workspace_diff`: Unified diff of current workspace changes. (ReadOnly)
 
 ### C. Shell Execution & Journal Rewind (`2` Tools)
-17. `run_command`: Execute shell command with timeout, PTY ANSI responder, and `SafetyPolicy` guards (`ADR-0015`/`0016`). (Mutating)
+17. `run_command`: Execute shell command with timeout, PTY ANSI responder, and `ShellCommandGuard` / `SafetyPolicy` defenses (`ADR-0015` compound heredoc file-write blocks and `ADR-0016` terminal file dump blocks with UTF-8 preservation). (Mutating)
 18. `rollback_last_mutation`: Undo the most recent file mutation via `TransactionJournal`. (Mutating)
 
 ### D. Memory, Spill Recovery & Skills (`5` Tools)
@@ -76,3 +76,13 @@ sequenceDiagram
 27. `skill_forge`: Evolutionary Skill Tree & Soul Drop Vault (`list_dag`, `forge`, `apply_pack`, `clone`, `lint`, `autofix`, `sync_vault`, `export`, `ingest`, `soul_status`). (Mutating)
 28. `engage_swarm`: `The Legion` 7-specialist topological task classifier (`classify_task_for_legion`). (ReadOnly)
 29. `spatial_interact`: First-class Double-Wrapped Spatial Action engine (`ground`, `execute` with off-screen auto-scroll, `plan`, `execute_plan`, `query` directional relationships, `reconcile` DOM+SoM, `audit`, `orchestrate`). (Mutating)
+
+---
+
+## 3. Sticky Dynamic Tool Schema Routing & Token Optimization
+
+Rather than transmitting all 29 tool schemas (`~4,278` tokens) unconditionally on every turn, [`ToolRegistry::select_tool_schemas_for`](../../src/core/tool_registry.rs) partitions tools into **Core Active** and **On-Demand Specialist** sets:
+- **Core Active Subset (`15` tools, `~1,510` tokens)**: `view_file`, `write_file`, `replace_file_content`, `multi_replace_file_content`, `apply_unified_diff`, `delete_file`, `list_dir`, `find_files`, `grep_search`, `search_symbols`, `run_command`, `rollback_last_mutation`, `save_memory`, `search_memory`, `retrieve_spill_content`.
+- **On-Demand Specialist Subset (`14` tools)**: `edit_file_anchored`, `move_file`, `file_info`, `directory_tree`, `batch_replace_regex`, `get_workspace_diff`, `list_skills`, `use_skill`, `computer_use`, `browser_use`, `vision_inspect`, `skill_forge`, `engage_swarm`, `spatial_interact`.
+- **Sticky Session Retention**: Specialist tools unlock automatically when user prompts or prior turns reference GUI, browser, vision, skills, or swarm capabilities, and remain unlocked for the duration of the task so multi-step workflows never suffer amnesia. This saves **`2,768` tokens (`64.7%`)** per coding turn.
+- **Specialist Scope Isolation**: When executing subagent tasks in `The Legion` swarm, `engage_swarm` is automatically stripped from exposed schemas and blocked by [`AgentEngine::without_swarm_delegation`](../../src/core/engine.rs) to prevent runaway recursive delegation.

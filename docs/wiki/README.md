@@ -22,7 +22,7 @@ Welcome to the **HEAV3NS-MICRO Engineering Wiki**—the concept-first encycloped
 ```mermaid
 flowchart LR
   subgraph S1 ["1. Spatial Sovereignty (Joyzoning)"]
-    Z["5 Canonical Zones (64 Rust Modules)<br/>DOMAIN · CORE · INFRA · PLUMBING · UI"]
+    Z["5 Canonical Zones (70 Rust Modules)<br/>DOMAIN · CORE · INFRA · PLUMBING · UI"]
     P["Principle of Geographic Alignment"]
     C["39 Formal I* Traits in src/domain/"]
   end
@@ -51,4 +51,4 @@ flowchart LR
 | **[Mental Models (`mental-models.md`)](mental-models.md)** | The 7 core mental models: *The Arena Slab (`REWIND`)*, *The Two-Phase VFS*, *The Wavefront (`THE HARNESS`)*, *The Self-Healing Parser (`HEAV3NS-MICRO`)*, *The Double-Wrapped Spatial Gate (`COMPUTER USE`)*, *The Spider & Broccoli Loop*, and *The Five Sovereign Rooms*. | Humans and AI agents onboarding to HEAV3NS-MICRO |
 | **[Rust Substrate Architecture (`rust-substrate-architecture.md`)](rust-substrate-architecture.md)** | Deep dive into pointer arithmetic, arena slab layout, memory alignment, zero-allocation parsing, and `"v": 1` stdio JSON-RPC IPC. | Systems programmers & performance engineers |
 | **[Tool System & Execution Wavefront (`tool-system-and-execution-wavefront.md`)](tool-system-and-execution-wavefront.md)** | Concurrency geometry of the DAG wave scheduler, read/write barrier partitioning, and all `29` native tool specs. | AI tool builders & runtime developers |
-| **[Metrics & Memory Encyclopedia (`metrics-and-memory-encyclopedia.md`)](metrics-and-memory-encyclopedia.md)** | Formulas for token estimation, arena memory budgeting, FNV-1a hashing, Bayesian confidence calibration, 2D occlusion union, and Joyzoning stability indexing ($E_S = 0.0038$). | Architects & code auditors |
+| **[Metrics & Memory Encyclopedia (`metrics-and-memory-encyclopedia.md`)](metrics-and-memory-encyclopedia.md)** | Formulas for token estimation, arena memory budgeting, FNV-1a hashing, Bayesian confidence calibration, 2D occlusion union, and Joyzoning stability indexing ($E_S = 0.0041$). | Architects & code auditors |

@@ -21,7 +21,7 @@ This section contains the theoretical, mathematical, and empirical foundations o
 | Paper | Scope | Key Topics |
 | :--- | :--- | :--- |
 | **[The Ascendant Computational Intelligence](ascendant-intelligence.md)** | Foundational Doctrine & Cybernetic Theory | The Seven Sovereign Pillars (`HEAV3NS-MICRO`, `SPIDER`, `REWIND`, `BROCCOLI`, `SYNTHETIC SWARM`, `COMPUTER USE`, `THE HARNESS`), emergent intelligence formalism, and the 5 Grand Challenges. |
-| **[Companion Brief](companion-brief.md)** | Executive & SRE Overview | Live workspace-verified metrics (`64` Rust modules, `39` `I<Name>` traits, `29` tools, `49` Rust tests, `311` AppKit tests, `E_S = 0.0038`), benchmark throughput, and operational comparison. |
+| **[Companion Brief](companion-brief.md)** | Executive & SRE Overview | Live workspace-verified metrics (`70` Rust modules, `39` `I<Name>` traits, `29` tools, `66` Rust tests, `315` AppKit tests, `E_S = 0.0041`), benchmark throughput, and operational comparison. |
 | **[Empirical Benchmarking](empirical-benchmarking.md)** | Empirical Evaluation & Stress Dynamics | Live micro-benchmarks ($260\text{k}$ allocs/sec, $6.3\text{k}$ parser repairs/sec, $17\text{k}$ spatial groundings/sec) and real-world workspace task verification across 4 testbeds in `/Users/bozoegg/Desktop/tests`. |
 | **[Philosophy](philosophy.md)** | Engineering Values & Ethics | Spatial sovereignty, embodied agency beyond passive token prediction, bounded memory, and reversible reality parity. |
 | **[Technical Whitepaper](whitepaper.md)** | Formal Substrate & Spatial Specification | Arena bump allocation, self-healing streaming parsing, two-phase VFS, Double-Wrapped Spatial Action Mediation (`Wrapper A` + `Wrapper B`), 9-stage Closed-Loop Computer Use, and AppKit JSON-RPC IPC. |
@@ -43,14 +43,14 @@ This section contains the theoretical, mathematical, and empirical foundations o
 All quantitative claims made across these papers are verified directly against the live repository:
 
 ```bash
-# Verify Rust test suite (49 tests) and Agent Flight benchmarks (FT-01..FT-05)
+# Verify Rust test suite (66 tests) and Agent Flight benchmarks (FT-01..FT-05)
 cargo test
 cargo run -- --flight
 
-# Verify Native macOS AppKit test suite (311 tests)
+# Verify Native macOS AppKit test suite (315 tests)
 cd native && swift test && cd ..
 
 # Verify 100% Joyzoning Stability Index and documentation guardrails
-npm run joy-check
-npm run docs:check
+node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --theme strict
+node bin/docs-check.mjs
 ```

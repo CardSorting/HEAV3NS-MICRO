@@ -18,7 +18,7 @@
 
 ## Abstract
 
-We present **HEAV3NS-MICRO** (`v0.1.0`), the distilled Rust intelligence runtime of **HEAV3NS — The Sovereign Intelligence Architecture**, paired with **HEAV3NS-CODE**, a native AppKit macOS developer control station. Organized across five mathematically enforced Joyzoning layers (`64` Rust modules, `39` formal `I<Name>` traits, `29` native tools, `280+` audited workspace files), the system unifies seven sovereign pillars: **`HEAV3NS-MICRO`** (runtime core), **`SPIDER`** (structural & interface perception), **`REWIND`** (multi-plane temporal continuity), **`BROCCOLI`** (durable behavioral knowledge & evolutionary skill DAG), **`SYNTHETIC SWARM`** (5-specialist cognitive consultation & 7-specialist Legion task orchestration), **`COMPUTER USE`** (9-stage closed-loop embodied agency with Double-Wrapped Spatial Action Mediation), and **`THE HARNESS`** (wave scheduler, token governor, zero-trust security, and `"v": 1` stdio JSON-RPC bridge). We demonstrate sub-microsecond spatial grounding ($\le 0.40\ \mu\text{s}$), 100% Joyzoning Stability Index ($E_S = 0.0038$), 100% Build Health (`Grade: A+ — SOVEREIGN`), and 100% pass rates across all 49 Rust test suites (including the `FT-01..FT-05` Flight benchmark) and 311 native AppKit tests.
+We present **HEAV3NS-MICRO** (`v0.1.0`), the distilled Rust intelligence runtime of **HEAV3NS — The Sovereign Intelligence Architecture**, paired with **HEAV3NS-CODE**, a native AppKit macOS developer control station. Organized across five mathematically enforced Joyzoning layers (`70` Rust modules, `39` formal `I<Name>` traits, `29` native tools, `280+` audited workspace files), the system unifies seven sovereign pillars: **`HEAV3NS-MICRO`** (runtime core), **`SPIDER`** (structural & interface perception), **`REWIND`** (multi-plane temporal continuity), **`BROCCOLI`** (durable behavioral knowledge & evolutionary skill DAG), **`SYNTHETIC SWARM`** (5-specialist cognitive consultation & 7-specialist Legion task orchestration), **`COMPUTER USE`** (9-stage closed-loop embodied agency with Double-Wrapped Spatial Action Mediation), and **`THE HARNESS`** (wave scheduler, token governor, zero-trust security, and `"v": 1` stdio JSON-RPC bridge). We demonstrate sub-microsecond spatial grounding ($\le 0.40\ \mu\text{s}$), 100% Joyzoning Stability Index ($E_S = 0.0041$), 100% Build Health (`Grade: A+ — SOVEREIGN`), and 100% pass rates across all 66 Rust test suites (including the `FT-01..FT-05` Flight benchmark) and 315 native AppKit tests.
 
 ---
 
@@ -111,9 +111,9 @@ The [`ComputerUseOrchestrator`](../../src/core/computer_use_orchestrator.rs) exe
 
 | Verification Suite | Command | Measured Result |
 | :--- | :--- | :--- |
-| **Rust Unit, Spatial & CUA Suite** | `cargo test` | **49 / 49 passed** (`0` failures, `0.05s`) |
+| **Rust Unit, Spatial, CUA & Zenith Suite** | `cargo test` | **66 / 66 passed** (`0` failures, `0.05s`) |
 | **Agent Flight Benchmark (`FT-01..FT-05`)** | `cargo run -- --flight` | **5 / 5 scenarios (`19 / 19` checks, `100%`)** |
 | **Spatial Grounding Micro-Benchmark** | `cargo test test_microbenchmark` | **$\le 0.40\ \mu\text{s}$ / op** (`> 240,000` groundings/sec) |
-| **Native macOS AppKit Test Suite** | `cd native && swift test` | **311 / 311 passed** (`0` failures) |
-| **Strict Joyzoning & Stability Doctor** | `npm run joy-check` | **100% Stability Index ($E_S = 0.0038$)**, **Grade A+ (`100% SOVEREIGN`)** |
-| **Documentation Guardrails** | `npm run docs:check` | **100% header, section, and link parity** |
+| **Native macOS AppKit Test Suite** | `cd native && swift test` | **315 / 315 passed** (`0` failures) |
+| **Strict Joyzoning & Stability Doctor** | `node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --theme strict` | **100% Stability Index ($E_S = 0.0041$)**, **Grade A+ (`100% SOVEREIGN`)** |
+| **Documentation Guardrails** | `node bin/docs-check.mjs` | **100% header, section, and link parity** |

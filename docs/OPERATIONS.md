@@ -33,6 +33,8 @@ flowchart TD
 
 | Mode | Command | Use Case | Exit Codes |
 | :--- | :--- | :--- | :--- |
+| **Context HUD** | `heav3ns-micro context [--json]` | Token budget, KV-prefix, and tool routing inspection | `0`: done |
+| **Diagnostic Doctor** | `heav3ns-micro doctor` | Substrate health, credentials, and prompt audit | `0`: pass, `1`: action needed |
 | **Flight Benchmark** | `heav3ns-micro --flight` | CI/CD gate and post-build verification | `0`: all pass, `1`: failure |
 | **Smoke Check** | `heav3ns-micro --smoke` | Fast runtime environment sanity test | `0`: pass, `1`: error |
 | **Micro-benchmarks** | `heav3ns-micro --bench` | Arena allocation & parsing throughput analysis | `0`: done |
@@ -57,6 +59,7 @@ When spawned by the native AppKit client (`native/Sources/Heav3nsCode/RuntimeCli
 - `files.list` / `files.read` / `files.readBinary`: Safe workspace exploration and chunked Base64 binary streaming.
 - `changes.read`: Renders unified diffs against Git working tree and staging.
 - `spider.check`: Static AST syntax, local imports, and cyclic dependency audits.
+- `context.inspect` / `prompt.inspect`: Live token budget telemetry, KV-cache prefix fingerprint, and prompt viewports.
 - `memory.list` / `memory.save` / `memory.remove`: Persistent conversation memory inspection and modification.
 - `task.submit` / `task.stop` / `task.lookup`: Dispatches instructions, handles cooperative cancellation, and reconciles interrupted submissions without replay.
 - `swarm.plan` / `swarm.next` / `swarm.report`: Multi-specialist topological swarm orchestration.
@@ -72,6 +75,9 @@ When running in interactive REPL mode, the following slash commands control sess
 | :--- | :--- | :--- |
 | `/help` | Print command usage and active configuration | CLI Presenter |
 | `/status` | Display token count, memory arena usage, and authority level | `AgentEngine::config_snapshot` |
+| `/context` | Display visual 20-cell token budget HUD and tool routing breakdown | `AgentEngine::render_context_hud` |
+| `/prompt` | Inspect deterministic static prompt prefix or profile output | `AgentEngine::render_prompt_inspector` |
+| `/tools` | Inspect active core tools vs on-demand specialist tools and token savings | `AgentEngine::render_tools_status` |
 | `/compact` | Perform explicit memory arena compaction | `SessionCompactor::compact` |
 | `/clear` | Reset active session turns and rewind scratch arena | `ArenaAllocator::rewind_to_checkpoint` |
 | `/memory` | Inspect stored semantic memories and key-value facts | `MemoryStore::list_memories` |

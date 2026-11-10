@@ -62,6 +62,10 @@ Complete map of the **HEAV3NS-MICRO** documentation system, mirroring the **HEAV
 | [adr/0007-contractual-sovereignty-and-i-interfaces.md](adr/0007-contractual-sovereignty-and-i-interfaces.md) | Strict `I<Name>` Rust traits decoupling core orchestration from infrastructure |
 | [adr/0008-secret-redaction-and-security-policy.md](adr/0008-secret-redaction-and-security-policy.md) | Deterministic secret redaction and high-risk file interdiction |
 | [adr/0009-diataxis-documentation-and-knowledge-governance.md](adr/0009-diataxis-documentation-and-knowledge-governance.md) | Diátaxis + Institutional Memory Documentation Architecture & Automated Guardrails |
+| [adr/0010-native-desktop-integration-and-rpc-protocol.md](adr/0010-native-desktop-integration-and-rpc-protocol.md) | Native Desktop AppKit Integration, Modular UI Decomposition, and Stdio JSON-RPC Protocol |
+| [adr/0011-sovereign-intelligence-and-spatial-computer-use.md](adr/0011-sovereign-intelligence-and-spatial-computer-use.md) | Sovereign Intelligence Architecture, Double-Wrapped Spatial Mediation & Closed-Loop Computer Use |
+| [adr/0012-lean-system-prompt-and-kv-cache-prefix-determinism.md](adr/0012-lean-system-prompt-and-kv-cache-prefix-determinism.md) | Lean System Prompt Specification, KV-Cache Prefix Determinism & Sticky Dynamic Tool Routing |
+| [adr/0013-shell-command-defenses-and-pipeline-sanitization.md](adr/0013-shell-command-defenses-and-pipeline-sanitization.md) | Shell Command Guard, Heredoc File-Write Interdiction & Terminal File-Read Anti-Starvation |
 
 ### 3. Operational Playbooks (`docs/playbooks/`)
 
