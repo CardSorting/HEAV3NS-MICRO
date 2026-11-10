@@ -2,9 +2,10 @@
 use crate::core::engine::AgentEngine;
 use crate::core::session_store::SessionCompactor;
 use crate::domain::memory::MemoryEntry;
-use crate::domain::types::progress::{EngineProgressEvent, EngineProgressPhase, EngineProgressStatus};
+use crate::domain::pricing_and_taxonomy::BillingMetering;
 use crate::plumbing::hash_and_math::now_ms;
-use crate::plumbing::text_tokens::{encode_base64, render_unified_diff};
+use crate::plumbing::secret_redactor::SafetyPolicy;
+use crate::plumbing::text_tokens::{encode_base64, render_unified_diff, safe_utf8_prefix};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -41,7 +42,12 @@ pub fn build_hello_response(ws_id: &str, sess_id: &str, workspace_root: &Path) -
             "workspace-verification-v1",
             "task-continuation-v1",
             "project-repair-v1",
+            "project-run-v1",
+            "project-self-healing-v1",
+            "walkthrough-v1",
             "queue:3",
+            "queue-edit",
+            "queue-remove",
             "cancel",
             "approval",
             "history",
@@ -75,7 +81,10 @@ pub fn build_hello_response(ws_id: &str, sess_id: &str, workspace_root: &Path) -
             "skill-forge-v1",
             "soul-vault-v1",
             "heredoc-defense-v1",
-            "prompt-inspect-v1"
+            "prompt-inspect-v1",
+            "posture-dial-v1",
+            "turn-receipts-v1",
+            "request-preview-v1"
         ]
     })
 }
@@ -118,7 +127,19 @@ pub fn build_model_catalog(provider: &str, model: &str, reasoning: &str, revisio
                 "id": "openrouter",
                 "label": "OpenRouter",
                 "detail": "Unified multi-provider model gateway",
-                "models": ["openai/gpt-5.6-terra", "anthropic/claude-4-sonnet"]
+                "models": ["openai/gpt-5.6-terra", "anthropic/claude-4-sonnet", "deepseek/deepseek-chat"]
+            },
+            {
+                "id": "gemini",
+                "label": "Google Gemini",
+                "detail": "High-context multimodal and rapid code synthesis",
+                "models": ["gemini-2.5-pro", "gemini-2.0-flash"]
+            },
+            {
+                "id": "ollama",
+                "label": "Local Ollama (Zero-Key)",
+                "detail": "100% local private inference on localhost:11434",
+                "models": ["llama3.2", "qwen2.5-coder:14b", "deepseek-r1:14b"]
             },
             {
                 "id": "apple-playground",
@@ -133,13 +154,21 @@ pub fn build_model_catalog(provider: &str, model: &str, reasoning: &str, revisio
 
 pub fn build_model_discovery(provider: &str) -> Value {
     let valid_provider = match provider {
-        "openai-codex" | "claude-subscription-directsdk-experimental" | "openrouter" | "cline-pass" | "nous" | "opencode" | "apple-playground" => provider,
+        "openai-codex" | "claude-subscription-directsdk-experimental" | "gemini" | "deepseek" | "ollama" | "openrouter" | "cline-pass" | "nous" | "opencode" | "apple-playground" => provider,
         _ => "openai-codex",
     };
     let models = match valid_provider {
         "claude-subscription-directsdk-experimental" => vec![
             json!({ "id": "claude-4-sonnet", "label": "Claude 4 Sonnet", "detail": "Balanced speed and deep code reasoning" }),
             json!({ "id": "claude-4-opus", "label": "Claude 4 Opus", "detail": "Maximum architectural depth" }),
+        ],
+        "gemini" => vec![
+            json!({ "id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro", "detail": "Deep architectural reasoning with 1M context" }),
+            json!({ "id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash", "detail": "Sub-second iterative verification" }),
+        ],
+        "ollama" => vec![
+            json!({ "id": "llama3.2", "label": "Llama 3.2 (Local)", "detail": "Zero-key local Ollama inference" }),
+            json!({ "id": "qwen2.5-coder:14b", "label": "Qwen 2.5 Coder 14B", "detail": "Local code specialist" }),
         ],
         "apple-playground" => vec![
             json!({ "id": "apple-on-device-default", "label": "Apple On-Device Model", "detail": "Local macOS Foundation Models adapter" }),
@@ -162,52 +191,90 @@ pub fn build_model_discovery(provider: &str) -> Value {
 }
 
 pub fn build_spider_check_response(workspace_root: &Path, file: &str) -> Value {
+    build_spider_check_multi_response(workspace_root, &[file.to_string()])
+}
+
+pub fn build_spider_check_multi_response(workspace_root: &Path, requested: &[String]) -> Value {
     let now = now_ms() as f64;
-    let safe_file = if file.is_empty() || file.starts_with('/') || file.contains("..") { "src/main.rs" } else { file };
-    let full_path = workspace_root.join(safe_file);
-    let content = fs::read_to_string(&full_path).unwrap_or_default();
-    let hash_64 = sha256_hex(&content);
-    let header_slice = &content[..content.len().min(2048)];
-    let has_layer = header_slice.contains("[LAYER:");
-    let line_count = content.lines().count();
+    let clean_paths: Vec<String> = if requested.is_empty() {
+        vec!["src/main.rs".to_string()]
+    } else {
+        requested
+            .iter()
+            .map(|p| {
+                let t = p.trim();
+                if t.is_empty() || t.starts_with('/') || t.contains("..") {
+                    "src/main.rs".to_string()
+                } else {
+                    t.to_string()
+                }
+            })
+            .collect()
+    };
+
+    let mut files_meta = Vec::new();
     let mut findings = Vec::new();
-    if !content.is_empty() && !has_layer {
-        findings.push(json!({
-            "id": "SPI-208-1",
-            "rule": "SPI-208",
-            "severity": "warning",
-            "path": safe_file,
-            "message": "Missing explicit [LAYER: <ZONE>] header tag in the file header.",
-            "remediation": "Add // [LAYER: <ZONE>] on line 1 matching the file's directory zone.",
-            "line": 1,
-            "column": 1
-        }));
+    let mut rel_imports = 0usize;
+    let mut ext_imports = 0usize;
+    let mut seed_concat = String::new();
+
+    for (idx, safe_file) in clean_paths.iter().enumerate() {
+        let full_path = workspace_root.join(safe_file);
+        let content = fs::read_to_string(&full_path).unwrap_or_default();
+        let hash_64 = sha256_hex(&content);
+        seed_concat.push_str(&hash_64);
+        files_meta.push(json!({ "path": safe_file, "hash": hash_64 }));
+
+        let check_layer = safe_file.ends_with(".rs")
+            || safe_file.ends_with(".swift")
+            || safe_file.ends_with(".ts")
+            || safe_file.ends_with(".js")
+            || safe_file.ends_with(".py")
+            || safe_file.ends_with(".go")
+            || safe_file.ends_with(".md");
+        let header_slice = safe_utf8_prefix(&content, 10_000);
+        let has_layer = header_slice.contains("[LAYER:");
+        let line_count = content.lines().count();
+        if !content.is_empty() && check_layer && !has_layer {
+            findings.push(json!({
+                "id": format!("SPI-208-{}", idx + 1),
+                "rule": "SPI-208",
+                "severity": "warning",
+                "path": safe_file,
+                "message": "Missing explicit [LAYER: <ZONE>] header tag in the file header.",
+                "remediation": "Add // [LAYER: <ZONE>] on line 1 matching the file's directory zone.",
+                "line": 1,
+                "column": 1
+            }));
+        }
+        if check_layer && !safe_file.ends_with(".md") && line_count >= 800 {
+            findings.push(json!({
+                "id": format!("SPI-203-{}", idx + 1),
+                "rule": "SPI-203",
+                "severity": "warning",
+                "path": safe_file,
+                "message": format!("File has {line_count} lines, exceeding the 800-line Tier 1 Optimal cap."),
+                "remediation": "Decompose module into smaller focused files under 800 lines.",
+                "line": 800,
+                "column": 1
+            }));
+        }
+        rel_imports += content.lines().filter(|l| l.contains("use crate::") || l.contains("from './") || l.contains("from '../")).count();
+        ext_imports += content.lines().filter(|l| (l.trim_start().starts_with("use ") && !l.contains("use crate::")) || l.trim_start().starts_with("import ")).count();
     }
-    if line_count >= 800 {
-        findings.push(json!({
-            "id": "SPI-203-1",
-            "rule": "SPI-203",
-            "severity": "warning",
-            "path": safe_file,
-            "message": format!("File has {line_count} lines, exceeding the 800-line Tier 1 Optimal cap."),
-            "remediation": "Decompose module into smaller focused files under 800 lines.",
-            "line": 800,
-            "column": 1
-        }));
-    }
-    let rel_imports = content.lines().filter(|l| l.contains("use crate::") || l.contains("from './") || l.contains("from '../")).count();
-    let ext_imports = content.lines().filter(|l| (l.trim_start().starts_with("use ") && !l.contains("use crate::")) || l.trim_start().starts_with("import ")).count();
+
+    let id_hash = sha256_hex(&seed_concat);
     let outcome = if findings.is_empty() { "no-findings" } else { "findings" };
     json!({
         "version": 1,
-        "id": format!("spider-{}", &hash_64[..12]),
+        "id": format!("spider-{}", safe_utf8_prefix(&id_hash, 12)),
         "generatedAt": now,
-        "requestedPaths": [safe_file],
+        "requestedPaths": clean_paths,
         "outcome": outcome,
         "summary": if findings.is_empty() { "100% Joyzoning sovereignty verified across all checked layers." } else { "Joyzoning structural check reported findings." },
         "scope": "workspace",
         "nextAction": if findings.is_empty() { "Proceed with operational workflow." } else { "Review and remediate reported structural findings." },
-        "files": [{ "path": safe_file, "hash": hash_64 }],
+        "files": files_meta,
         "findings": findings,
         "coverage": {
             "relativeImports": rel_imports,
@@ -268,6 +335,15 @@ pub fn build_context_inspect_response(conversation: &str, engine: &AgentEngine) 
     let saved_memories = engine.memory().lock().unwrap().list_memories().len();
     let q = engine.queue().snapshot();
     let snap = engine.inspect_context_snapshot("");
+    let cfg = engine.config_snapshot();
+    let posture = engine.current_posture();
+    let last_receipt = engine.latest_receipt();
+    let (billing_display, billing_kind) = if let Some(ref r) = last_receipt {
+        (r.billing_display.clone(), r.billing_kind.clone())
+    } else {
+        let b = BillingMetering::evaluate(&cfg.provider, &cfg.model_name, &cfg.api_endpoint, &Default::default());
+        (b.format_honest(), b.kind_slug().to_string())
+    };
     json!({
         "conversation": conversation,
         "activeMessages": active_msgs,
@@ -276,9 +352,14 @@ pub fn build_context_inspect_response(conversation: &str, engine: &AgentEngine) 
         "queued": q.pending_count.min(32),
         "working": q.active,
         "observedAt": now,
+        "posture": posture.slug(),
+        "postureLabel": posture.display_label(),
         "promptProfile": snap.profile,
         "modelFamily": snap.model_family,
         "cachePrefixHash": snap.cache_prefix_hash,
+        "prefixStatus": last_receipt.as_ref().map(|r| r.prefix_status.as_str()).unwrap_or("pinned_initial"),
+        "billingDisplay": billing_display,
+        "billingKind": billing_kind,
         "systemTokens": snap.system_total_tokens,
         "staticPrefixTokens": snap.static_prefix_tokens,
         "toolSchemaTokens": snap.tool_schema_tokens,
@@ -288,7 +369,8 @@ pub fn build_context_inspect_response(conversation: &str, engine: &AgentEngine) 
         "usedInputTokens": snap.used_input_tokens,
         "headroomTokens": snap.headroom_tokens,
         "governanceSources": snap.governance_sources,
-        "governanceWarnings": snap.governance_warnings
+        "governanceWarnings": snap.governance_warnings,
+        "latestReceipt": last_receipt
     })
 }
 
@@ -315,7 +397,10 @@ pub fn build_context_history_response(conversation: &str, offset: usize, engine:
     let rev_uuid = uuid_from_seed(&full_text);
     let bytes = full_text.as_bytes();
     let total = bytes.len();
-    let safe_offset = offset.min(total);
+    let mut safe_offset = offset.min(total);
+    while safe_offset > 0 && !full_text.is_char_boundary(safe_offset) {
+        safe_offset -= 1;
+    }
     let mut end = (safe_offset + 16 * 1024).min(total);
     while end > safe_offset && !full_text.is_char_boundary(end) {
         end -= 1;
@@ -410,7 +495,7 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
                 if let Some(r) = trimmed.strip_prefix("ref: refs/heads/") {
                     format!("branch:{r}")
                 } else if trimmed.len() >= 7 {
-                    format!("detached:{}", &trimmed[..12.min(trimmed.len())])
+                    format!("detached:{}", safe_utf8_prefix(trimmed, 12))
                 } else {
                     "branch:main".to_string()
                 }
@@ -489,13 +574,26 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
                 "scope": "workspace"
             })
         }
-        "files.read" => {
-            let path = params.get("path").and_then(|v| v.as_str()).unwrap_or("README.md");
+        "files.read" | "artifact.read" => {
+            let path = params.get("path").or_else(|| params.get("id")).and_then(|v| v.as_str()).unwrap_or("README.md");
+            if path.contains("..") || path.starts_with('/') || SafetyPolicy::check_path(Path::new(path)).is_err() {
+                return json!({
+                    "text": "",
+                    "revision": "rev-blocked",
+                    "offset": 0,
+                    "nextOffset": 0,
+                    "size": 0,
+                    "more": false
+                });
+            }
             let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(65536) as usize;
             let text_content = fs::read_to_string(root.join(path)).unwrap_or_default();
             let total = text_content.len();
-            let safe_offset = offset.min(total);
+            let mut safe_offset = offset.min(total);
+            while safe_offset > 0 && !text_content.is_char_boundary(safe_offset) {
+                safe_offset -= 1;
+            }
             let mut end = (safe_offset + limit).min(total);
             while end > safe_offset && !text_content.is_char_boundary(end) {
                 end -= 1;
@@ -531,7 +629,7 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
         }
         "changes.list" => {
             let staged = engine.vfs().lock().unwrap().export_staged();
-            let entries: Vec<Value> = staged
+            let mut entries: Vec<Value> = staged
                 .into_iter()
                 .map(|f| {
                     let name = Path::new(&f.path)
@@ -548,6 +646,26 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
                     })
                 })
                 .collect();
+            if entries.is_empty() {
+                if let Some(last) = engine.latest_receipt() {
+                    for fc in last.file_changes {
+                        let name = Path::new(&fc.path)
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| fc.path.clone());
+                        entries.push(json!({
+                            "path": fc.path,
+                            "name": name,
+                            "status": fc.kind,
+                            "staged": false,
+                            "unstaged": true,
+                            "untracked": fc.kind == "created" || fc.kind == "added",
+                            "addedLines": fc.lines_added,
+                            "removedLines": fc.lines_removed
+                        }));
+                    }
+                }
+            }
             json!({ "entries": entries, "limited": false })
         }
         "changes.read" => {
@@ -557,6 +675,15 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
                 let old = fs::read_to_string(root.join(path)).unwrap_or_default();
                 let new = if f.is_deleted { String::new() } else { f.content };
                 render_unified_diff(path, &old, &new)
+            } else if let Some(last) = engine.latest_receipt() {
+                if let (Some(b), Some(a)) = (&last.snapshot_before, &last.snapshot_after) {
+                    engine
+                        .cas_diff_between(b, Some(a.as_str()))
+                        .map(|(_, full_diff)| filter_unified_diff_for_path(&full_diff, path))
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                }
             } else {
                 String::new()
             };
@@ -564,6 +691,28 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
             json!({ "text": diff, "revision": format!("diff-{size}"), "offset": 0, "nextOffset": size, "size": size, "more": false })
         }
         _ => json!({ "entries": [] }),
+    }
+}
+
+fn filter_unified_diff_for_path(full_diff: &str, target_path: &str) -> String {
+    if target_path.is_empty() {
+        return full_diff.to_string();
+    }
+    let header_a = format!("--- a/{target_path}");
+    let mut collecting = false;
+    let mut out = Vec::new();
+    for line in full_diff.lines() {
+        if line.starts_with("--- a/") {
+            collecting = line == header_a;
+        }
+        if collecting {
+            out.push(line);
+        }
+    }
+    if out.is_empty() {
+        full_diff.to_string()
+    } else {
+        out.join("\n")
     }
 }
 
@@ -610,50 +759,4 @@ fn collect_search_files(root: &Path, dir: &Path, query: &str, out: &mut Vec<(i32
             }
         }
     }
-}
-
-pub fn progress_to_walkthrough_activity(ev: &EngineProgressEvent) -> Value {
-    let phase = match ev.phase {
-        EngineProgressPhase::Planning => "planning",
-        EngineProgressPhase::Connecting => "connecting",
-        EngineProgressPhase::Thinking => "thinking",
-        EngineProgressPhase::Tool | EngineProgressPhase::Writing => "writing",
-        EngineProgressPhase::Verifying => "verifying",
-        EngineProgressPhase::Responding => "responding",
-        EngineProgressPhase::Completed => "completed",
-        EngineProgressPhase::Deferred => "planning",
-        EngineProgressPhase::Cancelled => "cancelled",
-        EngineProgressPhase::Failed => "failed",
-    };
-    let status = match ev.status {
-        EngineProgressStatus::Denied => "denied",
-        EngineProgressStatus::Started => "started",
-        EngineProgressStatus::InProgress => "in_progress",
-        EngineProgressStatus::Completed => "completed",
-        EngineProgressStatus::Deferred => "completed",
-        EngineProgressStatus::Cancelled => "cancelled",
-        EngineProgressStatus::Failed => "failed",
-    };
-    let seq = (ev.sequence as i64).max(1);
-    let scope = ev.metadata.as_ref().and_then(|m| m.scope.as_deref()).unwrap_or("activity");
-    let source = ev.metadata.as_ref().and_then(|m| m.source.as_deref()).unwrap_or("engine");
-    let item_type = ev.metadata.as_ref().and_then(|m| m.item_type.as_deref()).unwrap_or("tool");
-    json!({
-        "activityId": ev.activity_id,
-        "sequence": seq,
-        "startedSequence": seq,
-        "phase": phase,
-        "status": status,
-        "message": ev.message,
-        "detail": ev.detail.clone().unwrap_or_default(),
-        "timestamp": ev.timestamp as f64,
-        "elapsedMs": ev.elapsed_ms.unwrap_or(0) as f64,
-        "metadata": {
-            "scope": if scope == "turn" { "turn" } else { "activity" },
-            "source": source,
-            "itemType": item_type,
-            "operation": "execute",
-            "files": []
-        }
-    })
 }

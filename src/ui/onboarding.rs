@@ -4,6 +4,7 @@ use crate::core::engine::AgentEngine;
 use crate::core::tool_specs::builtin_tool_specs;
 use crate::domain::types::progress::{EngineProgressEvent, EngineProgressPhase, EngineProgressStatus};
 use crate::plumbing::hash_and_math::{levenshtein, now_ms};
+use crate::plumbing::text_tokens::mask_secret_preview;
 use crate::ui::cli_presenter::Heav3nsUserConfig;
 use std::env;
 use std::io::{self, Write};
@@ -68,7 +69,7 @@ pub fn print_welcome_banner(cwd: &Path, provider: &str, model: &str, has_key: bo
     println!();
     println!("{}", cyan("╔══════════════════════════════════════════════════════════════════════════════╗"));
     println!("{}  {}  {}", cyan("║"), bold("HEAV3NS-MICRO v0.1.0 — Sovereign Agentic Coding Runtime"), cyan("║"));
-    println!("{}  {}       {}", cyan("║"), dim("16-MiB Arena Slab · 28 Built-in Tools · Set-of-Marks · Local-First"), cyan("║"));
+    println!("{}  {} {}", cyan("║"), dim("16-MiB Arena · 31 Tools · 5-Stop Posture · CAS Receipts · KV-Pinned"), cyan("║"));
     println!("{}", cyan("╠══════════════════════════════════════════════════════════════════════════════╣"));
     println!("{}  {} {} {} {}", cyan("║"), bold("Workspace:"), dim(&cwd.display().to_string()), cyan("│"), key_status);
     println!("{}  {} {} ({})", cyan("║"), bold("Active:   "), cyan(provider), dim(model));
@@ -165,10 +166,16 @@ pub fn run_doctor_cli(cwd: &Path, opts_provider: Option<&str>, opts_model: Optio
     let openai_key = env::var("OPENAI_API_KEY").ok().filter(|s| !s.is_empty());
     let gemini_key = env::var("GEMINI_API_KEY").or_else(|_| env::var("GOOGLE_API_KEY")).ok().filter(|s| !s.is_empty());
     let anthropic_key = env::var("ANTHROPIC_API_KEY").ok().filter(|s| !s.is_empty());
+    let alt_key = env::var("OPENROUTER_API_KEY")
+        .or_else(|_| env::var("DEEPSEEK_API_KEY"))
+        .or_else(|_| env::var("GROQ_API_KEY"))
+        .or_else(|_| env::var("XAI_API_KEY"))
+        .ok()
+        .filter(|s| !s.is_empty());
 
     let mut keys_found = 0;
     if let Some(k) = openai_key {
-        let masked = if k.len() > 8 { format!("{}...{}", &k[..4], &k[k.len() - 4..]) } else { "***".to_string() };
+        let masked = mask_secret_preview(&k);
         println!("  {} OPENAI_API_KEY is active ({})", green("✔"), dim(&masked));
         keys_found += 1;
     } else {
@@ -176,7 +183,7 @@ pub fn run_doctor_cli(cwd: &Path, opts_provider: Option<&str>, opts_model: Optio
     }
 
     if let Some(k) = gemini_key {
-        let masked = if k.len() > 8 { format!("{}...{}", &k[..4], &k[k.len() - 4..]) } else { "***".to_string() };
+        let masked = mask_secret_preview(&k);
         println!("  {} GEMINI_API_KEY is active ({})", green("✔"), dim(&masked));
         keys_found += 1;
     } else {
@@ -184,11 +191,17 @@ pub fn run_doctor_cli(cwd: &Path, opts_provider: Option<&str>, opts_model: Optio
     }
 
     if let Some(k) = anthropic_key {
-        let masked = if k.len() > 8 { format!("{}...{}", &k[..4], &k[k.len() - 4..]) } else { "***".to_string() };
+        let masked = mask_secret_preview(&k);
         println!("  {} ANTHROPIC_API_KEY is active ({})", green("✔"), dim(&masked));
         keys_found += 1;
     } else {
         println!("  {} ANTHROPIC_API_KEY is not set", dim("ℹ"));
+    }
+
+    if let Some(k) = alt_key {
+        let masked = mask_secret_preview(&k);
+        println!("  {} Gateway API key (OpenRouter/DeepSeek/Groq/xAI) is active ({})", green("✔"), dim(&masked));
+        keys_found += 1;
     }
 
     let effective_provider = opts_provider
@@ -322,7 +335,7 @@ pub fn run_init_wizard(cwd: &Path) -> io::Result<()> {
         };
 
         if let Some(existing) = env_key {
-            let masked = if existing.len() > 8 { format!("{}...{}", &existing[..4], &existing[existing.len() - 4..]) } else { "***".to_string() };
+            let masked = mask_secret_preview(&existing);
             print!("Found existing key in env ({}). Use this? [Y/n]: ", masked);
             io::stdout().flush()?;
             let mut confirm = String::new();

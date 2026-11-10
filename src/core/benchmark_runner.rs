@@ -493,12 +493,10 @@ pub async fn run_full_benchmark_suite(tests_dir: Option<&Path>) -> Value {
     let resolved_tests_dir = tests_dir
         .map(|p| p.to_path_buf())
         .or_else(|| {
-            let candidate = PathBuf::from("/Users/bozoegg/Desktop/tests");
-            if candidate.exists() {
-                Some(candidate)
-            } else {
-                None
-            }
+            std::env::var("HEAV3NS_BENCH_TESTS_DIR")
+                .ok()
+                .map(PathBuf::from)
+                .filter(|p| p.exists())
         });
 
     let workspace_tasks = if let Some(ref dir) = resolved_tests_dir {

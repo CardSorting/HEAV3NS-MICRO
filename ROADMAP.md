@@ -20,7 +20,7 @@ This roadmap charts the completed engineering milestones of **HEAV3NS-MICRO (`v0
 - [x] **Pillar 2 (`SPIDER` — Structural Perception & Environmental Understanding)**:
   - Functional viewport region classification (`HeaderNav`, `Sidebar`, `Toolbar`, `ContentArea`, `FooterStatusBar`, `ModalDialog`), UI element affordance classification (including disabled-control guards), relational graph extraction (`contains`, `labelled_by`, `controls`, `submits`, `adjacent`), and `spider.check` static AST/cycle verification.
 - [x] **Pillar 3 (`REWIND` — Temporal Cognition, Continuity & Recoverability)**:
-  - $O(1)$ `SlabBufferSnapshot` arena pointer rewind, two-phase `SessionVfs` with FNV-1a `VfsDiskBaseline` parity verification, `TransactionJournal` atomic file rollback, 32-deep `VirtualDisplayState` undo/redo ring, and `BehavioralKnowledgeStore::reconcile_state` epoch drift detection.
+  - $O(1)$ `SlabBufferSnapshot` arena pointer rewind, pure-Rust SHA-256 `WorkspaceSnapshotCas` (`WouldBlock`-protected `/undo`, `/restore`, non-Git `/diff`), two-phase `SessionVfs` with FNV-1a `VfsDiskBaseline` parity verification, `TransactionJournal` atomic file rollback, 32-deep `VirtualDisplayState` undo/redo ring, and `BehavioralKnowledgeStore::reconcile_state` epoch drift detection.
 - [x] **Pillar 4 (`BROCCOLI` — Persistent Knowledge, Memory & Historical Evolution)**:
   - `BehavioralKnowledgeStore` with Laplace-smoothed confidence calibration, automatic `LearnedWorkflowProcedure` synthesis from multi-step recoveries, hybrid TF-IDF + FNV-1a `MemoryStore` synchronization, and Kahn-verified `SkillTreeCatalog` evolutionary DAG with `SkillDoctor` linter and multi-format Soul Drop Vault ingestion.
 - [x] **Pillar 5 (`SYNTHETIC SWARM` — Distributed Collective Intelligence)**:
@@ -28,7 +28,7 @@ This roadmap charts the completed engineering milestones of **HEAV3NS-MICRO (`v0
 - [x] **Pillar 6 (`COMPUTER USE` — Embodied Agency & Double-Wrapped Spatial Mediation)**:
   - 9-stage closed-loop `ComputerUseOrchestrator` (`Observe -> Orient -> Interpret -> Reason -> Plan -> Act -> Observe -> Verify -> Learn`), `SpatialActionMediator` Double-Wrapped Action Mediation (`Wrapper A` Grounding in $\le 0.40\ \mu\text{s}$ + `Wrapper B` Execution Assurance), automatic off-screen viewport pre-scrolling, multi-step `execute_plan`, modal trap auto-interception (`key: Escape`), disabled-element protection, checkbox/radio state toggling, and SSRF-hardened `browser_use`.
 - [x] **Pillar 7 (`THE HARNESS` — Sovereign Computational Substrate & Native Control Station)**:
-  - 5-Zone **HEAV3NS-JOY** architecture across `64` Rust modules and `280+` workspace files (`100%` Stability Index, $E_S = 0.0038$, `Grade: A+ — SOVEREIGN`), `39` formal `I<Name>` traits, `29` native tools with DAG wave scheduling, `"v": 1` stdio JSON-RPC bridge, and modular AppKit `HEAV3NS-CODE` desktop client (`311/311` Swift tests passing, `49/49` Rust tests passing).
+  - 5-Zone **HEAV3NS-JOY** architecture across `80` Rust modules and `307` workspace files (`100%` Stability Index, `Grade: A+ — SOVEREIGN`), `41` formal `I<Name>` traits, `31` native tools (`tool_search` 8-slot LRU + `execute_tools` batch + DAG wave scheduling), 5-stop `ExecutionPosture` (`Shift+Tab`), macOS Seatbelt `sandbox-exec`, `TurnReceipt` (`heav3ns.receipt/v1`), multiplexed `"v": 1` stdio JSON-RPC bridge, and modular AppKit `HEAV3NS-CODE` desktop client (`321/321` Swift tests passing, `77/77` Rust tests passing).
 
 ---
 

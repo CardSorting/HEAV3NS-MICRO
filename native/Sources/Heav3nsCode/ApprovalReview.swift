@@ -18,6 +18,7 @@ final class ApprovalReview: NSWindowController, NSWindowDelegate {
     let request: ApprovalRequest
     private let message = NSTextField(wrappingLabelWithString: "")
     private let allowButton = NSButton(title: "Allow Once", target: nil, action: nil)
+    private let allowSessionButton = NSButton(title: "Allow for Session", target: nil, action: nil)
     private let denyButton = NSButton(title: "Deny", target: nil, action: nil)
     private let closeButton = NSButton(title: "Close", target: nil, action: nil)
     private let decide: (ApprovalRequest, String) -> Void
@@ -53,10 +54,10 @@ final class ApprovalReview: NSWindowController, NSWindowDelegate {
         text.setAccessibilityLabel("Full operation details for \(request.tool)")
         let scroll = NSScrollView(); scroll.documentView = text; scroll.hasVerticalScroller = true; scroll.borderType = .bezelBorder
         message.font = .systemFont(ofSize: 12); message.textColor = .secondaryLabelColor; message.maximumNumberOfLines = 3
-        let buttons = NSStackView(views: [closeButton, NSView(), denyButton, allowButton]); buttons.spacing = 8
-        for button in [closeButton, denyButton, allowButton] { button.bezelStyle = .rounded; button.target = self; button.setContentHuggingPriority(.required, for: .horizontal) }
+        let buttons = NSStackView(views: [closeButton, NSView(), denyButton, allowSessionButton, allowButton]); buttons.spacing = 8
+        for button in [closeButton, denyButton, allowSessionButton, allowButton] { button.bezelStyle = .rounded; button.target = self; button.setContentHuggingPriority(.required, for: .horizontal) }
         closeButton.action = #selector(dismiss); closeButton.keyEquivalent = "\u{1b}"
-        denyButton.action = #selector(deny); allowButton.action = #selector(allow)
+        denyButton.action = #selector(deny); allowSessionButton.action = #selector(allowSession); allowButton.action = #selector(allow)
         [heading, scroll, message, buttons].forEach(root.addArrangedSubview)
         let content = NSView(); content.addSubview(root); window.contentView = content
         NSLayoutConstraint.activate([
@@ -66,7 +67,7 @@ final class ApprovalReview: NSWindowController, NSWindowDelegate {
             message.widthAnchor.constraint(equalTo: root.widthAnchor), buttons.widthAnchor.constraint(equalTo: root.widthAnchor), scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 120)
         ])
         window.initialFirstResponder = text
-        text.nextKeyView = closeButton; closeButton.nextKeyView = denyButton; denyButton.nextKeyView = allowButton; allowButton.nextKeyView = text
+        text.nextKeyView = closeButton; closeButton.nextKeyView = denyButton; denyButton.nextKeyView = allowSessionButton; allowSessionButton.nextKeyView = allowButton; allowButton.nextKeyView = text
         update(isCurrent: true, connected: false, submitting: false, stopping: false)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) unavailable") }
@@ -74,18 +75,19 @@ final class ApprovalReview: NSWindowController, NSWindowDelegate {
     func update(isCurrent: Bool, connected: Bool, submitting: Bool, stopping: Bool, error: String? = nil) {
         self.submitting = submitting
         canDecide = isCurrent && connected && !submitting && !stopping
-        allowButton.isEnabled = canDecide; denyButton.isEnabled = canDecide
+        allowButton.isEnabled = canDecide; allowSessionButton.isEnabled = canDecide; denyButton.isEnabled = canDecide
         message.stringValue = !isCurrent ? "This request is no longer waiting. Close this review to see the current task." :
             !connected ? "Disconnected. Reconnect in the workspace to check this request's status." :
             stopping ? "Stopping this task. This operation cannot be approved." :
-            submitting ? "Saving your decision…" : error ?? "Allow Once applies only to this operation. Close leaves the request waiting."
+            submitting ? "Saving your decision…" : error ?? "Allow Once applies only to this operation; Allow for Session remembers this tool for the session."
     }
     private func resolve(_ decision: String) {
         guard canDecide, !submitting else { return }
-        submitting = true; canDecide = false; allowButton.isEnabled = false; denyButton.isEnabled = false
+        submitting = true; canDecide = false; allowButton.isEnabled = false; allowSessionButton.isEnabled = false; denyButton.isEnabled = false
         message.stringValue = "Saving your decision…"; decide(request, decision)
     }
     @objc private func allow() { resolve("allow") }
+    @objc private func allowSession() { resolve("allow_session") }
     @objc private func deny() { resolve("deny") }
     @objc private func dismiss() {
         if let window, let parent = window.sheetParent { parent.endSheet(window); window.orderOut(nil) }

@@ -87,7 +87,10 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
     let approval = NSStackView()
     let approvalText = NSTextView()
     let reviewApprovalButton = NSButton(title: "Review Request…", target: nil, action: nil)
-    let denyButton = NSButton(title: "Deny", target: nil, action: nil); let allowButton = NSButton(title: "Allow Once", target: nil, action: nil)
+    let denyButton = NSButton(title: "Deny", target: nil, action: nil); let allowSessionButton = NSButton(title: "Allow for Session", target: nil, action: nil); let allowButton = NSButton(title: "Allow Once", target: nil, action: nil)
+    var activePosture: ExecutionPostureStop = .autoReview
+    let postureButton = NSButton(title: "Posture: Auto-Review", target: nil, action: nil)
+    let receiptBar = TurnReceiptSummaryBar()
     var pendingLineJump: (line: Int, column: Int)?
     var approvalReview: ApprovalReview?
     struct ApprovalDecision: Equatable {
@@ -258,6 +261,10 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         binaryDocumentLoader?.cancel(); binaryDocumentLoader = nil
         memoryWindow?.dismiss(); memoryWindow = nil
         palette?.cancelOperation(nil); palette = nil
+        quickOpen?.dispose(); quickOpen = nil
+        receiptBar.dispose()
+        composer.dispose()
+        turnScrubber.dispose()
         modelPicker?.dismiss(restoreFocus: false); modelPicker = nil
         checkpointWindow?.close(); checkpointWindow = nil
     }
@@ -396,7 +403,7 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         relatedEvidence.setAccessibilityLabel("Related evidence for this instruction")
         relatedEvidence.toolTip = "Open activity, the previous instruction, or a recorded checkpoint"
         checkCode.target = self; checkCode.action = #selector(showCodeCheck); checkCode.bezelStyle = .rounded; checkCode.isHidden = true
-        checkCode.toolTip = "Check saved JavaScript or TypeScript syntax, local imports and dependency cycles"
+        checkCode.toolTip = "Check saved Rust, Swift, JavaScript, TypeScript, Python or Go architecture & imports (⇧⌘K)"
         prepareCodeReview.target = self; prepareCodeReview.action = #selector(draftCodeReview); prepareCodeReview.bezelStyle = .rounded; prepareCodeReview.isHidden = true
         prepareCodeReview.toolTip = "Add the findings to a review draft without sending it"
         let evidenceBar = stack([recordedOutput, checkCode, relatedEvidence, prepareCodeReview], spacing: 6)
@@ -467,18 +474,22 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         reviewApprovalButton.toolTip = "Review the full operation before deciding (⌘5)"
         denyButton.target = self; denyButton.action = #selector(deny); denyButton.bezelStyle = .rounded
         denyButton.toolTip = "Deny this operation"
+        allowSessionButton.target = self; allowSessionButton.action = #selector(allowForSession); allowSessionButton.bezelStyle = .rounded
+        allowSessionButton.isEnabled = false
+        allowSessionButton.toolTip = "Allow this operation and remember approval for this tool during the session"
         allowButton.target = self; allowButton.action = #selector(allowOnce); allowButton.bezelStyle = .rounded
         allowButton.bezelColor = .controlAccentColor
         allowButton.isEnabled = false
         allowButton.toolTip = "Allow this operation once without opening full review"
         denyButton.isEnabled = false
-        approval.addArrangedSubview(stack([denyButton, reviewApprovalButton, allowButton]))
+        approval.addArrangedSubview(stack([denyButton, reviewApprovalButton, allowSessionButton, allowButton]))
 
         composer.font = .systemFont(ofSize: 14); composer.isRichText = false; composer.delegate = self
         composer.isAutomaticQuoteSubstitutionEnabled = false; composer.isAutomaticDashSubstitutionEnabled = false
         composer.textContainerInset = NSSize(width: 0, height: 3); composer.drawsBackground = false
         composer.setAccessibilityLabel("Instruction to LUMI")
         composer.submit = { [weak self] in self?.submit() }
+        composer.onStepPosture = { [weak self] in self?.stepPosture() }
         composer.onFileDropped = { [weak self] url in
             guard let self else { return }
             let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? 0
@@ -572,16 +583,22 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         }
         reasoningPicker.onPending = { [weak self] in self?.updateStatus() }
         reasoningPicker.onError = { [weak self] in self?.showNotice($0) }
-        let modelBar = stack([modelButton, reasoningPicker, hint], spacing: 8)
-        hint.toolTip = "Enter to send · Shift–Enter for a new line. Autonomous execution runs tools without approval prompts. Use Stop to interrupt."
-        modelButton.widthAnchor.constraint(lessThanOrEqualTo: modelBar.widthAnchor, multiplier: 0.45).isActive = true
-        modelButton.widthAnchor.constraint(lessThanOrEqualToConstant: 260).isActive = true
+        postureButton.target = self; postureButton.action = #selector(stepPosture); postureButton.bezelStyle = .rounded
+        postureButton.setContentHuggingPriority(.required, for: .horizontal)
+        refreshPostureControl()
+        receiptBar.onOpenChanges = { [weak self] in self?.showChanges() }
+        receiptBar.onOpenReceipts = { [weak self] in self?.showTurnReceipts() }
+        receiptBar.onUndoTurn = { [weak self] in self?.undoLastTurn() }
+        let modelBar = stack([modelButton, reasoningPicker, postureButton, hint], spacing: 8)
+        hint.toolTip = "Enter to send · Shift–Enter for a new line · Shift–Tab to cycle execution posture · ⌘K for Command Palette."
+        modelButton.widthAnchor.constraint(lessThanOrEqualTo: modelBar.widthAnchor, multiplier: 0.40).isActive = true
+        modelButton.widthAnchor.constraint(lessThanOrEqualToConstant: 240).isActive = true
         modelButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 80).isActive = true
-        let center = stack([surfaces, header, rule, work, approval, noticeBar, composerSurface, modelBar], vertical: true, spacing: 10)
+        let center = stack([surfaces, header, rule, work, approval, noticeBar, receiptBar, composerSurface, modelBar], vertical: true, spacing: 10)
         center.setContentHuggingPriority(.init(1), for: .horizontal)
         work.setContentHuggingPriority(.init(1), for: .vertical)
         center.edgeInsets = NSEdgeInsets(top: 20, left: 22, bottom: 16, right: 22)
-        for view in [header, rule, work, approval, noticeBar, composerSurface, modelBar] { view.widthAnchor.constraint(equalTo: center.widthAnchor, constant: -44).isActive = true }
+        for view in [header, rule, work, approval, noticeBar, receiptBar, composerSurface, modelBar] { view.widthAnchor.constraint(equalTo: center.widthAnchor, constant: -44).isActive = true }
         titleLine.widthAnchor.constraint(equalTo: header.widthAnchor).isActive = true
         chatState.widthAnchor.constraint(equalTo: header.widthAnchor).isActive = true
         work.heightAnchor.constraint(greaterThanOrEqualToConstant: 60).isActive = true
@@ -608,55 +625,7 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         TranscriptRow(id: "welcome", title: "What would you like to work on?", text: "Describe what you want to build, fix, or understand. LUMI will work with you here.\n\nFollow its activity in Walkthrough. Browse project files and review changes in Task context.", activity: false)
     }
 
-    private func buildContextPanel() {
-        contextPanel.orientation = .vertical; contextPanel.alignment = .leading; contextPanel.spacing = 10
-        contextPanel.edgeInsets = NSEdgeInsets(top: 20, left: 14, bottom: 16, right: 14)
-        let title = JourneyStyle.label("Task context", size: 16, weight: .semibold)
-        openFileButton.target = self; openFileButton.action = #selector(showQuickOpen); openFileButton.bezelStyle = .rounded
-        openFileButton.toolTip = "Open a workspace file by name or path (⌘P)"
-        let heading = stack([title, NSView(), openFileButton])
-        contextTabs.target = self; contextTabs.action = #selector(changeContext); contextTabs.selectedSegment = 0
-        contextTabs.setAccessibilityLabel("Task context: Walkthrough, Changes, Inspect or Run")
-        browseContext.target = self; browseContext.action = #selector(toggleContextBrowser); browseContext.bezelStyle = .rounded
-        walkthrough.onSelection = { [weak self] _ in self?.loadWalkthrough() }
-        walkthrough.onOpenFile = { [weak self] path in self?.readFile(path) }
-        walkthrough.onChanges = { [weak self] in self?.showChanges() }
-        walkthrough.onOutput = { [weak self] id in self?.inspect(.run(id)) }
-        walkthrough.onMoveProjectTask = { [weak self] task, status in self?.moveProjectTask(task, status: status) }
-        walkthrough.onPreviousTaskPage = { [weak self] in
-            guard let self, let previous = self.projectTaskPreviousOffsets.popLast() else { return }
-            self.projectTaskOffset = previous; self.refreshProjectTasks()
-        }
-        walkthrough.onNextTaskPage = { [weak self] next in
-            guard let self, next > self.projectTaskOffset else { return }
-            self.projectTaskPreviousOffsets.append(self.projectTaskOffset); self.projectTaskOffset = next; self.refreshProjectTasks()
-        }
-        walkthrough.onProjectTaskFilters = { [weak self] filters in
-            guard let self, self.projectTaskFilters != filters else { return }
-            self.projectTaskFilters = filters; self.projectTaskOffset = 0; self.projectTaskPreviousOffsets = []; self.refreshProjectTasks()
-        }
-        walkthrough.onReview = { [weak self] in self?.showApprovalReview() }
-        walkthrough.onRetryLoad = { [weak self] in self?.walkthroughLoaded = nil; self?.loadWalkthrough() }
-        walkthrough.onContinue = { [weak self] continuation in self?.continueWork(continuation) }
-        let rule = JourneyStyle.rule()
-        projectRun.onState = { [weak self] in
-            self?.checkpointWindow?.refreshAvailability()
-            self?.adapt()
-        }
-        projectRun.onRepair = { [weak self] launch in self?.repairProject(launch) }
-        projectRun.onShowRepair = { [weak self] run in self?.showProjectRepair(run) }
-        projectRunScroll.documentView = projectRun; projectRunScroll.hasVerticalScroller = true; projectRunScroll.drawsBackground = false
-        projectRun.widthAnchor.constraint(equalTo: projectRunScroll.contentView.widthAnchor).isActive = true
-        projectRun.heightAnchor.constraint(greaterThanOrEqualTo: projectRunScroll.contentView.heightAnchor).isActive = true
-        let fittingHeight = projectRun.heightAnchor.constraint(equalTo: projectRunScroll.contentView.heightAnchor); fittingHeight.priority = .defaultLow; fittingHeight.isActive = true
-        projectRunScroll.setContentHuggingPriority(.init(1), for: .vertical)
-        [heading, contextTabs, rule, walkthrough, inspector, projectRunScroll].forEach(contextPanel.addArrangedSubview)
-        for view in contextPanel.arrangedSubviews { view.widthAnchor.constraint(equalTo: contextPanel.widthAnchor, constant: -28).isActive = true }
-        walkthrough.setContentHuggingPriority(.init(1), for: .vertical)
-        inspector.setContentHuggingPriority(.init(1), for: .vertical)
-    }
-
-    @objc private func changeContext() {
+    @objc func changeContext() {
         showingInspector = true; surfaces.selectedSegment = 1
         if contextTabs.selectedSegment == 0 { walkthrough.followCurrentInstruction() }
         else if contextTabs.selectedSegment == 1 { navigation.select(.changes) }
@@ -664,7 +633,7 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         adapt()
     }
 
-    @objc private func toggleContextBrowser() { browsingCompact.toggle(); adapt() }
+    @objc func toggleContextBrowser() { browsingCompact.toggle(); adapt() }
 
     @objc func showWalkthrough() {
         walkthrough.followCurrentInstruction(); contextTabs.selectedSegment = 0; showingInspector = true; surfaces.selectedSegment = 1; switchSurface()

@@ -699,7 +699,7 @@ mod tests {
         let reg = ToolRegistry::new(mem);
         let all_schemas = reg.openai_tool_schemas();
         let core_only = reg.select_relevant_tool_schemas("Fix the off-by-one arithmetic error in src/lib.rs");
-        assert_eq!(all_schemas.len(), 29);
+        assert_eq!(all_schemas.len(), 31);
         let core_count = core_only.len();
         assert!(core_count < 20, "Expected core subset <20 tools, got {core_count}");
 

@@ -1,11 +1,107 @@
 // [LAYER: CORE]
+use crate::domain::types::runtime::ExecutionPosture;
 use crate::domain::types::skill_types::GovernedOutput;
+use crate::plumbing::hash_and_math::fnv1a_32;
 use crate::plumbing::secret_redactor::DeterministicSecretRedactor;
-use crate::plumbing::text_tokens::canonical_tool_name;
+use crate::plumbing::text_tokens::{canonical_tool_name, safe_utf8_prefix};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::fs;
 use std::path::{Path, PathBuf};
+
+/// Recorded file fingerprint from `view_file` used to block blind overwrites and detect external disk edits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileReadStamp {
+    pub byte_len: u64,
+    pub fnv1a_hash: u32,
+    pub full_read: bool,
+}
+
+/// Tracks files inspected in the current session (`Codewhale FileReadTracker` staleness & read-before-write invariant).
+#[derive(Debug, Default)]
+pub struct FileReadTracker {
+    stamps: HashMap<PathBuf, FileReadStamp>,
+}
+
+impl FileReadTracker {
+    pub fn record_disk_file(&mut self, path: &Path, full_read: bool) {
+        let key = normalize_tracker_key(path);
+        if let Ok(bytes) = fs::read(&key) {
+            let prev_full = self.stamps.get(&key).map(|s| s.full_read).unwrap_or(false);
+            self.stamps.insert(
+                key,
+                FileReadStamp {
+                    byte_len: bytes.len() as u64,
+                    fnv1a_hash: fnv1a_32(&bytes),
+                    full_read: full_read || prev_full,
+                },
+            );
+        } else {
+            self.stamps.remove(&key);
+        }
+    }
+
+    pub fn remove_path(&mut self, path: &Path) {
+        let key = normalize_tracker_key(path);
+        self.stamps.remove(&key);
+    }
+
+    /// Validates that an existing file has not drifted on disk since it was last read, and in interactive
+    /// postures (`Ask` / `AcceptEdits`) requires inspecting non-empty existing files before overwriting them.
+    pub fn verify_before_mutation(
+        &self,
+        canonical_tool: &str,
+        path: &Path,
+        posture: ExecutionPosture,
+    ) -> Result<(), String> {
+        let is_file_edit = matches!(
+            canonical_tool,
+            "write_file" | "replace_file_content" | "multi_replace_file_content" | "edit_file_anchored"
+        );
+        if !is_file_edit {
+            return Ok(());
+        }
+        let key = normalize_tracker_key(path);
+        let Ok(disk_bytes) = fs::read(&key) else {
+            // New file creation is always allowed
+            return Ok(());
+        };
+        if let Some(stamp) = self.stamps.get(&key) {
+            let current_hash = fnv1a_32(&disk_bytes);
+            let current_len = disk_bytes.len() as u64;
+            if current_hash != stamp.fnv1a_hash || current_len != stamp.byte_len {
+                return Err(format!(
+                    "Stale file conflict on '{}': file changed externally since last view_file (expected {:08x}/{}B, found {:08x}/{}B). Call view_file first to inspect external edits.",
+                    path.display(),
+                    stamp.fnv1a_hash,
+                    stamp.byte_len,
+                    current_hash,
+                    current_len
+                ));
+            }
+            return Ok(());
+        }
+        if !disk_bytes.is_empty()
+            && matches!(posture, ExecutionPosture::Ask | ExecutionPosture::AcceptEdits)
+        {
+            return Err(format!(
+                "Read-before-write guard: existing file '{}' ({} bytes) has not been read in this session. Call view_file first before modifying it.",
+                path.display(),
+                disk_bytes.len()
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn reset_stamps(&mut self) {
+        self.stamps.clear();
+    }
+}
+
+fn normalize_tracker_key(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
 
 /// Deterministic SHA-256 keyed in-memory read cache with path invalidation.
 #[derive(Debug, Default)]
@@ -129,7 +225,7 @@ impl ToolOutputGovernor {
         }
         let mut joined = preview.join("\n");
         if joined.len() > self.max_chars {
-            joined.truncate(self.max_chars);
+            joined = safe_utf8_prefix(&joined, self.max_chars).to_string();
         }
         GovernedOutput {
             output_text: joined,
@@ -163,7 +259,7 @@ impl ToolOutputGovernor {
     }
 }
 
-/// Detects repetitive identical tool call loops within a turn.
+/// Detects repetitive identical tool call loops within a turn (enforcing a hard ceiling even in autonomous/read-only mode).
 #[derive(Debug)]
 pub struct ToolLoopBreaker {
     recent_fingerprints: VecDeque<String>,
@@ -200,9 +296,19 @@ impl ToolLoopBreaker {
         }
         self.recent_fingerprints.push_back(fp.clone());
         let identical = self.recent_fingerprints.iter().filter(|&x| x == &fp).count();
-        if identical >= self.max_identical_calls && !soft_mode {
+        let consecutive_tail = self
+            .recent_fingerprints
+            .iter()
+            .rev()
+            .take_while(|&x| x == &fp)
+            .count();
+        let hard_ceiling = (self.max_identical_calls + 1).max(4);
+        if (!soft_mode && identical >= self.max_identical_calls)
+            || consecutive_tail >= hard_ceiling
+            || identical >= hard_ceiling + 1
+        {
             return Err(format!(
-                "Loop breaker triggered: tool '{tool_name}' called {identical} times with identical arguments"
+                "Loop breaker triggered: tool '{tool_name}' called {identical} times ({consecutive_tail} consecutive) with identical arguments"
             ));
         }
         Ok(())

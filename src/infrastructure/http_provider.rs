@@ -2,16 +2,36 @@
 use crate::domain::interfaces::{BoxFuture, ILlmProvider};
 use crate::domain::types::messages::{Role, ToolCall, ToolCallFunction};
 use crate::domain::types::runtime::CancellationToken;
-use crate::domain::types::tick_result::{finalize_provider_response, is_retryable_http_status, ProviderError, ProviderRequest, ProviderResponse};
+use crate::domain::types::tick_result::{finalize_provider_response, is_retryable_http_status, ProviderError, ProviderRequest, ProviderResponse, ProviderTokenUsage};
 use crate::plumbing::json_repair::{accumulate_streaming_tool_name, compute_streaming_arguments_delta};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-/// Parses SSE (`data: ...`) streams with ADR-0014 cumulative delta deduplication.
+/// Fast non-blocking probe (`150ms` timeout) for local Ollama chat models (`Codewhale zero-config discovery`).
+pub async fn probe_local_ollama_model() -> Option<String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(150))
+        .build()
+        .ok()?;
+    let resp = client.get("http://127.0.0.1:11434/api/tags").send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: Value = resp.json().await.ok()?;
+    body.get("models")
+        .and_then(Value::as_array)
+        .and_then(|arr| arr.first())
+        .and_then(|m| m.get("name"))
+        .and_then(Value::as_str)
+        .map(String::from)
+}
+
+/// Parses SSE (`data: ...`) streams with cumulative delta deduplication and token usage capture.
 pub fn parse_sse_stream(raw_sse: &str, provider_label: &str) -> Result<ProviderResponse, ProviderError> {
     let mut text_acc = String::new();
     let mut tool_map: BTreeMap<usize, (String, String, String)> = BTreeMap::new();
+    let mut latest_usage: Option<ProviderTokenUsage> = None;
 
     for line in raw_sse.lines() {
         let trimmed = line.trim();
@@ -20,6 +40,9 @@ pub fn parse_sse_stream(raw_sse: &str, provider_label: &str) -> Result<ProviderR
             continue;
         }
         let Ok(chunk) = serde_json::from_str::<Value>(data) else { continue };
+        if let Some(u) = extract_openai_usage(&chunk) {
+            latest_usage = Some(u);
+        }
         if let Some(choice) = chunk.get("choices").and_then(|c| c.as_array()).and_then(|a| a.first()) {
             let delta = choice.get("delta").or_else(|| choice.get("message")).unwrap_or(choice);
             if let Some(txt) = delta.get("content").and_then(|v| v.as_str()) {
@@ -61,14 +84,46 @@ pub fn parse_sse_stream(raw_sse: &str, provider_label: &str) -> Result<ProviderR
         })
         .collect();
 
-    Ok(finalize_provider_response(
-        Some(text_acc),
-        tool_calls,
-        provider_label,
-    ))
+    let mut resp = finalize_provider_response(Some(text_acc), tool_calls, provider_label);
+    resp.usage = latest_usage;
+    Ok(resp)
 }
 
-/// Multi-protocol HTTP LLM adapter supporting OpenAI, Anthropic, and Gemini wire formats.
+fn extract_openai_usage(body: &Value) -> Option<ProviderTokenUsage> {
+    let u = body.get("usage")?;
+    let prompt_tokens = u.get("prompt_tokens").and_then(Value::as_u64)? as usize;
+    let completion_tokens = u.get("completion_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
+    let cached_prompt_tokens = u
+        .get("prompt_tokens_details")
+        .and_then(|d| d.get("cached_tokens"))
+        .or_else(|| u.get("prompt_cache_hit_tokens"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    Some(ProviderTokenUsage {
+        prompt_tokens,
+        completion_tokens,
+        cached_prompt_tokens,
+        is_exact: true,
+    })
+}
+
+fn parse_retry_after_header(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+    if let Some(ms_val) = headers.get("retry-after-ms").and_then(|v| v.to_str().ok()) {
+        if let Ok(ms) = ms_val.trim().parse::<u64>() {
+            return Some(ms);
+        }
+    }
+    if let Some(sec_val) = headers.get("retry-after").and_then(|v| v.to_str().ok()) {
+        if let Ok(secs) = sec_val.trim().parse::<f64>() {
+            if secs.is_finite() && secs >= 0.0 {
+                return Some((secs * 1000.0) as u64);
+            }
+        }
+    }
+    None
+}
+
+/// Multi-protocol HTTP LLM adapter supporting OpenAI, DeepSeek, OpenRouter, Ollama, Anthropic, and Gemini wire formats.
 pub struct HttpProvider {
     name: String,
     endpoint: String,
@@ -140,8 +195,10 @@ impl HttpProvider {
             })
             .collect();
         let model_lower = req.model.to_ascii_lowercase();
-        let is_reasoning_or_modern = model_lower.starts_with("o1")
+        let is_o_series = model_lower.starts_with("o1")
             || model_lower.starts_with("o3")
+            || model_lower.starts_with("o4");
+        let is_reasoning_or_modern = is_o_series
             || model_lower.starts_with("gpt-5")
             || model_lower.contains("terra")
             || model_lower.contains("reasoning");
@@ -153,7 +210,7 @@ impl HttpProvider {
 
         if is_reasoning_or_modern {
             payload["max_completion_tokens"] = json!(req.max_tokens);
-            if !model_lower.starts_with("o1") && !model_lower.starts_with("o3") {
+            if !is_o_series {
                 payload["temperature"] = json!(req.temperature);
             }
         } else {
@@ -170,19 +227,32 @@ impl HttpProvider {
         payload
     }
 
-    fn build_anthropic_payload(&self, req: &ProviderRequest) -> Value {
+    /// Builds an Anthropic `/v1/messages` payload with:
+    /// 1. Consecutive `Role::Tool` coalescing into a single `role: "user"` `tool_result` block array!
+    /// 2. Strict `user`-first message alternation!
+    /// 3. Ephemeral `cache_control` breakpoints on the frozen system prompt and last tool schema!
+    pub(crate) fn build_anthropic_payload(&self, req: &ProviderRequest) -> Value {
         let mut system_parts = Vec::new();
-        let mut messages = Vec::new();
+        let mut messages: Vec<Value> = Vec::new();
         for m in &req.messages {
             match m.role {
                 Role::System if !m.content.trim().is_empty() => system_parts.push(m.content.clone()),
-                Role::User => messages.push(json!({ "role": "user", "content": m.content })),
-                Role::Assistant => {
-                    if let Some(calls) = &m.tool_calls {
-                        let mut blocks = Vec::new();
-                        if !m.content.trim().is_empty() {
-                            blocks.push(json!({ "type": "text", "text": m.content }));
+                Role::User => {
+                    let text_block = json!({ "type": "text", "text": m.content });
+                    if let Some(last) = messages.last_mut().filter(|v| v.get("role") == Some(&Value::String("user".into()))) {
+                        if let Some(arr) = last.get_mut("content").and_then(Value::as_array_mut) {
+                            arr.push(text_block);
+                            continue;
                         }
+                    }
+                    messages.push(json!({ "role": "user", "content": [text_block] }));
+                }
+                Role::Assistant => {
+                    let mut blocks = Vec::new();
+                    if !m.content.trim().is_empty() {
+                        blocks.push(json!({ "type": "text", "text": m.content }));
+                    }
+                    if let Some(calls) = &m.tool_calls {
                         for tc in calls {
                             let input: Value =
                                 serde_json::from_str(&tc.function.arguments).unwrap_or_else(|_| json!({}));
@@ -193,23 +263,30 @@ impl HttpProvider {
                                 "input": input
                             }));
                         }
+                    }
+                    if !blocks.is_empty() && !messages.is_empty() {
                         messages.push(json!({ "role": "assistant", "content": blocks }));
-                    } else {
-                        messages.push(json!({ "role": "assistant", "content": m.content }));
                     }
                 }
-                Role::Tool => messages.push(json!({
-                    "role": "user",
-                    "content": [{
+                Role::Tool => {
+                    let tr_block = json!({
                         "type": "tool_result",
                         "tool_use_id": m.tool_call_id.clone().unwrap_or_else(|| "tool-call".to_string()),
                         "content": m.content
-                    }],
-                })),
+                    });
+                    if let Some(last) = messages.last_mut().filter(|v| v.get("role") == Some(&Value::String("user".into()))) {
+                        if let Some(arr) = last.get_mut("content").and_then(Value::as_array_mut) {
+                            arr.push(tr_block);
+                            continue;
+                        }
+                    }
+                    messages.push(json!({ "role": "user", "content": [tr_block] }));
+                }
                 _ => {}
             }
         }
-        let tools: Vec<Value> = req
+
+        let mut tools: Vec<Value> = req
             .tools
             .iter()
             .filter_map(|t| {
@@ -221,6 +298,10 @@ impl HttpProvider {
                 }))
             })
             .collect();
+        if let Some(last_tool) = tools.last_mut() {
+            last_tool["cache_control"] = json!({ "type": "ephemeral" });
+        }
+
         let mut payload = json!({
             "model": req.model,
             "max_tokens": req.max_tokens,
@@ -228,7 +309,11 @@ impl HttpProvider {
             "messages": messages
         });
         if !system_parts.is_empty() {
-            payload["system"] = Value::String(system_parts.join("\n\n"));
+            payload["system"] = json!([{
+                "type": "text",
+                "text": system_parts.join("\n\n"),
+                "cache_control": { "type": "ephemeral" }
+            }]);
         }
         if !tools.is_empty() {
             payload["tools"] = Value::Array(tools);
@@ -236,9 +321,10 @@ impl HttpProvider {
         payload
     }
 
-    fn build_gemini_payload(&self, req: &ProviderRequest) -> Value {
+    /// Builds a Gemini `:generateContent` payload coalescing consecutive `Role::Tool` `functionResponse` parts.
+    pub(crate) fn build_gemini_payload(&self, req: &ProviderRequest) -> Value {
         let mut system_parts = Vec::new();
-        let mut contents = Vec::new();
+        let mut contents: Vec<Value> = Vec::new();
         for m in &req.messages {
             match m.role {
                 Role::System if !m.content.trim().is_empty() => system_parts.push(json!({ "text": m.content })),
@@ -255,17 +341,28 @@ impl HttpProvider {
                             parts.push(json!({ "functionCall": { "name": tc.function.name, "args": args } }));
                         }
                     }
-                    contents.push(json!({ "role": "model", "parts": parts }));
+                    if !parts.is_empty() {
+                        contents.push(json!({ "role": "model", "parts": parts }));
+                    }
                 }
-                Role::Tool => contents.push(json!({
-                    "role": "user",
-                    "parts": [{
+                Role::Tool => {
+                    let fr_part = json!({
                         "functionResponse": {
                             "name": m.name.clone().unwrap_or_else(|| "tool".to_string()),
                             "response": { "result": m.content }
                         }
-                    }]
-                })),
+                    });
+                    if let Some(last) = contents.last_mut().filter(|v| v.get("role") == Some(&Value::String("user".into()))) {
+                        if let Some(arr) = last.get_mut("parts").and_then(Value::as_array_mut) {
+                            let has_fr = arr.iter().any(|p| p.get("functionResponse").is_some());
+                            if has_fr {
+                                arr.push(fr_part);
+                                continue;
+                            }
+                        }
+                    }
+                    contents.push(json!({ "role": "user", "parts": [fr_part] }));
+                }
                 _ => {}
             }
         }
@@ -319,7 +416,9 @@ impl HttpProvider {
                 }
             }
         }
-        Ok(finalize_provider_response(content, tool_calls, "openai"))
+        let mut resp = finalize_provider_response(content, tool_calls, "openai");
+        resp.usage = extract_openai_usage(body);
+        Ok(resp)
     }
 
     fn parse_anthropic_response(body: &Value) -> Result<ProviderResponse, ProviderError> {
@@ -358,11 +457,20 @@ impl HttpProvider {
                 _ => {}
             }
         }
-        Ok(finalize_provider_response(
-            Some(text_parts.join("\n")),
-            tool_calls,
-            "anthropic",
-        ))
+        let mut resp = finalize_provider_response(Some(text_parts.join("\n")), tool_calls, "anthropic");
+        if let Some(u) = body.get("usage") {
+            let uncached = u.get("input_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let cache_read = u.get("cache_read_input_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let cache_create = u.get("cache_creation_input_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let out_tok = u.get("output_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
+            resp.usage = Some(ProviderTokenUsage {
+                prompt_tokens: uncached + cache_read + cache_create,
+                completion_tokens: out_tok,
+                cached_prompt_tokens: cache_read,
+                is_exact: true,
+            });
+        }
+        Ok(resp)
     }
 
     fn parse_gemini_response(body: &Value) -> Result<ProviderResponse, ProviderError> {
@@ -394,11 +502,19 @@ impl HttpProvider {
                 }
             }
         }
-        Ok(finalize_provider_response(
-            Some(text_parts.join("\n")),
-            tool_calls,
-            "gemini",
-        ))
+        let mut resp = finalize_provider_response(Some(text_parts.join("\n")), tool_calls, "gemini");
+        if let Some(um) = body.get("usageMetadata") {
+            let prompt_tokens = um.get("promptTokenCount").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let completion_tokens = um.get("candidatesTokenCount").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let cached_prompt_tokens = um.get("cachedContentTokenCount").and_then(Value::as_u64).unwrap_or(0) as usize;
+            resp.usage = Some(ProviderTokenUsage {
+                prompt_tokens,
+                completion_tokens,
+                cached_prompt_tokens,
+                is_exact: true,
+            });
+        }
+        Ok(resp)
     }
 }
 
@@ -445,45 +561,46 @@ impl ILlmProvider for HttpProvider {
                     .await
                     .map_err(|e| ProviderError::Transport(e.to_string()))?;
                 let status = resp.status().as_u16();
+                let retry_after_ms = parse_retry_after_header(resp.headers());
                 let text = resp.text().await.map_err(|e| ProviderError::Transport(e.to_string()))?;
                 if !(200..300).contains(&status) {
-                    let mut needs_retry = false;
-                    let mut healed_payload = payload.clone();
+                    if !is_anthropic && !is_gemini && status == 400 {
+                        let mut needs_retry = false;
+                        let mut healed_payload = payload.clone();
 
-                    if status == 400 && text.contains("max_completion_tokens") && healed_payload.get("max_tokens").is_some() {
-                        if let Some(tokens) = healed_payload.as_object_mut().and_then(|o| o.remove("max_tokens")) {
-                            healed_payload["max_completion_tokens"] = tokens;
+                        if text.contains("max_completion_tokens") && healed_payload.get("max_tokens").is_some() {
+                            if let Some(tokens) = healed_payload.as_object_mut().and_then(|o| o.remove("max_tokens")) {
+                                healed_payload["max_completion_tokens"] = tokens;
+                                needs_retry = true;
+                            }
+                        }
+                        if text.contains("reasoning_effort") && text.contains("set reasoning_effort to 'none'") {
+                            healed_payload["reasoning_effort"] = Value::String("none".to_string());
                             needs_retry = true;
                         }
-                    }
-
-                    if status == 400 && text.contains("reasoning_effort") && text.contains("set reasoning_effort to 'none'") {
-                        healed_payload["reasoning_effort"] = Value::String("none".to_string());
-                        needs_retry = true;
-                    }
-
-                    if status == 400 && text.contains("Unsupported parameter: 'temperature'") {
-                        if let Some(obj) = healed_payload.as_object_mut() {
-                            obj.remove("temperature");
-                            needs_retry = true;
+                        if text.contains("Unsupported parameter: 'temperature'") {
+                            if let Some(obj) = healed_payload.as_object_mut() {
+                                obj.remove("temperature");
+                                needs_retry = true;
+                            }
                         }
-                    }
 
-                    if needs_retry {
-                        let mut retry_builder = self.client.post(&url).header("content-type", "application/json");
-                        if let Some(ref key) = self.api_key {
-                            retry_builder = retry_builder.bearer_auth(key);
-                        }
-                        if let Ok(retry_resp) = retry_builder.json(&healed_payload).send().await {
-                            let retry_status = retry_resp.status().as_u16();
-                            let retry_text = retry_resp.text().await.map_err(|e| ProviderError::Transport(e.to_string()))?;
-                            if (200..300).contains(&retry_status) {
-                                if retry_text.trim_start().starts_with("data:") {
-                                    return parse_sse_stream(&retry_text, &self.name);
+                        if needs_retry {
+                            let mut retry_builder = self.client.post(&url).header("content-type", "application/json");
+                            if let Some(ref key) = self.api_key {
+                                retry_builder = retry_builder.bearer_auth(key);
+                            }
+                            if let Ok(retry_resp) = retry_builder.json(&healed_payload).send().await {
+                                let retry_status = retry_resp.status().as_u16();
+                                let retry_text = retry_resp.text().await.map_err(|e| ProviderError::Transport(e.to_string()))?;
+                                if (200..300).contains(&retry_status) {
+                                    if retry_text.trim_start().starts_with("data:") {
+                                        return parse_sse_stream(&retry_text, &self.name);
+                                    }
+                                    let json_body: Value = serde_json::from_str(&retry_text)
+                                        .map_err(|e| ProviderError::Transport(format!("Invalid JSON from provider: {e}")))?;
+                                    return Self::parse_openai_response(&json_body);
                                 }
-                                let json_body: Value = serde_json::from_str(&retry_text)
-                                    .map_err(|e| ProviderError::Transport(format!("Invalid JSON from provider: {e}")))?;
-                                return Self::parse_openai_response(&json_body);
                             }
                         }
                     }
@@ -492,6 +609,7 @@ impl ILlmProvider for HttpProvider {
                         status,
                         body: text,
                         retryable: is_retryable_http_status(status),
+                        retry_after_ms,
                     });
                 }
                 if text.trim_start().starts_with("data:") {
@@ -533,10 +651,7 @@ mod tests {
         let provider = HttpProvider::new("openai", "https://api.openai.com/v1", None, 30_000);
         let req = ProviderRequest {
             model: "gpt-5.6-terra".to_string(),
-            messages: vec![crate::domain::types::messages::SessionMessage::new(
-                Role::User,
-                "Hello",
-            )],
+            messages: vec![crate::domain::types::messages::SessionMessage::new(Role::User, "Hello")],
             tools: Vec::new(),
             max_tokens: 4096,
             temperature: 0.0,
@@ -548,10 +663,7 @@ mod tests {
 
         let req_with_tools = ProviderRequest {
             model: "gpt-5.6-terra".to_string(),
-            messages: vec![crate::domain::types::messages::SessionMessage::new(
-                Role::User,
-                "List files",
-            )],
+            messages: vec![crate::domain::types::messages::SessionMessage::new(Role::User, "List files")],
             tools: vec![serde_json::json!({
                 "type": "function",
                 "function": { "name": "list_files", "parameters": {} }
@@ -562,21 +674,19 @@ mod tests {
         let payload_tools = provider.build_openai_payload(&req_with_tools);
         assert_eq!(payload_tools["reasoning_effort"], "none");
 
-        let req_o1 = ProviderRequest {
-            model: "o1-mini".to_string(),
-            messages: vec![crate::domain::types::messages::SessionMessage::new(
-                Role::User,
-                "Hello",
-            )],
-            tools: Vec::new(),
-            max_tokens: 2048,
-            temperature: 1.0,
-        };
-        let payload_o1 = provider.build_openai_payload(&req_o1);
-        assert_eq!(payload_o1["max_completion_tokens"], 2048);
-        assert!(payload_o1.get("max_tokens").is_none());
-        // o1 models do not include temperature
-        assert!(payload_o1.get("temperature").is_none());
+        for reasoning_model in ["o1-mini", "o3-mini", "o4-mini"] {
+            let req_o = ProviderRequest {
+                model: reasoning_model.to_string(),
+                messages: vec![crate::domain::types::messages::SessionMessage::new(Role::User, "Hello")],
+                tools: Vec::new(),
+                max_tokens: 2048,
+                temperature: 1.0,
+            };
+            let payload_o = provider.build_openai_payload(&req_o);
+            assert_eq!(payload_o["max_completion_tokens"], 2048);
+            assert!(payload_o.get("max_tokens").is_none());
+            assert!(payload_o.get("temperature").is_none());
+        }
     }
 
     #[test]
@@ -584,10 +694,7 @@ mod tests {
         let provider = HttpProvider::new("openai", "https://api.openai.com/v1", None, 30_000);
         let req = ProviderRequest {
             model: "gpt-3.5-turbo".to_string(),
-            messages: vec![crate::domain::types::messages::SessionMessage::new(
-                Role::User,
-                "Hello",
-            )],
+            messages: vec![crate::domain::types::messages::SessionMessage::new(Role::User, "Hello")],
             tools: Vec::new(),
             max_tokens: 1024,
             temperature: 0.0,
@@ -598,4 +705,3 @@ mod tests {
         assert_eq!(payload["temperature"], 0.0);
     }
 }
-

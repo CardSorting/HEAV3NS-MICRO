@@ -52,9 +52,9 @@ final class RuntimeClient {
     private let sleepAssertion: RunSleepAssertion
     private var runSequence = -1
     static let runEvents: Set<String> = ["run.state", "run.progress", "run.accepted", "approval.requested", "approval.resolved"]
-    private static let controls: Set<String> = ["task.cancel", "task.cancelAll", "approval.resolve", "command.actionReconcile", "snapshot", "shutdown", "project.stop", "project.healing"]
+    private static let controls: Set<String> = ["task.cancel", "task.cancelAll", "approval.resolve", "command.actionReconcile", "snapshot", "shutdown", "project.stop", "project.healing", "posture.set", "posture.step", "turn.undo"]
     private static let discoveries: Set<String> = ["models.discover", "files.search", "project.discover", "changes.list", "spider.check"]
-    private static let inspections: Set<String> = ["workspace.branch", "models.list", "models.discover", "files.list", "files.search", "files.read", "files.readBinary", "changes.list", "changes.read", "artifact.read", "history.read", "history.list", "conversation.list", "activity.list", "checkpoint.list", "checkpoint.preview", "project.discover", "project.status", "project.tasks.list", "task.lookup", "task.deferStatus", "command.actionsList", "agentSwarm.formStatus", "agentSwarm.formHistory", "agentSwarm.formStream", "agentSwarm.classify", "side.query", "memory.list", "memory.read", "context.inspect", "context.history", "spider.check", "state.inspect"]
+    private static let inspections: Set<String> = ["workspace.branch", "models.list", "models.discover", "files.list", "files.search", "files.read", "files.readBinary", "changes.list", "changes.read", "artifact.read", "history.read", "history.list", "conversation.list", "activity.list", "checkpoint.list", "checkpoint.preview", "project.discover", "project.status", "project.tasks.list", "task.lookup", "task.deferStatus", "command.actionsList", "agentSwarm.formStatus", "agentSwarm.formHistory", "agentSwarm.formStream", "agentSwarm.classify", "side.query", "memory.list", "memory.read", "context.inspect", "context.history", "spider.check", "state.inspect", "posture.get", "receipts.list", "request.preview"]
     private var pendingWrites = 0
     private let nodeOverride: URL?
     private let cliOverride: URL?

@@ -510,7 +510,7 @@ fn extract_html_attr(tag_body: &str, attr_name: &str) -> Option<String> {
 
 fn extract_following_text(after_open_tag: &str) -> String {
     let end = after_open_tag.find('<').unwrap_or_else(|| after_open_tag.len().min(120));
-    collapse_whitespace(&after_open_tag[..end.min(120)])
+    collapse_whitespace(crate::plumbing::text_tokens::safe_utf8_prefix(after_open_tag, end.min(120)))
 }
 
 fn strip_all_tags(html: &str) -> String {

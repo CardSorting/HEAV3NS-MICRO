@@ -48,10 +48,22 @@ struct ConversationContextDetails {
            let activeTools = count("activeTools"), let totalTools = count("totalTools"), activeTools <= totalTools {
             let deferred = totalTools - activeTools
             let prefixNote = (data["cachePrefixHash"] as? String).flatMap { $0.isEmpty ? nil : " · prefix fnv1a:\($0)" } ?? ""
+            let pinNote = ((data["prefixStatus"] as? String) ?? (data["cachePinStatus"] as? String)).flatMap { $0.isEmpty ? nil : " (\($0))" } ?? ""
             var routingLines = [
-                "Profile: \(profile)\(prefixNote).",
+                "Profile: \(profile)\(prefixNote)\(pinNote).",
                 "\(activeTools) of \(totalTools) tools active\(deferred > 0 ? " (\(deferred) specialist tool\(deferred == 1 ? "" : "s") loaded on demand)" : "")."
             ]
+            if let posture = (data["postureLabel"] as? String) ?? (data["posture"] as? String), !posture.isEmpty {
+                routingLines.append("Execution posture: \(posture).")
+            }
+            if let est = count("usedInputTokens") ?? count("estimatedTokens"),
+               let win = count("contextWindowTokens") ?? count("contextWindow"), win > 0 {
+                let headroom = (data["headroomTokens"] as? Int) ?? (win - est)
+                routingLines.append("Context budget: ~\(est.formatted()) / \(win.formatted()) tokens (headroom: \(headroom >= 0 ? "+" : "")\(headroom.formatted())).")
+            }
+            if let billing = data["billingDisplay"] as? String, !billing.isEmpty {
+                routingLines.append("Session metering: \(billing).")
+            }
             if let sources = data["governanceSources"] as? [String], !sources.isEmpty {
                 routingLines.append("Governance rules: \(sources.prefix(6).joined(separator: ", ")).")
             }
@@ -62,13 +74,13 @@ struct ConversationContextDetails {
         }
 
         sections.append("About this snapshot\nRetained history and memory for this conversation. Other instructions, skills, files and tools are included as LUMI prepares a request.")
-        sections.append("Review and manage\nUse Open… for retained history, memory, saved state, recorded runs and checkpoints. Reload updates this snapshot.")
+        sections.append("Review and manage\nUse Open… for retained history, memory, saved state, recorded runs, request preview, turn receipts and checkpoints. Reload updates this snapshot.")
         text = sections.joined(separator: "\n\n")
     }
 }
 
 enum ConversationContextLink: CaseIterable {
-    case history, memory, savedState, runs, checkpoints
+    case history, memory, savedState, runs, checkpoints, requestPreview, receipts
     var title: String {
         switch self {
         case .history: return "Retained History"
@@ -76,6 +88,8 @@ enum ConversationContextLink: CaseIterable {
         case .savedState: return "Saved State"
         case .runs: return "Recorded Runs"
         case .checkpoints: return "Checkpoints"
+        case .requestPreview: return "Outbound Request Preview"
+        case .receipts: return "Turn Receipts Ledger"
         }
     }
 }

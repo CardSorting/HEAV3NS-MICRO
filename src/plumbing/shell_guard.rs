@@ -2,6 +2,12 @@
 use regex::Regex;
 use std::sync::OnceLock;
 
+/// Abstract contract for stateless shell command statement and pipeline inspection (`ADR-0013`..`0016`).
+pub trait IShellCommandGuard {
+    fn inspect_heredoc_redirection(&self, cmd: &str) -> Option<String>;
+    fn inspect_terminal_file_read(&self, cmd: &str) -> Option<String>;
+}
+
 /// Stateless shell command statement, heredoc (`ADR-0015`), and terminal file-read (`ADR-0016`) guard.
 pub struct ShellCommandGuard;
 

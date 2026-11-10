@@ -140,6 +140,43 @@ extension WorkspaceWindow {
                 case .failure(let error): self.inspectionFailed(error, initial: true)
                 }
             }
+        case .requestPreview:
+            prepareInspection(title: "Outbound Request Preview", file: nil, contextSummary: true)
+            guard client.isReady else {
+                inspectionFailed(BridgeError.message("Request preview is unavailable while disconnected."), initial: true); return
+            }
+            let generation = inspectionGeneration
+            let draftHint = composer.string.trimmingCharacters(in: .whitespacesAndNewlines)
+            client.request("request.preview", params: ["prompt": draftHint]) { [weak self] result in
+                guard let self, self.inspectionGeneration == generation else { return }
+                switch result {
+                case .success(let data):
+                    self.inspection.string = RequestPreviewFormatter.format(data)
+                    self.inspection.scrollToBeginningOfDocument(nil)
+                    self.pageLabel.stringValue = "Zero-side-effect manifest · Reload to update"
+                    self.pageLabel.toolTip = self.pageLabel.stringValue
+                case .failure(let error):
+                    self.inspectionFailed(error, initial: true)
+                }
+            }
+        case .receipts:
+            prepareInspection(title: "Turn Receipts Ledger", file: nil, contextSummary: true)
+            guard client.isReady else {
+                inspectionFailed(BridgeError.message("Turn receipts are unavailable while disconnected."), initial: true); return
+            }
+            let generation = inspectionGeneration
+            client.request("receipts.list", params: ["limit": 24]) { [weak self] result in
+                guard let self, self.inspectionGeneration == generation else { return }
+                switch result {
+                case .success(let data):
+                    self.inspection.string = ReceiptsLedgerFormatter.format(data)
+                    self.inspection.scrollToBeginningOfDocument(nil)
+                    self.pageLabel.stringValue = "Verifiable runtime receipts · Reload to update"
+                    self.pageLabel.toolTip = self.pageLabel.stringValue
+                case .failure(let error):
+                    self.inspectionFailed(error, initial: true)
+                }
+            }
         }
     }
 
@@ -448,6 +485,8 @@ extension WorkspaceWindow {
             case .savedState: showSavedState()
             case .runs: showSessions()
             case .checkpoints: showCheckpoints()
+            case .requestPreview: showRequestPreview()
+            case .receipts: showTurnReceipts()
             }
             return
         }

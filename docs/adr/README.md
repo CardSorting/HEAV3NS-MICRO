@@ -35,6 +35,7 @@ flowchart TD
   ADR11["ADR-0011: Sovereign Intelligence, Spatial Mediation & Closed-Loop CUA"]
   ADR12["ADR-0012: Lean System Prompt, KV-Cache Prefixing & Sticky Tool Routing"]
   ADR13["ADR-0013: Shell Command Guard & Pipeline Anti-Starvation Defenses"]
+  ADR14["ADR-0014: Codewhale Distillation — Posture, CAS, Seatbelt & Receipts"]
 
   ADR1 --> ADR7
   ADR1 --> ADR2
@@ -54,6 +55,9 @@ flowchart TD
   ADR7 --> ADR12
   ADR8 --> ADR13
   ADR5 --> ADR13
+  ADR10 --> ADR14
+  ADR12 --> ADR14
+  ADR13 --> ADR14
 ```
 
 ---
@@ -76,6 +80,7 @@ flowchart TD
 | [ADR-0011](0011-sovereign-intelligence-and-spatial-computer-use.md) | Sovereign Intelligence Architecture, Double-Wrapped Spatial Mediation & Closed-Loop Computer Use | **Accepted** | `SPIDER` · `BROCCOLI` · `SWARM` · `COMPUTER USE` | `cargo test core::spatial_tests` & `computer_use_tests` |
 | [ADR-0012](0012-lean-system-prompt-and-kv-cache-prefix-determinism.md) | Lean System Prompt Specification, KV-Cache Prefix Determinism & Sticky Dynamic Tool Routing | **Accepted** | Prompt Architecture (`HEAV3NS-MICRO`) | `test_prompt_cache_prefix_determinism_and_model_families` |
 | [ADR-0013](0013-shell-command-defenses-and-pipeline-sanitization.md) | Shell Command Guard, Heredoc File-Write Interdiction & Terminal File-Read Anti-Starvation | **Accepted** | Runtime Defenses (`THE HARNESS`) | `test_adr_0015_compound_multiline_and_closing_heredoc_defenses` |
+| [ADR-0014](0014-codewhale-distillation-posture-cas-and-receipts.md) | Codewhale Zenith Distillation — 5-Stop Execution Posture, Pure-Rust Workspace CAS, Seatbelt Sandboxing, KV-Cache Pinning & Turn Receipts | **Accepted** | Safety, Ergonomics & Desktop UX (`THE HARNESS`) | `cargo test core::codewhale_zenith_tests` & `swift test` |
 
 ---
 

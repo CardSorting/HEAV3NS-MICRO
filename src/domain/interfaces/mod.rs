@@ -1,4 +1,5 @@
 // [LAYER: DOMAIN]
+use crate::domain::turn_receipt::FileChangeReceipt;
 use crate::domain::types::progress::{EngineProgressEvent, ToolExecutionRecord};
 use crate::domain::types::runtime::{CancellationToken, ExecutionAuthorityLevel};
 use crate::domain::types::skill_types::SkillManifest;
@@ -15,10 +16,10 @@ pub type ProgressCallback = Arc<dyn Fn(EngineProgressEvent) + Send + Sync>;
 pub type DeferralPredicate = Arc<dyn Fn() -> bool + Send + Sync>;
 pub type MemoryPersistenceCallback = Arc<dyn Fn(&str, &str, &str) + Send + Sync>;
 
-/// Contractual sovereignty marker for [`HttpProvider`](crate::infrastructure::http_provider::HttpProvider).
+/// Contractual sovereignty marker for HTTP-backed LLM completion providers.
 pub trait IHttpProvider: ILlmProvider {}
 
-/// Contractual sovereignty marker for [`ScriptedProvider`](crate::infrastructure::scripted_provider::ScriptedProvider).
+/// Contractual sovereignty marker for deterministic scripted LLM providers.
 pub trait IScriptedProvider: ILlmProvider {
     fn request_count(&self) -> usize;
 }
@@ -29,13 +30,21 @@ pub trait ISessionPersistence: Send + Sync {
     fn load_jsonl(&self, path: &Path) -> Result<String, String>;
 }
 
-/// Contractual sovereignty marker for [`FileSessionPersistence`](crate::infrastructure::vfs_store::FileSessionPersistence).
+/// Contractual sovereignty marker for file-backed session JSONL persistence.
 pub trait IFileSessionPersistence: ISessionPersistence {}
 
 /// Contractual sovereignty interface for staged Virtual File System overlays.
 pub trait ISessionVfs: Send + Sync {
     fn export_staged_overlays(&self) -> Vec<VfsFileOverlay>;
     fn commit_staged(&mut self) -> Result<Vec<String>, String>;
+}
+
+/// Contractual sovereignty interface for pure-Rust Content-Addressable Workspace Snapshots (`CAS`).
+pub trait IWorkspaceSnapshotCas: Send + Sync {
+    fn capture_snapshot(&mut self, label: &str, turn_number: u64) -> Result<String, String>;
+    fn diff_between(&self, base_id: &str, target_id: Option<&str>) -> Result<(Vec<FileChangeReceipt>, String), String>;
+    fn undo_turn_changes(&mut self, pre_turn_id: &str, post_turn_id: &str, force: bool) -> Result<Vec<String>, String>;
+    fn restore_full_snapshot(&mut self, snapshot_id: &str) -> Result<Vec<String>, String>;
 }
 
 /// Contractual sovereignty interface for workspace `SKILL.md` discovery.
@@ -83,7 +92,7 @@ pub trait IBehavioralKnowledgeStore: Send + Sync {
     fn reconcile_state(&self, recorded_epoch: u64, current_epoch: u64, hash_drift: bool) -> crate::domain::types::learned_knowledge_types::EnvironmentalReconciliationReport;
 }
 
-/// Contractual sovereignty marker for [`BehavioralKnowledgeStore`](crate::infrastructure::behavioral_store::BehavioralKnowledgeStore).
+/// Contractual sovereignty marker for file-backed behavioral knowledge stores.
 pub trait IBehavioralStore: IBehavioralKnowledgeStore {}
 
 /// Contractual sovereignty interface for consulting the Synthetic Swarm on environmental interpretation and recovery.

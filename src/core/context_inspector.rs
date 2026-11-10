@@ -1,17 +1,20 @@
 // [LAYER: CORE]
 use crate::core::engine::AgentEngine;
+use crate::core::request_queue::{discover_skills_cached, PromptComposer};
 use crate::core::session_store::SessionCompactor;
 use crate::core::tool_specs::builtin_tool_specs;
 use crate::domain::compaction::ContextBudgetInfo;
+use crate::domain::prefix_and_manifest::{PrefixFingerprint, RequestManifest};
+use crate::domain::pricing_and_taxonomy::{select_auto_routed_model, BillingMetering, ProviderTokenUsage};
 use crate::domain::prompt_spec::{ModelPromptFamily, PromptProfile, SystemPromptSpec};
-use crate::domain::types::messages::{estimate_messages_tokens, Role};
+use crate::domain::types::messages::{estimate_messages_tokens, Role, SessionMessage};
 use crate::domain::types::runtime::ExecutionAuthorityLevel;
-use crate::infrastructure::vfs_store::{SkillsIngestor, WorkspacePromptProbe};
+use crate::infrastructure::vfs_store::WorkspacePromptProbe;
 use crate::plumbing::text_tokens::estimate_text_tokens;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// Structured telemetry snapshot of system prompt composition, KV-cache prefix, sticky tool routing, and context window headroom.
+/// Structured telemetry snapshot of system prompt composition, KV-cache prefix, sticky tool routing, posture, and context window headroom.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContextInspectionSnapshot {
@@ -19,7 +22,10 @@ pub struct ContextInspectionSnapshot {
     pub model_name: String,
     pub model_family: String,
     pub provider: String,
+    pub posture: String,
     pub cache_prefix_hash: String,
+    pub prefix_pin_status: String,
+    pub billing_estimate: String,
     pub static_prefix_tokens: usize,
     pub dynamic_workspace_tokens: usize,
     pub system_total_tokens: usize,
@@ -28,6 +34,7 @@ pub struct ContextInspectionSnapshot {
     pub tool_schema_tokens: usize,
     pub tool_full_schema_tokens: usize,
     pub unlocked_specialist_tools: Vec<String>,
+    pub evicted_specialist_tools: Vec<String>,
     pub deferred_specialist_tools: Vec<String>,
     pub memory_entries: usize,
     pub memory_tokens: usize,
@@ -40,6 +47,7 @@ pub struct ContextInspectionSnapshot {
     pub safety_margin_tokens: usize,
     pub used_input_tokens: usize,
     pub headroom_tokens: usize,
+    pub signed_headroom_tokens: i64,
     pub utilization_pct: f64,
     pub compaction_trigger_tokens: usize,
     pub joyzoning_detected: bool,
@@ -52,14 +60,20 @@ pub struct ContextInspectionSnapshot {
 impl AgentEngine {
     pub fn inspect_context_snapshot(&self, sample_prompt: &str) -> ContextInspectionSnapshot {
         let cfg = self.config_snapshot();
+        let posture = self.current_posture();
         let soul = Some(self.tools().skill_catalog.lock().unwrap().active_soul.clone());
         let spec = SystemPromptSpec::for_turn(&cfg, ExecutionAuthorityLevel::Autonomous, soul);
         let facts = WorkspacePromptProbe::probe_cached(self.workspace_root());
-        let skills = SkillsIngestor::discover(self.workspace_root());
+        let skills = discover_skills_cached(self.workspace_root());
 
         let static_prefix = spec.static_prefix(&cfg);
         let dynamic_suffix = spec.dynamic_suffix(&cfg, self.workspace_root(), &facts, &skills);
-        let full_system = spec.render(&cfg, self.workspace_root(), &facts, &skills);
+        let full_system = self
+            .pinned_system_prompt
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_else(|| spec.render(&cfg, self.workspace_root(), &facts, &skills));
         let static_prefix_tokens = estimate_text_tokens(&static_prefix);
         let dynamic_workspace_tokens = estimate_text_tokens(&dynamic_suffix);
         let system_total_tokens = estimate_text_tokens(&full_system);
@@ -71,7 +85,11 @@ impl AgentEngine {
         let tool_full_schema_tokens = estimate_text_tokens(&Value::Array(full_schemas.clone()).to_string());
 
         let unlocked_set: Vec<String> = {
-            let guard = self.tools().unlocked_tools.lock().unwrap();
+            let guard = self.tools().unlocked_lru.lock().unwrap();
+            guard.iter().map(|s| (*s).to_string()).collect()
+        };
+        let evicted_set: Vec<String> = {
+            let guard = self.tools().evicted_tools.lock().unwrap();
             guard.iter().map(|s| (*s).to_string()).collect()
         };
         let mut deferred = Vec::new();
@@ -99,6 +117,7 @@ impl AgentEngine {
         let budget = ContextBudgetInfo::calculate(cfg.context_window_tokens, cfg.max_output_tokens);
         let used_input_tokens = system_total_tokens + tool_schema_tokens + memory_tokens + history_tokens;
         let headroom_tokens = budget.available_input_tokens.saturating_sub(used_input_tokens);
+        let signed_headroom_tokens = (budget.available_input_tokens as i64) - (used_input_tokens as i64);
         let utilization_pct = if budget.available_input_tokens == 0 {
             0.0
         } else {
@@ -106,14 +125,27 @@ impl AgentEngine {
         };
 
         let model_family = ModelPromptFamily::classify(&cfg).as_str().to_string();
-        let cache_prefix_hash = spec.cache_prefix_fingerprint(&cfg);
+        let fp = PrefixFingerprint::from_wire_prefix(&full_system, &active_schemas);
+        let cache_prefix_hash = fp.combined_hash;
+        let prefix_pin_status = self.last_prefix_status.lock().unwrap().clone();
+        let sample_usage = ProviderTokenUsage {
+            prompt_tokens: used_input_tokens,
+            completion_tokens: 0,
+            cached_prompt_tokens: 0,
+            is_exact: false,
+        };
+        let billing_estimate =
+            BillingMetering::evaluate(&cfg.provider, &cfg.model_name, &cfg.api_endpoint, &sample_usage).format_honest();
 
         ContextInspectionSnapshot {
             profile: spec.profile.as_str().to_string(),
             model_name: cfg.model_name,
             model_family,
             provider: cfg.provider,
+            posture: posture.slug().to_string(),
             cache_prefix_hash,
+            prefix_pin_status,
+            billing_estimate,
             static_prefix_tokens,
             dynamic_workspace_tokens,
             system_total_tokens,
@@ -122,6 +154,7 @@ impl AgentEngine {
             tool_schema_tokens,
             tool_full_schema_tokens,
             unlocked_specialist_tools: unlocked_set,
+            evicted_specialist_tools: evicted_set,
             deferred_specialist_tools: deferred,
             memory_entries,
             memory_tokens,
@@ -134,6 +167,7 @@ impl AgentEngine {
             safety_margin_tokens: budget.safety_margin_tokens,
             used_input_tokens,
             headroom_tokens,
+            signed_headroom_tokens,
             utilization_pct,
             compaction_trigger_tokens: budget.compaction_trigger_tokens,
             joyzoning_detected: facts.joyzoning_detected,
@@ -141,6 +175,65 @@ impl AgentEngine {
             skills_discovered: skills.len(),
             governance_sources: facts.governance_sources,
             governance_warnings: facts.governance_warnings,
+        }
+    }
+
+    /// Builds a zero-side-effect `RequestManifest` (`heav3ns.request_manifest/v1`) without mutating session or unlocking tools!
+    pub fn build_request_manifest(&self, sample_prompt: &str) -> RequestManifest {
+        let cfg = self.config_snapshot();
+        let posture = self.current_posture();
+        let soul = Some(self.tools().skill_catalog.lock().unwrap().active_soul.clone());
+        let spec = SystemPromptSpec::for_turn(&cfg, ExecutionAuthorityLevel::Autonomous, soul);
+
+        // Read-only tool schema projection (does not mutate unlocked_lru)
+        let unlocked = self.tools().unlocked_tools.lock().unwrap().clone();
+        let tools_wire: Vec<Value> = self
+            .tools()
+            .list_specs()
+            .into_iter()
+            .filter(|s| (!self.forbids_swarm_delegation() || s.name != "engage_swarm") && (s.is_core || unlocked.contains(s.name)))
+            .map(|s| s.to_openai_tool())
+            .collect();
+        let tool_toks = estimate_text_tokens(&Value::Array(tools_wire.clone()).to_string());
+        let pinned = self.pinned_system_prompt.lock().unwrap().clone();
+
+        let mut msgs = {
+            let sess = self.session().lock().unwrap();
+            let mem = self.memory().lock().unwrap();
+            let (m, _) = PromptComposer::compose_with_posture(
+                &cfg,
+                self.workspace_root(),
+                &sess,
+                &mem,
+                tool_toks,
+                &spec,
+                posture,
+                pinned.as_deref(),
+            );
+            m
+        };
+        if !sample_prompt.trim().is_empty() {
+            msgs.push(SessionMessage::new(Role::User, sample_prompt.trim()));
+        }
+
+        let status = self.last_prefix_status.lock().unwrap().clone();
+        RequestManifest::build(&cfg.model_name, posture, &msgs, &tools_wire, cfg.context_window_tokens, &status)
+    }
+
+    pub fn render_request_manifest(&self, arg: &str) -> String {
+        let trimmed = arg.trim();
+        let (as_json, sample) = if trimmed == "json" || trimmed == "--json" {
+            (true, "")
+        } else if let Some(rest) = trimmed.strip_prefix("--json ") {
+            (true, rest.trim())
+        } else {
+            (false, trimmed)
+        };
+        let manifest = self.build_request_manifest(sample);
+        if as_json {
+            serde_json::to_string_pretty(&manifest).unwrap_or_default()
+        } else {
+            manifest.render_human_readable()
         }
     }
 
@@ -167,12 +260,12 @@ impl AgentEngine {
             "HEAV3NS-MICRO Context & Prompt Inspector".to_string(),
             "────────────────────────────────────────────────────────────────────────".to_string(),
             format!(
-                "Model & Profile : {} ({} · {} · provider={})",
-                snap.model_name, snap.model_family, snap.profile, snap.provider
+                "Model & Posture : {} ({} · {} · provider={} · mode={} · est={})",
+                snap.model_name, snap.model_family, snap.profile, snap.provider, snap.posture, snap.billing_estimate
             ),
             format!(
-                "Cache Prefix    : fnv1a:{} ({}t static KV-prefix + {}t workspace tail)",
-                snap.cache_prefix_hash, snap.static_prefix_tokens, snap.dynamic_workspace_tokens
+                "Cache Prefix    : fnv1a:{} [{}] ({}t static KV-prefix + {}t workspace tail)",
+                snap.cache_prefix_hash, snap.prefix_pin_status, snap.static_prefix_tokens, snap.dynamic_workspace_tokens
             ),
             format!(
                 "Input Budget    : [{}] {:.1}% ({}t / {}t cap · window={}t)",
@@ -182,7 +275,7 @@ impl AgentEngine {
             format!("  • System Static Prefix (KV-Cached) : {:>7}t", snap.static_prefix_tokens),
             format!("  • Workspace & Governance Tail      : {:>7}t", snap.dynamic_workspace_tokens),
             format!(
-                "  • Active Tool Schemas ({:>2}/{:>2})      : {:>7}t  (saved {}t via sticky routing)",
+                "  • Active Tool Schemas ({:>2}/{:>2})      : {:>7}t  (saved {}t via sticky 8-LRU routing)",
                 snap.tool_active_count, snap.tool_total_count, snap.tool_schema_tokens, saved_tool_toks
             ),
             format!(
@@ -194,8 +287,8 @@ impl AgentEngine {
                 snap.history_messages, snap.rolling_summaries, snap.history_tokens
             ),
             format!(
-                "  • Free Input Headroom              : {:>7}t  (auto-compacts at {}t)",
-                snap.headroom_tokens, snap.compaction_trigger_tokens
+                "  • Signed Input Headroom            : {:>+7}t  (auto-compacts at {}t)",
+                snap.signed_headroom_tokens, snap.compaction_trigger_tokens
             ),
             "────────────────────────────────────────────────────────────────────────".to_string(),
             format!(
@@ -208,6 +301,9 @@ impl AgentEngine {
             format!("Unlocked Tools  : {unlocked_label}"),
             format!("On-Demand Tools : {}", snap.deferred_specialist_tools.join(", ")),
         ];
+        if !snap.evicted_specialist_tools.is_empty() {
+            lines.push(format!("Evicted (LRU-8) : {}", snap.evicted_specialist_tools.join(", ")));
+        }
         if !snap.governance_warnings.is_empty() {
             lines.push(format!("Quarantined     : {}", snap.governance_warnings.join("; ")));
         }
@@ -217,7 +313,7 @@ impl AgentEngine {
     pub fn render_prompt_inspector(&self, mode: &str) -> String {
         let cfg = self.config_snapshot();
         let facts = WorkspacePromptProbe::probe_cached(self.workspace_root());
-        let skills = SkillsIngestor::discover(self.workspace_root());
+        let skills = discover_skills_cached(self.workspace_root());
         let soul = Some(self.tools().skill_catalog.lock().unwrap().active_soul.clone());
         let trimmed = mode.trim().to_ascii_lowercase();
 
@@ -287,7 +383,8 @@ impl AgentEngine {
     }
 
     pub fn inspect_or_switch_model(&self, arg: &str) -> String {
-        if arg.is_empty() {
+        let trimmed = arg.trim();
+        if trimmed.is_empty() {
             let cfg = self.config_snapshot();
             format!(
                 "Active model: {} (family: {}, profile: {}, provider: {}, fallback: {:?})",
@@ -297,11 +394,19 @@ impl AgentEngine {
                 cfg.provider,
                 cfg.fallback_model
             )
+        } else if trimmed.eq_ignore_ascii_case("auto") {
+            self.set_active_model_name("auto");
+            let cfg = self.config_snapshot();
+            let sample = select_auto_routed_model(&cfg.provider, "auto", "architectural refactor");
+            format!(
+                "Enabled `/model auto` same-provider routing on '{}' (strong tier -> {}, fast tier -> fast model).",
+                cfg.provider, sample.selected_model
+            )
         } else {
-            self.set_active_model_name(arg);
+            self.set_active_model_name(trimmed);
             let cfg = self.config_snapshot();
             format!(
-                "Switched active model to: {} (family: {}, profile: {})",
+                "Switched active model to: {} (family: {}, profile: {}, KV-prefix repin declared)",
                 cfg.model_name,
                 ModelPromptFamily::classify(&cfg).as_str(),
                 PromptProfile::select(&cfg).as_str()

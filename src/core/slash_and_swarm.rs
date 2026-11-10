@@ -1,11 +1,13 @@
 // [LAYER: CORE]
 use crate::core::engine::AgentEngine;
+use crate::core::request_queue::discover_skills_cached;
 use crate::domain::compaction::CompactionPolicy;
+use crate::domain::interfaces::IWorkspaceSnapshotCas;
 use crate::domain::prompt_spec::SystemPromptSpec;
 use crate::domain::swarm::{classify_task_for_legion, SwarmAssignment, SwarmFormationResult, SwarmItemReport};
 use crate::domain::types::messages::{estimate_messages_tokens, Role, SessionMessage};
 use crate::domain::types::progress::ToolExecutionRecord;
-use crate::domain::types::runtime::{CancellationToken, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel};
+use crate::domain::types::runtime::{CancellationToken, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel, ExecutionPosture};
 use crate::domain::types::tool_schedule::ScheduledToolCall;
 use crate::infrastructure::vfs_store::{workspace_revision, SkillsIngestor, WorkspacePromptProbe};
 use crate::plumbing::hash_and_math::now_ms;
@@ -122,7 +124,7 @@ impl AgentEngine {
 
             waves += 1;
             let swarm_facts = WorkspacePromptProbe::probe_cached(self.workspace_root());
-            let swarm_skills = SkillsIngestor::discover(self.workspace_root());
+            let swarm_skills = discover_skills_cached(self.workspace_root());
             let mut wave_futs = Vec::with_capacity(ready_ids.len());
             for id in ready_ids {
                 let assign = pending.remove(&id).unwrap();
@@ -139,14 +141,13 @@ impl AgentEngine {
                 let child_engine = AgentEngine::with_shared_substrate(
                     self.workspace_root().to_path_buf(),
                     child_cfg,
-                    Arc::clone(self.provider()),
+                    self.provider_arc(),
                     Arc::clone(self.memory()),
                     Arc::clone(self.tools()),
                 )
                 .without_swarm_delegation();
 
                 let prompt = SystemPromptSpec::format_swarm_task_prompt(&assign.objective, &dep_context);
-
                 let tok = cancel_token.clone();
                 let def = should_defer.clone();
                 wave_futs.push(async move {
@@ -212,36 +213,112 @@ impl AgentEngine {
         let reply = match cmd.as_str() {
             "/help" => [
                 "Available slash commands:",
+                "  /mode [posture]     - Inspect or step 5-stop posture (ask|accept-edits|plan|auto-review|full-access)",
+                "  /preview-request    - Zero-side-effect outbound wire manifest & byte accounting",
+                "  /receipts [last]    - Inspect prose-free turn audit receipts (heav3ns.receipt/v1)",
+                "  /turn [inspect|undo]- Inspect latest turn receipt & KV-pin or undo last turn",
+                "  /undo [--force]     - Path-scoped CAS turn rollback (protects post-turn manual edits)",
+                "  /restore <snap_id>  - Restore full workspace tree from CAS snapshot ID",
                 "  /context [json]     - Visual token budget HUD, KV-cache prefix, and tool routing",
                 "  /prompt [mode]      - Inspect active system prompt (prefix|compact|specialist|json)",
                 "  /stats              - Session, arena, cache, and token statistics",
                 "  /vfs                - Show staged Virtual File System changes",
-                "  /diff               - Render unified diff of staged VFS or workspace changes",
-                "  /commit             - Commit staged VFS mutations to disk",
-                "  /discard            - Discard staged VFS mutations",
-                "  /tools              - List core, unlocked, and on-demand built-in tools (29 total)",
-                "  /guide              - Display quickstart setup and onboarding guide",
-                "  /demo               - Information on running the offline interactive tour",
+                "  /diff               - Render unified diff of staged VFS, CAS turn, or session changes",
+                "  /commit | /discard  - Commit or discard staged VFS mutations",
+                "  /tools              - List core, unlocked (8-LRU), and deferred built-in tools (31 total)",
                 "  /memory [query]     - List or search persistent LUMI-MEMORY/1 facts",
-                "  /skills             - List discovered workspace SKILL.md & DAG capabilities",
-                "  /soul               - Inspect active Soul persona, axioms, and competencies",
+                "  /skills | /soul     - Inspect SKILL.md manifests, Skill Tree DAG, and Soul persona",
                 "  /forge <prompt>     - Synthesize a new custom skill into the Skill Tree DAG",
-                "  /doctor             - Audit Computer Use SLA health and Skill Tree DAG integrity",
+                "  /doctor             - Audit Computer Use SLA health, CAS status, and DAG integrity",
                 "  /computer [action]  - Capture or inspect Set-of-Marks Virtual Display state",
                 "  /spatial [target]   - Audit spatial grounding health or ground a UI selector",
                 "  /browser [url]      - Navigate or snapshot interactive Set-of-Marks DOM tree",
                 "  /vision [path]      - Decode binary image header metadata or generate test SVG",
-                "  /legion <objective> - Classify task into The Legion 7-specialist swarm DAG",
+                "  /legion | /swarm    - Classify task into The Legion 7-specialist swarm DAG",
                 "  /compact            - Force rolling LUMI-CONTEXT/1 compaction",
-                "  /model [name]       - Inspect or switch the active model and prompt profile",
-                "  /snapshot           - Capture a holistic session + VFS + arena snapshot",
-                "  /snapshots          - List captured snapshots",
-                "  /rewind [index|n]   - Rewind to snapshot or drop last N messages",
-                "  /undo               - Roll back the most recent file mutation",
+                "  /model [name|auto]  - Inspect or switch active model (or same-provider auto routing)",
+                "  /snapshot           - Capture holistic session + VFS + CAS disk snapshot",
+                "  /snapshots          - List captured snapshots and CAS checkpoints",
+                "  /rewind [snap-N|N]  - Rewind session + workspace disk to snapshot or drop last N msgs",
                 "  /clear              - Clear conversation messages and reset arena",
-                "  /health             - Runtime health, workspace revision, and queue diagnostics",
+                "  /health             - Runtime health, workspace revision, posture, and queue diagnostics",
             ]
             .join("\n"),
+            "/mode" | "/posture" => {
+                if arg.is_empty() {
+                    let cur = self.current_posture();
+                    format!(
+                        "Active posture: {} ({}) — sandbox={:?} (cycle with `Shift+Tab` or `/mode next`)",
+                        cur.display_label(),
+                        cur.slug(),
+                        cur.sandbox_mode()
+                    )
+                } else if arg.eq_ignore_ascii_case("next") || arg.eq_ignore_ascii_case("step") {
+                    let next = self.step_posture();
+                    format!(
+                        "Stepped posture -> {} ({}) [KV-cache tool schemas remain pinned]",
+                        next.display_label(),
+                        next.slug()
+                    )
+                } else if let Some(parsed) = ExecutionPosture::parse_label(arg) {
+                    self.set_posture(parsed);
+                    format!(
+                        "Switched posture to: {} ({}) — sandbox={:?}",
+                        parsed.display_label(),
+                        parsed.slug(),
+                        parsed.sandbox_mode()
+                    )
+                } else {
+                    "Unknown posture. Valid stops: ask | accept-edits | plan | auto-review | full-access | next".to_string()
+                }
+            }
+            "/preview-request" | "/preview" => self.render_request_manifest(arg),
+            "/receipts" => {
+                let list = self.receipts_snapshot();
+                if list.is_empty() {
+                    "No turn receipts recorded yet in this workspace.".to_string()
+                } else if arg == "json" || arg == "--json" {
+                    serde_json::to_string_pretty(&list).unwrap_or_default()
+                } else if arg == "last" || arg == "--last" {
+                    list.last().map(|r| r.render_human_readable()).unwrap_or_default()
+                } else {
+                    list.iter()
+                        .rev()
+                        .take(5)
+                        .map(|r| r.render_human_readable())
+                        .collect::<Vec<_>>()
+                        .join("\n\n")
+                }
+            }
+            "/turn" => {
+                let sub = arg.to_ascii_lowercase();
+                if sub == "undo" || sub.starts_with("undo ") {
+                    let force = sub.contains("--force") || sub.contains("force");
+                    match self.undo_last_turn(force) {
+                        Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_default(),
+                        Err(e) => format!("Turn undo blocked: {e}"),
+                    }
+                } else if let Some(last) = self.latest_receipt() {
+                    format!("{}\n\n{}", last.render_human_readable(), self.render_request_manifest(""))
+                } else {
+                    self.render_request_manifest("")
+                }
+            }
+            "/restore" => {
+                if arg.is_empty() {
+                    let snaps = self.cas.lock().unwrap().snapshots().to_vec();
+                    json!({ "availableCasSnapshots": snaps }).to_string()
+                } else {
+                    match self.cas.lock().unwrap().restore_full_snapshot(arg) {
+                        Ok(v) => {
+                            self.tools().cache.lock().unwrap().clear();
+                            self.tools().read_tracker.lock().unwrap().reset_stamps();
+                            serde_json::to_string_pretty(&json!({ "restored": v })).unwrap_or_default()
+                        }
+                        Err(e) => format!("CAS snapshot restore error: {e}"),
+                    }
+                }
+            }
             "/context" => self.render_context_hud(arg),
             "/prompt" => self.render_prompt_inspector(arg),
             "/stats" => {
@@ -255,6 +332,7 @@ impl AgentEngine {
                     "messages": sess.messages().len(),
                     "transcript": sess.transcript().len(),
                     "tokens": estimate_messages_tokens(sess.messages()),
+                    "posture": self.current_posture().slug(),
                     "arenaAllocatedBytes": slab.allocated_bytes,
                     "arenaCapacityBytes": slab.capacity_bytes,
                     "arenaResets": slab.reset_count,
@@ -263,6 +341,7 @@ impl AgentEngine {
                     "cacheHits": cache.hits,
                     "cacheMisses": cache.misses,
                     "journalMutations": journal.history().len(),
+                    "turnReceipts": self.turn_receipts.lock().unwrap().len(),
                 })
                 .to_string()
             }
@@ -280,15 +359,19 @@ impl AgentEngine {
                         .filter_map(|ov| vfs.generate_diff(&ov.path))
                         .collect::<Vec<_>>()
                         .join("\n")
+                } else if let Some(last) = self.latest_receipt() {
+                    if let (Some(b), Some(a)) = (&last.snapshot_before, &last.snapshot_after) {
+                        if let Ok((changes, diff_txt)) = self.cas.lock().unwrap().diff_between(b, Some(a.as_str())) {
+                            if !changes.is_empty() {
+                                return Some(diff_txt);
+                            }
+                        }
+                    }
+                    let j_diff = self.tools().journal.lock().unwrap().generate_session_diff(self.workspace_root(), None);
+                    serde_json::to_string_pretty(&j_diff).unwrap_or_else(|_| "No staged VFS or session changes.".to_string())
                 } else {
-                    let j_diff = self
-                        .tools()
-                        .journal
-                        .lock()
-                        .unwrap()
-                        .generate_session_diff(self.workspace_root(), None);
-                    serde_json::to_string_pretty(&j_diff)
-                        .unwrap_or_else(|_| "No staged VFS or session changes.".to_string())
+                    let j_diff = self.tools().journal.lock().unwrap().generate_session_diff(self.workspace_root(), None);
+                    serde_json::to_string_pretty(&j_diff).unwrap_or_else(|_| "No staged VFS or session changes.".to_string())
                 }
             }
             "/commit" => match self.vfs().lock().unwrap().commit_all() {
@@ -302,51 +385,38 @@ impl AgentEngine {
             "/tools" => self.render_tools_status(),
             "/guide" | "/quickstart" => [
                 "HEAV3NS-MICRO Quickstart Guide:",
-                "  1. Configure AI Provider:",
-                "     - Set OpenAI key:    export OPENAI_API_KEY=\"sk-...\"",
-                "     - Or use Gemini:      export GEMINI_API_KEY=\"...\"",
-                "     - Or use free Ollama: heav3ns-micro --provider ollama -m llama3.2",
-                "  2. Core Safety & VFS Commands:",
-                "     /stats    - View session memory, 16-MiB arena slab, token usage",
-                "     /vfs      - Inspect staged sandboxed file modifications",
-                "     /diff     - View unified diff before committing changes to disk",
-                "     /commit   - Safely write staged VFS files to disk",
-                "     /discard  - Discard staged changes safely",
-                "     /memory   - Search long-term persistent knowledge store",
-                "     /doctor   - Inspect SLA health, Skill Tree DAG, and display status",
-                "     /tools    - List all registered built-in tools",
-                "     /demo     - Walkthrough the 5 sovereign pillars",
+                "  1. Configure AI Provider (or zero-config local Ollama):",
+                "     - OpenAI / Anthropic / Gemini / DeepSeek / OpenRouter env keys supported",
+                "     - Or zero-key Ollama: heav3ns-micro --provider ollama -m llama3.2",
+                "  2. Posture & Audit Commands:",
+                "     /mode            - Cycle 5-stop posture (Ask -> Accept Edits -> Plan -> Auto-Review -> Full Access)",
+                "     /preview-request - Inspect exact outbound JSON bytes & KV-cache fingerprint",
+                "     /receipts        - View prose-free CAS turn receipts (heav3ns.receipt/v1)",
+                "     /undo            - Roll back last turn's file mutations with conflict detection",
+                "     /diff            - Render unified LCS diff (works even outside git repos)",
             ]
             .join("\n"),
             "/demo" => [
                 "HEAV3NS-MICRO Zero-Key Guided Tour:",
-                "  To run the full interactive guided tour in your terminal, run:",
-                "    heav3ns-micro demo",
-                "  This executes the 5 sovereign pillars (Arena Slab, VFS Sandbox, Diff Review,",
-                "  LUMI-MEMORY persistence, and Flight Suite validation) completely offline.",
+                "  Run `heav3ns-micro demo` to verify Arena Slab, VFS Sandbox, CAS Receipts, and Flight Suite offline.",
             ]
             .join("\n"),
             "/memory" => {
                 let mem = self.memory().lock().unwrap();
                 if arg.is_empty() {
-                    mem.format_memory_envelope()
-                        .unwrap_or_else(|| "Memory store is empty.".to_string())
+                    mem.format_memory_envelope().unwrap_or_else(|| "Memory store is empty.".to_string())
                 } else {
                     serde_json::to_string_pretty(&mem.search_memories(arg)).unwrap_or_default()
                 }
             }
             "/skills" => {
-                let skills = SkillsIngestor::discover(self.workspace_root());
+                let skills = discover_skills_cached(self.workspace_root());
                 let dag = self.tools().skill_catalog.lock().unwrap().evaluate_dag();
                 serde_json::to_string_pretty(&json!({ "workspaceSkills": skills, "skillTreeDag": dag })).unwrap_or_default()
             }
             "/soul" => {
                 let cat = self.tools().skill_catalog.lock().unwrap();
-                serde_json::to_string_pretty(&json!({
-                    "activeSoul": cat.active_soul,
-                    "competencies": cat.competency_scores
-                }))
-                .unwrap_or_default()
+                serde_json::to_string_pretty(&json!({ "activeSoul": cat.active_soul, "competencies": cat.competency_scores })).unwrap_or_default()
             }
             "/forge" => {
                 let prompt = if arg.is_empty() { "sovereign-custom-operator" } else { arg };
@@ -359,79 +429,21 @@ impl AgentEngine {
             "/doctor" => {
                 let disp_health = self.tools().display_state.lock().unwrap().audit_health();
                 let dag = self.tools().skill_catalog.lock().unwrap().evaluate_dag();
+                let cas_snaps = self.cas.lock().unwrap().snapshots().len();
                 serde_json::to_string_pretty(&json!({
+                    "posture": self.current_posture().slug(),
+                    "prefixStatus": *self.last_prefix_status.lock().unwrap(),
+                    "casSnapshots": cas_snaps,
                     "displayHealth": disp_health,
                     "skillTreeAcyclic": dag.get("acyclic"),
                     "skillNodeCount": dag.get("nodeCount")
                 }))
                 .unwrap_or_default()
             }
-            "/computer" => {
-                let mut sub_parts = arg.splitn(2, char::is_whitespace);
-                let sub_cmd = sub_parts.next().unwrap_or("").trim().to_ascii_lowercase();
-                let sub_arg = sub_parts.next().unwrap_or("").trim();
-                match sub_cmd.as_str() {
-                    "observe" => {
-                        let obs = self.tools().computer_orchestrator.observe();
-                        serde_json::to_string_pretty(&obs).unwrap_or_default()
-                    }
-                    "interpret" => {
-                        let obs = self.tools().computer_orchestrator.observe();
-                        let interp = self.tools().computer_orchestrator.interpret(&obs);
-                        serde_json::to_string_pretty(&interp).unwrap_or_default()
-                    }
-                    "patterns" => {
-                        let kstore = self.tools().computer_orchestrator.knowledge_store.lock().unwrap();
-                        serde_json::to_string_pretty(&json!({
-                            "patterns": kstore.list_patterns(),
-                            "procedures": kstore.list_procedures()
-                        }))
-                        .unwrap_or_default()
-                    }
-                    "consult" => {
-                        use crate::domain::interfaces::ISwarmIntelligenceConsultant;
-                        let obs = self.tools().computer_orchestrator.observe();
-                        let goal = if sub_arg.is_empty() { "Analyze active window" } else { sub_arg };
-                        let mut req = crate::domain::types::swarm_intelligence_types::SwarmConsultationRequest::new(
-                            "consult-slash",
-                            goal,
-                            &obs.app_name,
-                            &obs.window_title,
-                        );
-                        req.modal_blocking = obs.modal_detected;
-                        req.candidate_target_ids = obs.elements.iter().map(|e| e.id.clone()).collect();
-                        let res = self.tools().computer_orchestrator.consult(&req);
-                        serde_json::to_string_pretty(&res).unwrap_or_default()
-                    }
-                    "orchestrate" => {
-                        let target = if sub_arg.is_empty() { None } else { Some(sub_arg.to_string()) };
-                        let contract = crate::domain::types::spatial_types::SpatialActionContract {
-                            action_name: "click".into(),
-                            target_selector: target,
-                            ..Default::default()
-                        };
-                        match self.tools().computer_orchestrator.execute_closed_loop_cycle("Slash command orchestration", &contract) {
-                            Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_default(),
-                            Err(e) => format!("Computer orchestration error: {e}"),
-                        }
-                    }
-                    _ => {
-                        let mut disp = self.tools().display_state.lock().unwrap();
-                        let action = if arg.is_empty() { "capture" } else { arg };
-                        match disp.execute_action(&json!({ "action": action })) {
-                            Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_default(),
-                            Err(e) => format!("Computer action error: {e}"),
-                        }
-                    }
-                }
-            }
+            "/computer" => self.handle_computer_slash(arg),
             "/browser" => {
                 let mut disp = self.tools().display_state.lock().unwrap();
-                let req = if arg.is_empty() {
-                    json!({ "action": "snapshot" })
-                } else {
-                    json!({ "action": "navigate", "url": arg })
-                };
+                let req = if arg.is_empty() { json!({ "action": "snapshot" }) } else { json!({ "action": "navigate", "url": arg }) };
                 match disp.execute_browser_action(&req) {
                     Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_default(),
                     Err(e) => format!("Browser action error: {e}"),
@@ -462,11 +474,10 @@ impl AgentEngine {
                     let fresh = crate::core::spatial_engine::SpatialInteractionEngine::extract_scene_from_display(&disp);
                     let mut med = self.tools().spatial_engine.mediator.lock().unwrap();
                     med.update_scene(fresh);
-                    let res = med.ground_action(&contract);
-                    serde_json::to_string_pretty(&res).unwrap_or_default()
+                    serde_json::to_string_pretty(&med.ground_action(&contract)).unwrap_or_default()
                 }
             }
-            "/legion" => {
+            "/legion" | "/swarm" => {
                 let obj = if arg.is_empty() { "Audit, harden, and verify workspace architecture" } else { arg };
                 serde_json::to_string_pretty(&classify_task_for_legion(obj, &[], None, 5)).unwrap_or_default()
             }
@@ -491,28 +502,40 @@ impl AgentEngine {
             }
             "/snapshots" => self.format_snapshots_list(),
             "/rewind" => {
-                let n = arg.parse::<usize>().unwrap_or(0);
-                if self.snapshot_count() > 0 && n < self.snapshot_count() {
-                    match self.rewind_to_snapshot(n) {
-                        Ok(s) => format!("Rewound to snapshot #{n} ({}).", s.snapshot_id),
-                        Err(e) => e,
+                let normalized = arg.trim_start_matches('#').trim_start_matches("snap-");
+                let parsed_idx = normalized.parse::<usize>().ok();
+                if let Some(n) = parsed_idx {
+                    if self.snapshot_count() > 0 && n < self.snapshot_count() {
+                        return Some(match self.rewind_to_snapshot(n) {
+                            Ok(s) => format!("Rewound session and workspace to snapshot #{n} ({}).", s.snapshot_id),
+                            Err(e) => e,
+                        });
                     }
-                } else {
-                    let count = n.max(2);
-                    self.session().lock().unwrap().truncate_active_messages(count);
-                    format!("Truncated last {count} message(s) from active session.")
                 }
+                if arg.starts_with("snap-") {
+                    match self.cas.lock().unwrap().restore_full_snapshot(arg) {
+                        Ok(v) => return Some(format!("Restored workspace CAS snapshot {arg}: {:?}", v)),
+                        Err(e) => return Some(format!("Snapshot '{arg}' not found: {e}")),
+                    }
+                }
+                let count = parsed_idx.unwrap_or(2).max(2);
+                self.session().lock().unwrap().truncate_active_messages(count);
+                format!("Truncated last {count} message(s) from active session.")
             }
             "/undo" => {
-                let res = self.tools().journal.lock().unwrap().rollback_last();
-                self.tools().cache.lock().unwrap().clear();
-                serde_json::to_string(&res).unwrap_or_default()
+                let force = arg.contains("--force") || arg.contains("force");
+                match self.undo_last_turn(force) {
+                    Ok(v) => serde_json::to_string(&v).unwrap_or_default(),
+                    Err(e) => json!({ "restoredCount": 0, "errors": [e], "wouldBlock": true }).to_string(),
+                }
             }
             "/clear" => {
                 let cfg = self.config_snapshot();
                 let mut sess = self.session().lock().unwrap();
                 sess.clear();
                 sess.add_message(SessionMessage::new(Role::System, cfg.system_prompt));
+                *self.pinned_system_prompt.lock().unwrap() = None;
+                self.prefix_tracker.lock().unwrap().declare_repin("session_clear");
                 self.tools().end_task();
                 "Session cleared and arena reset to offset 0.".to_string()
             }
@@ -520,7 +543,9 @@ impl AgentEngine {
                 let q = self.queue().snapshot();
                 json!({
                     "status": "ok",
-                    "provider": self.provider().provider_name(),
+                    "provider": self.provider_arc().provider_name(),
+                    "posture": self.current_posture().slug(),
+                    "prefixStatus": *self.last_prefix_status.lock().unwrap(),
                     "workspaceRevision": workspace_revision(self.workspace_root()),
                     "queueActive": q.active,
                     "queuePending": q.pending_count,
@@ -531,5 +556,51 @@ impl AgentEngine {
             _ => return None,
         };
         Some(reply)
+    }
+
+    fn handle_computer_slash(&self, arg: &str) -> String {
+        let mut sub_parts = arg.splitn(2, char::is_whitespace);
+        let sub_cmd = sub_parts.next().unwrap_or("").trim().to_ascii_lowercase();
+        let sub_arg = sub_parts.next().unwrap_or("").trim();
+        match sub_cmd.as_str() {
+            "observe" => serde_json::to_string_pretty(&self.tools().computer_orchestrator.observe()).unwrap_or_default(),
+            "interpret" => {
+                let obs = self.tools().computer_orchestrator.observe();
+                serde_json::to_string_pretty(&self.tools().computer_orchestrator.interpret(&obs)).unwrap_or_default()
+            }
+            "patterns" => {
+                let kstore = self.tools().computer_orchestrator.knowledge_store.lock().unwrap();
+                serde_json::to_string_pretty(&json!({ "patterns": kstore.list_patterns(), "procedures": kstore.list_procedures() })).unwrap_or_default()
+            }
+            "consult" => {
+                use crate::domain::interfaces::ISwarmIntelligenceConsultant;
+                let obs = self.tools().computer_orchestrator.observe();
+                let goal = if sub_arg.is_empty() { "Analyze active window" } else { sub_arg };
+                let mut req = crate::domain::types::swarm_intelligence_types::SwarmConsultationRequest::new("consult-slash", goal, &obs.app_name, &obs.window_title);
+                req.modal_blocking = obs.modal_detected;
+                req.candidate_target_ids = obs.elements.iter().map(|e| e.id.clone()).collect();
+                serde_json::to_string_pretty(&self.tools().computer_orchestrator.consult(&req)).unwrap_or_default()
+            }
+            "orchestrate" => {
+                let target = if sub_arg.is_empty() { None } else { Some(sub_arg.to_string()) };
+                let contract = crate::domain::types::spatial_types::SpatialActionContract {
+                    action_name: "click".into(),
+                    target_selector: target,
+                    ..Default::default()
+                };
+                match self.tools().computer_orchestrator.execute_closed_loop_cycle("Slash command orchestration", &contract) {
+                    Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_default(),
+                    Err(e) => format!("Computer orchestration error: {e}"),
+                }
+            }
+            _ => {
+                let mut disp = self.tools().display_state.lock().unwrap();
+                let action = if arg.is_empty() { "capture" } else { arg };
+                match disp.execute_action(&json!({ "action": action })) {
+                    Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_default(),
+                    Err(e) => format!("Computer action error: {e}"),
+                }
+            }
+        }
     }
 }

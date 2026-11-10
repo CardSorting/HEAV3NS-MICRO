@@ -10,6 +10,8 @@ enum InspectionDestination: Equatable {
     case contextHistory(String)
     case spider(String)
     case savedState(String)
+    case requestPreview
+    case receipts
 }
 
 /// History contains destinations, not content. Revisiting always reads a fresh

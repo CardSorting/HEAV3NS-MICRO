@@ -1,24 +1,23 @@
 // [LAYER: CORE]
 use crate::core::computer_use_orchestrator::ComputerUseOrchestrator;
 use crate::core::spatial_engine::SpatialInteractionEngine;
-use crate::core::tool_governor::{ToolExecutionCache, ToolLoopBreaker, ToolOutputGovernor};
+use crate::core::tool_governor::{FileReadTracker, ToolExecutionCache, ToolLoopBreaker, ToolOutputGovernor};
 use crate::core::tool_specs::builtin_tool_specs;
 use crate::domain::computer_use::VirtualDisplayState;
-use crate::domain::interfaces::{BoxFuture, ISwarmIntelligenceConsultant, IToolExecutor};
+use crate::domain::interfaces::{BoxFuture, IToolExecutor};
 use crate::domain::memory::MemoryStore;
 use crate::domain::skill_tree::SkillTreeCatalog;
 use crate::domain::swarm::classify_task_for_legion;
 use crate::domain::tool_parser::ToolCallArgParser;
+use crate::domain::types::posture_types::{evaluate_tool_posture, AuthorizationVerdict, RepoConstitution};
 use crate::domain::types::progress::ToolExecutionRecord;
-use crate::domain::types::runtime::{CancellationToken, ExecutionAuthorityLevel};
-use crate::domain::types::spatial_types::SpatialActionContract;
-use crate::domain::types::swarm_intelligence_types::SwarmConsultationRequest;
+use crate::domain::types::runtime::{ApprovalGateCallback, CancellationToken, ExecutionAuthorityLevel, ExecutionPosture, UserApprovalChoice};
 use crate::domain::types::tool_schedule::ScheduledToolCall;
 use crate::domain::types::tool_types::ToolSpec;
 use crate::infrastructure::behavioral_store::BehavioralKnowledgeStore;
 use crate::infrastructure::fs_tools::dispatch_fs_tool;
 use crate::infrastructure::search_tools::resolve_workspace_path;
-use crate::infrastructure::shell_runner::execute_shell_command;
+use crate::infrastructure::shell_runner::execute_shell_command_sandboxed;
 use crate::infrastructure::transaction_journal::TransactionJournal;
 use crate::infrastructure::vfs_store::SkillsIngestor;
 use crate::plumbing::secret_redactor::SafetyPolicy;
@@ -31,7 +30,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-/// Hyper-compressed Tool Registry, Wave Scheduler, Cache, Governor, and Native I/O Orchestrator.
+/// Hyper-compressed Tool Registry, Wave Scheduler, Posture Gate, Staleness Tracker, and Sandboxed I/O Orchestrator.
 pub struct ToolRegistry {
     specs: HashMap<&'static str, ToolSpec>,
     ordered_names: Vec<&'static str>,
@@ -40,6 +39,7 @@ pub struct ToolRegistry {
     pub cache: Mutex<ToolExecutionCache>,
     pub governor: Mutex<ToolOutputGovernor>,
     pub loop_breaker: Mutex<ToolLoopBreaker>,
+    pub read_tracker: Mutex<FileReadTracker>,
     pub memory_store: Arc<Mutex<MemoryStore>>,
     pub display_state: Arc<Mutex<VirtualDisplayState>>,
     pub spatial_engine: Arc<SpatialInteractionEngine>,
@@ -47,6 +47,13 @@ pub struct ToolRegistry {
     pub computer_orchestrator: Arc<ComputerUseOrchestrator>,
     pub skill_catalog: Mutex<SkillTreeCatalog>,
     pub unlocked_tools: Mutex<BTreeSet<&'static str>>,
+    pub unlocked_lru: Mutex<Vec<&'static str>>,
+    pub evicted_tools: Mutex<Vec<&'static str>>,
+    pub active_posture: Mutex<Option<ExecutionPosture>>,
+    pub session_allowlist: Mutex<Vec<String>>,
+    pub constitution: Mutex<Option<RepoConstitution>>,
+    pub approval_gate: Mutex<Option<ApprovalGateCallback>>,
+    pub turn_approvals: Mutex<Vec<String>>,
     pub max_concurrency: usize,
 }
 
@@ -76,6 +83,7 @@ impl ToolRegistry {
             cache: Mutex::new(ToolExecutionCache::default()),
             governor: Mutex::new(ToolOutputGovernor::new()),
             loop_breaker: Mutex::new(ToolLoopBreaker::default()),
+            read_tracker: Mutex::new(FileReadTracker::default()),
             memory_store,
             display_state,
             spatial_engine,
@@ -83,6 +91,13 @@ impl ToolRegistry {
             computer_orchestrator,
             skill_catalog: Mutex::new(SkillTreeCatalog::new()),
             unlocked_tools: Mutex::new(BTreeSet::new()),
+            unlocked_lru: Mutex::new(Vec::new()),
+            evicted_tools: Mutex::new(Vec::new()),
+            active_posture: Mutex::new(None),
+            session_allowlist: Mutex::new(Vec::new()),
+            constitution: Mutex::new(None),
+            approval_gate: Mutex::new(None),
+            turn_approvals: Mutex::new(Vec::new()),
             max_concurrency: 8,
         };
         for spec in builtin_tool_specs() {
@@ -108,12 +123,11 @@ impl ToolRegistry {
         self.list_specs().iter().map(|s| s.to_openai_tool()).collect()
     }
 
-    /// Context-aware sticky dynamic tool router: always includes core tools, unlocks domain tools matching prompt intent, and retains session-unlocked tools across turns.
     pub fn select_relevant_tool_schemas(&self, prompt: &str) -> Vec<Value> {
         self.select_tool_schemas_for(prompt, false)
     }
 
-    /// Selects relevant OpenAI tool schemas with optional structural exclusion of `engage_swarm` for child Legion specialists.
+    /// Selects relevant OpenAI tool schemas with bounded 8-slot LRU deferred unlocking and structural `engage_swarm` exclusion for specialists.
     pub fn select_tool_schemas_for(&self, prompt: &str, forbid_swarm: bool) -> Vec<Value> {
         let lower = prompt.trim().to_lowercase();
         if lower.is_empty() {
@@ -124,7 +138,7 @@ impl ToolRegistry {
                 .map(|s| s.to_openai_tool())
                 .collect();
         }
-        let mut unlocked = self.unlocked_tools.lock().unwrap();
+        let mut to_unlock = Vec::new();
         for spec in self.list_specs() {
             if spec.is_core || (forbid_swarm && spec.name == "engage_swarm") {
                 continue;
@@ -151,9 +165,13 @@ impl ToolRegistry {
                 || (spec.name == "file_info" && (lower.contains("metadata") || lower.contains("sha256") || lower.contains("digest")))
                 || (spec.name == "edit_file_anchored" && (lower.contains("anchor") || lower.contains("fnv")));
             if matched {
-                unlocked.insert(spec.name);
+                to_unlock.push(spec.name);
             }
         }
+        for name in to_unlock {
+            self.touch_unlocked_lru(name);
+        }
+        let unlocked = self.unlocked_tools.lock().unwrap();
         self.list_specs()
             .into_iter()
             .filter(|spec| (!forbid_swarm || spec.name != "engage_swarm") && (spec.is_core || unlocked.contains(spec.name)))
@@ -164,10 +182,31 @@ impl ToolRegistry {
     pub fn unlock_tool_by_name(&self, name: &str) {
         if let Some(spec) = self.get_spec(name) {
             if !spec.is_core {
-                if let Ok(mut unlocked) = self.unlocked_tools.lock() {
-                    unlocked.insert(spec.name);
-                }
+                self.touch_unlocked_lru(spec.name);
             }
+        }
+    }
+
+    pub fn configure_turn_security(
+        &self,
+        posture: Option<ExecutionPosture>,
+        constitution: Option<RepoConstitution>,
+        approval_gate: Option<ApprovalGateCallback>,
+    ) {
+        *self.active_posture.lock().unwrap() = posture;
+        *self.constitution.lock().unwrap() = constitution;
+        *self.approval_gate.lock().unwrap() = approval_gate;
+        self.turn_approvals.lock().unwrap().clear();
+    }
+
+    pub fn effective_posture_for(&self, authority: ExecutionAuthorityLevel) -> ExecutionPosture {
+        if let Some(p) = *self.active_posture.lock().unwrap() {
+            return p;
+        }
+        match authority {
+            ExecutionAuthorityLevel::Strict | ExecutionAuthorityLevel::Interactive => ExecutionPosture::Ask,
+            ExecutionAuthorityLevel::Balanced => ExecutionPosture::AcceptEdits,
+            ExecutionAuthorityLevel::HighThroughput | ExecutionAuthorityLevel::Autonomous => ExecutionPosture::AutoReview,
         }
     }
 
@@ -190,6 +229,15 @@ impl ToolRegistry {
         if let Ok(mut u) = self.unlocked_tools.lock() {
             u.clear();
         }
+        if let Ok(mut lru) = self.unlocked_lru.lock() {
+            lru.clear();
+        }
+        if let Ok(mut ev) = self.evicted_tools.lock() {
+            ev.clear();
+        }
+        if let Ok(mut rt) = self.read_tracker.lock() {
+            rt.reset_stamps();
+        }
     }
 
     pub fn extract_target_resources(&self, call: &ScheduledToolCall, cwd: &Path) -> Vec<PathBuf> {
@@ -205,14 +253,9 @@ impl ToolRegistry {
         paths
     }
 
-    /// Partitions a batch of tool calls into dependency-safe concurrent execution waves.
     pub fn partition_waves(&self, calls: &[ScheduledToolCall], cwd: &Path) -> Vec<Vec<ScheduledToolCall>> {
         if calls.len() <= 1 {
-            return if calls.is_empty() {
-                Vec::new()
-            } else {
-                vec![calls.to_vec()]
-            };
+            return if calls.is_empty() { Vec::new() } else { vec![calls.to_vec()] };
         }
         let (mut waves, mut current_wave, mut current_resources, mut current_has_mutations) =
             (Vec::new(), Vec::new(), HashSet::new(), false);
@@ -222,7 +265,7 @@ impl ToolRegistry {
             let is_mutating = self.get_spec(canonical).map(|s| s.is_mutating).unwrap_or(true);
             let is_global = matches!(
                 canonical,
-                "run_command" | "rollback_last_mutation" | "apply_unified_diff" | "batch_replace_regex"
+                "run_command" | "execute_tools" | "rollback_last_mutation" | "apply_unified_diff" | "batch_replace_regex"
             );
             let resources = self.extract_target_resources(call, cwd);
 
@@ -281,9 +324,7 @@ impl ToolRegistry {
             if wave.len() == 1 {
                 results.push(self.execute_single(&wave[0], cwd, authority, cancel_token).await);
             } else {
-                let futs = wave
-                    .iter()
-                    .map(|call| self.execute_single(call, cwd, authority, cancel_token));
+                let futs = wave.iter().map(|call| self.execute_single(call, cwd, authority, cancel_token));
                 results.extend(join_all(futs).await);
             }
         }
@@ -301,21 +342,12 @@ impl ToolRegistry {
         let canonical = canonical_tool_name(&call.name);
         let Some(spec) = self.get_spec(canonical) else {
             let err_msg = format!("Tool '{}' not found in registry", call.name);
-            return ToolExecutionRecord {
-                name: call.name.clone(),
-                call_id: Some(call.id.clone()),
-                args: Some(call.args.clone()),
-                output: json!({ "error": err_msg }),
-                success: false,
-                denied: None,
-                output_limited: None,
-                error: Some(err_msg),
-                duration_ms: started.elapsed().as_millis() as u64,
-            };
+            return Self::failed_record(call, call.args.clone(), err_msg, None, started);
         };
         self.unlock_tool_by_name(spec.name);
 
         let (prepared_args, validation) = self.parser.prepare_arguments(&call.args, &spec.parameters);
+        let prepared_val = Value::Object(prepared_args.clone());
         if !validation.valid {
             let err_msg = format!(
                 "Tool '{}' argument schema validation failed: {}",
@@ -325,7 +357,7 @@ impl ToolRegistry {
             return ToolExecutionRecord {
                 name: call.name.clone(),
                 call_id: Some(call.id.clone()),
-                args: Some(Value::Object(prepared_args)),
+                args: Some(prepared_val),
                 output: json!({ "error": err_msg, "suggestions": validation.suggestions }),
                 success: false,
                 denied: None,
@@ -335,20 +367,73 @@ impl ToolRegistry {
             };
         }
 
+        // Monotonic 9-layer authorization reducer (`ExecutionPosture` + `RepoLaw` + Credential Guard + Session Allowlist)
+        let posture = self.effective_posture_for(authority);
+        if canonical != "execute_tools" {
+            let eval = {
+                let law = self.constitution.lock().unwrap().clone();
+                let allowed = self.session_allowlist.lock().unwrap().clone();
+                evaluate_tool_posture(posture, canonical, &prepared_val, spec.is_mutating, law.as_ref(), &allowed)
+            };
+            match eval.verdict {
+                AuthorizationVerdict::Deny => {
+                    return Self::failed_record(call, prepared_val, eval.reason, Some(true), started);
+                }
+                AuthorizationVerdict::AskUser => {
+                    let gate = self.approval_gate.lock().unwrap().clone();
+                    let choice = if let Some(cb) = gate {
+                        cb(canonical, &eval.reason, &eval.session_rule_key)
+                    } else {
+                        UserApprovalChoice::Deny
+                    };
+                    match choice {
+                        UserApprovalChoice::AllowOnce => {
+                            self.turn_approvals
+                                .lock()
+                                .unwrap()
+                                .push(format!("{canonical}: allow_once ({})", eval.layer));
+                        }
+                        UserApprovalChoice::AllowSession => {
+                            let mut allow = self.session_allowlist.lock().unwrap();
+                            if !allow.contains(&eval.session_rule_key) {
+                                allow.push(eval.session_rule_key.clone());
+                            }
+                            self.turn_approvals
+                                .lock()
+                                .unwrap()
+                                .push(format!("{canonical}: allow_session ({})", eval.session_rule_key));
+                        }
+                        UserApprovalChoice::Deny => {
+                            let msg = format!(
+                                "Approval required ({}) — denied: {}",
+                                posture.display_label(),
+                                eval.reason
+                            );
+                            return Self::failed_record(call, prepared_val, msg, Some(true), started);
+                        }
+                    }
+                }
+                AuthorizationVerdict::Allow => {}
+            }
+        }
+
+        // Read-Before-Write & External Staleness Guard (`FileReadTracker`)
+        if let Some(p_str) = prepared_args.get("path").and_then(Value::as_str) {
+            let resolved = resolve_workspace_path(cwd, p_str);
+            if let Err(stale_err) = self
+                .read_tracker
+                .lock()
+                .unwrap()
+                .verify_before_mutation(canonical, &resolved, posture)
+            {
+                return Self::failed_record(call, prepared_val, stale_err, None, started);
+            }
+        }
+
         let soft_loop = authority.is_autonomous() || !spec.is_mutating;
         if let Ok(mut lb) = self.loop_breaker.lock() {
             if let Err(loop_err) = lb.record_and_check(canonical, &prepared_args, soft_loop) {
-                return ToolExecutionRecord {
-                    name: call.name.clone(),
-                    call_id: Some(call.id.clone()),
-                    args: Some(Value::Object(prepared_args)),
-                    output: json!({ "error": loop_err }),
-                    success: false,
-                    denied: None,
-                    output_limited: None,
-                    error: Some(loop_err),
-                    duration_ms: started.elapsed().as_millis() as u64,
-                };
+                return Self::failed_record(call, prepared_val, loop_err, None, started);
             }
         }
 
@@ -357,10 +442,21 @@ impl ToolRegistry {
             let key = ToolExecutionCache::compute_key(canonical, &prepared_args, cwd);
             if let Ok(mut c) = self.cache.lock() {
                 if let Some(cached_val) = c.lookup(&key) {
+                    if canonical == "view_file" {
+                        if let Some(p_str) = prepared_args.get("path").and_then(Value::as_str) {
+                            let full = prepared_args.get("startLine").is_none()
+                                && prepared_args.get("endLine").is_none()
+                                && prepared_args.get("contentOffset").is_none();
+                            self.read_tracker
+                                .lock()
+                                .unwrap()
+                                .record_disk_file(&resolve_workspace_path(cwd, p_str), full);
+                        }
+                    }
                     return ToolExecutionRecord {
                         name: call.name.clone(),
                         call_id: Some(call.id.clone()),
-                        args: Some(Value::Object(prepared_args)),
+                        args: Some(prepared_val),
                         output: cached_val,
                         success: true,
                         denied: None,
@@ -378,7 +474,7 @@ impl ToolRegistry {
         let target_resources = self.extract_target_resources(call, cwd);
 
         match self
-            .dispatch_builtin(canonical, &prepared_args, cwd, cancel_token)
+            .dispatch_builtin(canonical, &prepared_args, cwd, authority, posture, cancel_token)
             .await
         {
             Ok((val, denied)) => {
@@ -386,38 +482,69 @@ impl ToolRegistry {
                     if let Ok(mut c) = self.cache.lock() {
                         c.invalidate_paths(&target_resources);
                     }
-                } else if let Some(key) = cache_key {
-                    if let Ok(mut c) = self.cache.lock() {
-                        c.store(key, target_resources, val.clone());
+                    if !denied {
+                        let mut rt = self.read_tracker.lock().unwrap();
+                        if canonical == "delete_file" {
+                            for p in &target_resources {
+                                rt.remove_path(p);
+                            }
+                        } else if matches!(
+                            canonical,
+                            "write_file" | "replace_file_content" | "multi_replace_file_content" | "edit_file_anchored"
+                        ) {
+                            for p in &target_resources {
+                                rt.record_disk_file(p, true);
+                            }
+                        }
+                    }
+                } else {
+                    if canonical == "view_file" && !denied {
+                        let full = prepared_args.get("startLine").is_none()
+                            && prepared_args.get("endLine").is_none()
+                            && prepared_args.get("contentOffset").is_none();
+                        for p in &target_resources {
+                            self.read_tracker.lock().unwrap().record_disk_file(p, full);
+                        }
+                    }
+                    if let Some(key) = cache_key {
+                        if let Ok(mut c) = self.cache.lock() {
+                            c.store(key, target_resources, val.clone());
+                        }
                     }
                 }
                 ToolExecutionRecord {
                     name: call.name.clone(),
                     call_id: Some(call.id.clone()),
-                    args: Some(Value::Object(prepared_args)),
+                    args: Some(prepared_val),
                     output: val,
                     success: !denied,
                     denied: if denied { Some(true) } else { None },
                     output_limited: None,
-                    error: if denied {
-                        Some("Permission denied for this operation".to_string())
-                    } else {
-                        None
-                    },
+                    error: if denied { Some("Permission denied for this operation".to_string()) } else { None },
                     duration_ms: started.elapsed().as_millis() as u64,
                 }
             }
-            Err(err_msg) => ToolExecutionRecord {
-                name: call.name.clone(),
-                call_id: Some(call.id.clone()),
-                args: Some(Value::Object(prepared_args)),
-                output: json!({ "error": err_msg }),
-                success: false,
-                denied: None,
-                output_limited: None,
-                error: Some(err_msg),
-                duration_ms: started.elapsed().as_millis() as u64,
-            },
+            Err(err_msg) => Self::failed_record(call, prepared_val, err_msg, None, started),
+        }
+    }
+
+    fn failed_record(
+        call: &ScheduledToolCall,
+        args: Value,
+        err_msg: String,
+        denied: Option<bool>,
+        started: Instant,
+    ) -> ToolExecutionRecord {
+        ToolExecutionRecord {
+            name: call.name.clone(),
+            call_id: Some(call.id.clone()),
+            args: Some(args),
+            output: json!({ "error": err_msg }),
+            success: false,
+            denied,
+            output_limited: None,
+            error: Some(err_msg),
+            duration_ms: started.elapsed().as_millis() as u64,
         }
     }
 
@@ -426,9 +553,22 @@ impl ToolRegistry {
         canonical: &str,
         args: &Map<String, Value>,
         cwd: &Path,
+        authority: ExecutionAuthorityLevel,
+        posture: ExecutionPosture,
         cancel_token: Option<&CancellationToken>,
     ) -> Result<(Value, bool), String> {
         match canonical {
+            "tool_search" => {
+                let query = args.get("query").and_then(Value::as_str).unwrap_or("");
+                let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(4) as usize;
+                Ok((self.search_and_unlock_tools(query, limit, false), false))
+            }
+            "execute_tools" => {
+                let calls = args.get("calls").ok_or("Missing 'calls' array")?;
+                let stop_on_error = args.get("stopOnError").and_then(Value::as_bool).unwrap_or(true);
+                self.execute_declarative_batch(calls, stop_on_error, cwd, authority, cancel_token)
+                    .await
+            }
             "get_workspace_diff" => {
                 let turn_id = args.get("turnId").and_then(|v| v.as_str());
                 let report = self
@@ -441,6 +581,8 @@ impl ToolRegistry {
             "run_command" => {
                 let cmd_str = args.get("command").and_then(|v| v.as_str()).ok_or("Missing 'command'")?;
                 SafetyPolicy::check_command(cmd_str)?;
+                let advisory = SafetyPolicy::detect_heredoc_file_redirection(cmd_str)
+                    .or_else(|| SafetyPolicy::detect_terminal_file_read(cmd_str));
                 let cmd_cwd = args
                     .get("cwd")
                     .and_then(|v| v.as_str())
@@ -451,18 +593,28 @@ impl ToolRegistry {
                     .and_then(|v| v.as_u64())
                     .unwrap_or(30_000)
                     .clamp(100, 300_000);
-                execute_shell_command(cmd_str, &cmd_cwd, timeout_ms, cancel_token).await
+                let (mut out, denied) = execute_shell_command_sandboxed(
+                    cmd_str,
+                    &cmd_cwd,
+                    timeout_ms,
+                    posture.sandbox_mode(),
+                    cancel_token,
+                )
+                .await?;
+                if let (Some(adv), Some(obj)) = (advisory, out.as_object_mut()) {
+                    obj.insert("shellGuardAdvisory".to_string(), Value::String(adv));
+                }
+                Ok((out, denied))
             }
             "rollback_last_mutation" => {
                 let all_turn = args.get("allInCurrentTurn").and_then(|v| v.as_bool()).unwrap_or(false);
                 let mut journal = self.journal.lock().map_err(|_| "Journal lock poisoned")?;
-                let res = if all_turn {
-                    journal.rollback_turn(None)
-                } else {
-                    journal.rollback_last()
-                };
+                let res = if all_turn { journal.rollback_turn(None) } else { journal.rollback_last() };
                 if let Ok(mut c) = self.cache.lock() {
                     c.clear();
+                }
+                if let Ok(mut rt) = self.read_tracker.lock() {
+                    rt.reset_stamps();
                 }
                 Ok((serde_json::to_value(res).unwrap_or(Value::Null), false))
             }
@@ -494,124 +646,13 @@ impl ToolRegistry {
                     None => Err(format!("Spill ID '{spill_id}' not found or expired")),
                 }
             }
-            "computer_use" => {
-                let act = args.get("action").and_then(|v| v.as_str()).unwrap_or("capture").trim().to_ascii_lowercase();
-                match act.as_str() {
-                    "orchestrate" | "closed_loop" => {
-                        let goal = args.get("goal").or_else(|| args.get("objective")).and_then(|v| v.as_str()).unwrap_or("Execute computer use operation");
-                        let contract = SpatialActionContract {
-                            action_name: args.get("target_action").or_else(|| args.get("sub_action")).and_then(|v| v.as_str()).unwrap_or("click").to_string(),
-                            target_selector: args.get("target_id").or_else(|| args.get("selector")).or_else(|| args.get("ref")).or_else(|| args.get("element_id")).and_then(|v| v.as_str()).map(|s| s.to_string()),
-                            som_id: args.get("som_id").and_then(|v| v.as_u64()).map(|n| n as u32),
-                            delivery_mode: args.get("delivery_mode").and_then(|v| v.as_str()).unwrap_or("background").to_string(),
-                            payload_text: args.get("text").or_else(|| args.get("value")).and_then(|v| v.as_str()).map(|s| s.to_string()),
-                            keys: args.get("keys").or_else(|| args.get("key")).and_then(|v| v.as_str()).map(|s| s.to_string()),
-                            ..SpatialActionContract::default()
-                        };
-                        let res = self.computer_orchestrator.execute_closed_loop_cycle(goal, &contract)?;
-                        Ok((res, false))
-                    }
-                    "observe" | "env_observe" => {
-                        let obs = self.computer_orchestrator.observe();
-                        Ok((serde_json::to_value(obs).unwrap_or(Value::Null), false))
-                    }
-                    "interpret" | "env_interpret" => {
-                        let obs = self.computer_orchestrator.observe();
-                        let interp = self.computer_orchestrator.interpret(&obs);
-                        Ok((interp, false))
-                    }
-                    "consult_swarm" | "swarm_consult" => {
-                        let goal = args.get("goal").or_else(|| args.get("objective")).and_then(|v| v.as_str()).unwrap_or("Environmental interpretation");
-                        let app = args.get("app").and_then(|v| v.as_str()).unwrap_or("Heav3nsCode");
-                        let req = SwarmConsultationRequest::new("consult-cli", goal, app, "Active Window");
-                        let res = self.computer_orchestrator.consult(&req);
-                        Ok((serde_json::to_value(res).unwrap_or(Value::Null), false))
-                    }
-                    _ => {
-                        let val_args = Value::Object(args.clone());
-                        let mut disp = self.display_state.lock().map_err(|_| "Display lock poisoned")?;
-                        let res = disp.execute_action(&val_args)?;
-                        Ok((res, false))
-                    }
-                }
-            }
+            "computer_use" => self.dispatch_computer_use_tool(args),
             "browser_use" => {
                 let val_args = Value::Object(args.clone());
                 let mut disp = self.display_state.lock().map_err(|_| "Display lock poisoned")?;
-                let res = disp.execute_browser_action(&val_args)?;
-                Ok((res, false))
+                Ok((disp.execute_browser_action(&val_args)?, false))
             }
-            "spatial_interact" => {
-                let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("execute");
-                let contract = SpatialActionContract {
-                    action_name: args.get("target_action").or_else(|| args.get("sub_action")).and_then(|v| v.as_str()).unwrap_or("click").to_string(),
-                    target_selector: args.get("target_id").or_else(|| args.get("selector")).or_else(|| args.get("ref")).and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    som_id: args.get("som_id").and_then(|v| v.as_u64()).map(|n| n as u32),
-                    coordinates: if args.get("x").is_some() && args.get("y").is_some() {
-                        let x = args.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                        let y = args.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                        Some([x, y])
-                    } else {
-                        None
-                    },
-                    coordinate_space: args.get("coordinate_space").and_then(|v| v.as_str()).unwrap_or("screen").to_string(),
-                    delivery_mode: args.get("delivery_mode").and_then(|v| v.as_str()).unwrap_or("background").to_string(),
-                    required_confidence: args.get("required_confidence").and_then(|v| v.as_f64()).unwrap_or(0.50) as f32,
-                    max_occlusion: args.get("max_occlusion").and_then(|v| v.as_f64()).unwrap_or(0.60),
-                    expected_epoch: args.get("expected_epoch").and_then(|v| v.as_u64()),
-                    payload_text: args.get("text").or_else(|| args.get("value")).and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    keys: args.get("keys").or_else(|| args.get("key")).and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    to_coordinates: None,
-                    exclusion_zones: Vec::new(),
-                    auto_scroll_if_needed: true,
-                };
-
-                match action {
-                    "ground" => {
-                        let disp = self.display_state.lock().map_err(|_| "Display lock poisoned")?;
-                        let fresh = SpatialInteractionEngine::extract_scene_from_display(&disp);
-                        let mut med = self.spatial_engine.mediator.lock().map_err(|_| "Mediator lock poisoned")?;
-                        med.update_scene(fresh);
-                        let res = med.ground_action(&contract);
-                        Ok((serde_json::to_value(res).unwrap_or(Value::Null), false))
-                    }
-                    "plan" => {
-                        let disp = self.display_state.lock().map_err(|_| "Display lock poisoned")?;
-                        let fresh = SpatialInteractionEngine::extract_scene_from_display(&disp);
-                        let mut med = self.spatial_engine.mediator.lock().map_err(|_| "Mediator lock poisoned")?;
-                        med.update_scene(fresh);
-                        let plan = med.plan_action(&contract);
-                        Ok((serde_json::to_value(plan).unwrap_or(Value::Null), false))
-                    }
-                    "execute_plan" | "run_plan" => {
-                        let res = self.spatial_engine.execute_plan(&contract)?;
-                        Ok((res, false))
-                    }
-                    "query" => {
-                        let origin = args.get("origin_id").or_else(|| args.get("target_id")).and_then(|v| v.as_str()).unwrap_or("");
-                        let dir = args.get("direction").and_then(|v| v.as_str()).unwrap_or("right");
-                        let matched = self.spatial_engine.query_directional(origin, dir);
-                        Ok((json!({ "origin": origin, "direction": dir, "matched": matched }), false))
-                    }
-                    "reconcile" => {
-                        let dom_els = args.get("interactiveElements").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-                        let scene = self.spatial_engine.reconcile_dom_and_visual(&dom_els);
-                        Ok((serde_json::to_value(scene).unwrap_or(Value::Null), false))
-                    }
-                    "audit" => {
-                        Ok((self.spatial_engine.audit_health(), false))
-                    }
-                    "orchestrate" | "closed_loop" => {
-                        let goal = args.get("goal").or_else(|| args.get("objective")).and_then(|v| v.as_str()).unwrap_or("Spatial closed-loop execution");
-                        let res = self.computer_orchestrator.execute_closed_loop_cycle(goal, &contract)?;
-                        Ok((res, false))
-                    }
-                    _ => {
-                        let res = self.spatial_engine.execute_spatially_grounded_action(&contract)?;
-                        Ok((res, false))
-                    }
-                }
-            }
+            "spatial_interact" => self.dispatch_spatial_tool(args),
             "vision_inspect" => {
                 let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("inspect");
                 let w = args.get("width").and_then(|v| v.as_u64()).unwrap_or(800) as u32;
@@ -630,81 +671,32 @@ impl ToolRegistry {
                     }
                     _ => {
                         let path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path' for vision_inspect")?;
-                        let meta = SkillsIngestor::inspect_workspace_image(cwd, path)?;
-                        Ok((meta, false))
+                        Ok((SkillsIngestor::inspect_workspace_image(cwd, path)?, false))
                     }
                 }
             }
-            "skill_forge" => {
-                let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("list_dag");
-                let val_args = Value::Object(args.clone());
-                let mut cat = self.skill_catalog.lock().map_err(|_| "Skill catalog lock poisoned")?;
-                let res = match action {
-                    "list_dag" | "dag" | "list" => cat.evaluate_dag(),
-                    "forge" | "create" | "wizard" => cat.forge_skill(&val_args)?,
-                    "apply_pack" | "power_up" => {
-                        let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("computer-use-operator");
-                        let pack = args.get("pack").and_then(|v| v.as_str()).unwrap_or("tdd-enforcer");
-                        cat.apply_power_up_pack(id, pack)?
-                    }
-                    "clone" | "fork" => {
-                        let src = args.get("id").and_then(|v| v.as_str()).unwrap_or("computer-use-operator");
-                        let new_id = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("computer-use-fork");
-                        cat.clone_skill(src, new_id, None)?
-                    }
-                    "lint" => {
-                        let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("computer-use-operator");
-                        cat.lint_and_autofix_skill(id, false)?
-                    }
-                    "autofix" | "doctor" => {
-                        let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("computer-use-operator");
-                        cat.lint_and_autofix_skill(id, true)?
-                    }
-                    "sync_vault" | "sync" => {
-                        let vault_files = SkillsIngestor::read_drop_vault_files(cwd);
-                        let mut ingested = Vec::new();
-                        for (fname, raw) in vault_files {
-                            if let Ok(item) = cat.ingest_multi_format(&fname, &raw) {
-                                ingested.push(item);
-                            }
-                        }
-                        json!({
-                            "syncedCount": ingested.len(),
-                            "totalCatalogSkills": cat.nodes.len(),
-                            "activeSoul": cat.active_soul.name,
-                            "ingested": ingested
-                        })
-                    }
-                    "export" => {
-                        let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("computer-use-operator");
-                        let fmt = args.get("format").and_then(|v| v.as_str()).unwrap_or("markdown");
-                        cat.export_node(id, fmt)?
-                    }
-                    "ingest" => {
-                        let fname = args.get("id").and_then(|v| v.as_str()).unwrap_or("imported.md");
-                        let content = args.get("content").or_else(|| args.get("prompt")).and_then(|v| v.as_str()).unwrap_or("");
-                        cat.ingest_multi_format(fname, content)?
-                    }
-                    "soul_status" | "soul" => json!({ "activeSoul": cat.active_soul, "competencies": cat.competency_scores }),
-                    other => return Err(format!("Unsupported skill_forge action '{other}'")),
-                };
-                Ok((res, false))
-            }
+            "skill_forge" => self.dispatch_skill_forge_tool(args, cwd),
             "engage_swarm" => {
                 let objective = args.get("objective").and_then(|v| v.as_str()).unwrap_or("Execute complex objective");
                 let strategy = args.get("strategy").and_then(|v| v.as_str());
                 let max_spec = args.get("maxSpecialists").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
-                let plan = classify_task_for_legion(objective, &[], strategy, max_spec);
-                Ok((plan, false))
+                Ok((classify_task_for_legion(objective, &[], strategy, max_spec), false))
             }
             other => {
-                let res = dispatch_fs_tool(other, args, cwd, &self.journal)?;
-                if other == "batch_replace_regex" {
-                    let dry_run = args.get("dryRun").and_then(|v| v.as_bool()).unwrap_or(false);
-                    if !dry_run {
-                        if let Ok(mut c) = self.cache.lock() {
-                            c.clear();
-                        }
+                let on_multi = tokio::runtime::Handle::try_current()
+                    .map(|h| h.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread)
+                    .unwrap_or(false);
+                let res = if on_multi {
+                    tokio::task::block_in_place(|| dispatch_fs_tool(other, args, cwd, &self.journal))?
+                } else {
+                    dispatch_fs_tool(other, args, cwd, &self.journal)?
+                };
+                if other == "batch_replace_regex" && !args.get("dryRun").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    if let Ok(mut c) = self.cache.lock() {
+                        c.clear();
+                    }
+                    if let Ok(mut rt) = self.read_tracker.lock() {
+                        rt.reset_stamps();
                     }
                 }
                 Ok(res)

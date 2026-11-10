@@ -1,7 +1,8 @@
 // [LAYER: INFRASTRUCTURE]
 use crate::infrastructure::transaction_journal::TransactionJournal;
-use crate::plumbing::hash_and_math::levenshtein;
-use crate::plumbing::secret_redactor::SafetyPolicy;
+use crate::plumbing::hash_and_math::{levenshtein, now_ms};
+use crate::plumbing::secret_redactor::{CredentialDenyScope, SafetyPolicy};
+use crate::plumbing::text_tokens::safe_utf8_prefix;
 use regex::{Regex, RegexBuilder};
 use serde_json::{json, Value};
 use std::fs;
@@ -17,6 +18,35 @@ pub fn resolve_workspace_path(cwd: &Path, raw: &str) -> PathBuf {
     }
 }
 
+/// Checks a path and its canonicalized symlink target against `CredentialDenyScope::ModelContext`
+/// without leaking symlink destination paths on refusal.
+pub fn verify_model_path_access(path: &Path) -> Result<(), String> {
+    let canon = path.canonicalize().ok();
+    SafetyPolicy::check_credential_path_with_target(path, canon.as_deref(), CredentialDenyScope::ModelContext)
+}
+
+/// Writes bytes atomically via a sibling temp file + `fs::rename`, preserving existing file permissions.
+pub fn atomic_write_file(target: &Path, bytes: &[u8]) -> Result<(), String> {
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create parent dirs: {e}"))?;
+    }
+    let existing_perms = fs::metadata(target).ok().map(|m| m.permissions());
+    let file_name = target
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file");
+    let tmp_path = target.with_file_name(format!(".{file_name}.heav3ns-tmp-{}-{}", std::process::id(), now_ms()));
+    fs::write(&tmp_path, bytes).map_err(|e| format!("Failed to write temp file for '{}': {e}", target.display()))?;
+    if let Some(perms) = existing_perms {
+        let _ = fs::set_permissions(&tmp_path, perms);
+    }
+    if let Err(e) = fs::rename(&tmp_path, target) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(format!("Failed to commit '{}' atomically: {e}", target.display()));
+    }
+    Ok(())
+}
+
 /// Suggests nearby filenames in the same parent directory when a path lookup fails with ENOENT.
 pub fn suggest_nearby_files(missing_path: &Path) -> Vec<String> {
     let Some(parent) = missing_path.parent() else { return Vec::new() };
@@ -30,6 +60,9 @@ pub fn suggest_nearby_files(missing_path: &Path) -> Vec<String> {
         .flatten()
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().into_owned();
+            if verify_model_path_access(&e.path()).is_err() {
+                return None;
+            }
             let dist = levenshtein(&name.to_lowercase(), &target_name);
             if dist <= 4 || name.to_lowercase().contains(&target_name) {
                 Some((dist, name))
@@ -69,10 +102,10 @@ pub fn walk_find_files(
         let file_name = entry.file_name().to_string_lossy().into_owned();
         let path = entry.path();
         if path.is_dir() {
-            if !is_ignored_dir(&file_name) {
+            if !is_ignored_dir(&file_name) && verify_model_path_access(&path).is_ok() {
                 walk_find_files(root, &path, query, depth + 1, max_depth, out);
             }
-        } else {
+        } else if verify_model_path_access(&path).is_ok() {
             let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().into_owned();
             if clean_query.is_empty()
                 || file_name.to_lowercase().contains(clean_query)
@@ -97,7 +130,7 @@ pub fn build_directory_tree(
     let Ok(rd) = fs::read_dir(dir) else { return };
     let mut filtered: Vec<_> = rd
         .flatten()
-        .filter(|e| !is_ignored_dir(&e.file_name().to_string_lossy()))
+        .filter(|e| !is_ignored_dir(&e.file_name().to_string_lossy()) && verify_model_path_access(&e.path()).is_ok())
         .collect();
     filtered.sort_by(|a, b| match (a.path().is_dir(), b.path().is_dir()) {
         (true, false) => std::cmp::Ordering::Less,
@@ -123,7 +156,9 @@ pub fn collect_source_files(target: &Path, out: &mut Vec<PathBuf>) {
         return;
     }
     if target.is_file() {
-        out.push(target.to_path_buf());
+        if verify_model_path_access(target).is_ok() {
+            out.push(target.to_path_buf());
+        }
         return;
     }
     let Ok(rd) = fs::read_dir(target) else { return };
@@ -135,7 +170,7 @@ pub fn collect_source_files(target: &Path, out: &mut Vec<PathBuf>) {
         let p = entry.path();
         if p.is_dir() {
             collect_source_files(&p, out);
-        } else if p.is_file() {
+        } else if p.is_file() && verify_model_path_access(&p).is_ok() {
             out.push(p);
         }
     }
@@ -155,7 +190,7 @@ pub fn batch_replace_regex_files(
     let mut modified = Vec::new();
     let mut total_replacements = 0usize;
     for file in files {
-        if SafetyPolicy::check_path(&file).is_err() {
+        if verify_model_path_access(&file).is_err() {
             continue;
         }
         if let Ok(content) = fs::read_to_string(&file) {
@@ -169,7 +204,7 @@ pub fn batch_replace_regex_files(
                         j.record_mutation("batch_replace_regex", &file);
                     }
                     let updated = re.replace_all(&content, replace_with).into_owned();
-                    let _ = fs::write(&file, updated.as_bytes());
+                    let _ = atomic_write_file(&file, updated.as_bytes());
                 }
             }
         }
@@ -253,7 +288,7 @@ pub fn extract_workspace_symbols(
                             "kind": kind,
                             "file": rel,
                             "line": line_idx + 1,
-                            "signature": line.trim(),
+                            "signature": safe_utf8_prefix(line.trim(), 240),
                         }));
                         if results.len() >= limit {
                             return results;
@@ -273,6 +308,7 @@ pub fn execute_grep_search(
     case_insensitive: bool,
     max_results: usize,
 ) -> Result<Vec<Value>, String> {
+    verify_model_path_access(root)?;
     let re = RegexBuilder::new(query)
         .case_insensitive(case_insensitive)
         .build()
@@ -312,16 +348,19 @@ fn walk_grep(
         let name = entry.file_name().to_string_lossy().into_owned();
         let path = entry.path();
         if path.is_dir() {
-            if !is_ignored_dir(&name) {
+            if !is_ignored_dir(&name) && verify_model_path_access(&path).is_ok() {
                 walk_grep(root, &path, re, depth + 1, max_depth, max_results, hits);
             }
-        } else if path.is_file() {
+        } else if path.is_file() && verify_model_path_access(&path).is_ok() {
             search_file_lines(&path, root, re, max_results, hits);
         }
     }
 }
 
 fn search_file_lines(file: &Path, root: &Path, re: &Regex, max_results: usize, hits: &mut Vec<Value>) {
+    if verify_model_path_access(file).is_err() {
+        return;
+    }
     let Ok(meta) = fs::metadata(file) else { return };
     if meta.len() > 2 * 1024 * 1024 {
         return;
@@ -336,9 +375,8 @@ fn search_file_lines(file: &Path, root: &Path, re: &Regex, max_results: usize, h
             hits.push(json!({
                 "file": rel,
                 "line": idx + 1,
-                "content": if line.len() > 300 { &line[..300] } else { line },
+                "content": safe_utf8_prefix(line, 300),
             }));
         }
     }
 }
-

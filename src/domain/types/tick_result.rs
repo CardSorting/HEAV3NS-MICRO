@@ -1,4 +1,6 @@
 // [LAYER: DOMAIN]
+pub use crate::domain::pricing_and_taxonomy::ProviderTokenUsage;
+pub use crate::domain::turn_receipt::{FileChangeReceipt, TurnReceipt};
 use crate::domain::types::messages::{extract_text_tool_calls, SessionMessage, ToolCall};
 use crate::domain::types::progress::ToolExecutionRecord;
 use crate::domain::types::runtime::EngineTickOutcome;
@@ -26,6 +28,8 @@ pub struct EngineTickResult {
     pub safe_to_retry: Option<bool>,
     #[serde(rename = "durationMs")]
     pub duration_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt: Option<TurnReceipt>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,6 +45,8 @@ pub struct ProviderRequest {
 pub struct ProviderResponse {
     pub content: Option<String>,
     pub tool_calls: Vec<ToolCall>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<ProviderTokenUsage>,
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -50,6 +56,7 @@ pub enum ProviderError {
         status: u16,
         body: String,
         retryable: bool,
+        retry_after_ms: Option<u64>,
     },
     #[error("Provider request cancelled by user")]
     Cancelled,
@@ -72,6 +79,14 @@ impl ProviderError {
     #[inline]
     pub const fn is_cancelled(&self) -> bool {
         matches!(self, Self::Cancelled)
+    }
+
+    #[inline]
+    pub const fn retry_after_ms(&self) -> Option<u64> {
+        match self {
+            Self::HttpStatus { retry_after_ms, .. } => *retry_after_ms,
+            _ => None,
+        }
     }
 }
 
@@ -98,6 +113,9 @@ pub fn finalize_provider_response(
         }
     }
     content = content.filter(|s| !s.is_empty());
-    ProviderResponse { content, tool_calls }
+    ProviderResponse {
+        content,
+        tool_calls,
+        usage: None,
+    }
 }
-

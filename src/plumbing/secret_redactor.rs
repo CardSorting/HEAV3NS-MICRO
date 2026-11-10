@@ -14,42 +14,122 @@ pub trait ISafetyPolicy {
     fn scan_threats(&self, content: &str, scope: &str) -> Vec<String>;
 }
 
-const DENIED_PATH_SUBSTRINGS: &[&str] = &[
-    ".ssh/id_rsa",
-    ".ssh/id_ed25519",
-    ".ssh/id_ecdsa",
-    ".ssh/authorized_keys",
-    ".aws/credentials",
-    ".docker/config.json",
-    ".kube/config",
-    ".gnupg",
-    ".netrc",
-    ".git-credentials",
-    ".anthropic_oauth.json",
-    "bws_cache.enc.json",
+/// Dual-scope credential denylist tier distilled from Codewhale (`crates/sandbox/src/read_guard.rs`).
+/// `Process` is blocked at both OS sandbox and model-context levels; `ModelContext` additionally blocks
+/// CLI auth configs and `.env` secrets in model file/search tools while allowing legitimate CLI subprocesses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CredentialDenyScope {
+    Process,
+    ModelContext,
+}
+
+const ALLOWED_DOTENV_TEMPLATES: &[&str] = &[
+    ".env.example",
+    ".env.sample",
+    ".env.template",
+    ".env.defaults",
+    ".env.dist",
+    ".env.schema",
 ];
 
 const PROTECTED_INSTRUCTION_FILES: &[&str] = &[
     "agents.md",
     "claude.md",
+    "gemini.md",
     "soul.md",
     ".cursorrules",
     ".windsurfrules",
     ".clinerules",
 ];
 
-/// Deterministic secret redactor and sensitive credential path detector (`ADR-047`).
+/// Deterministic secret redactor and dual-scope credential path detector (`ADR-0008` / `ADR-0014`).
 pub struct DeterministicSecretRedactor;
 
 impl DeterministicSecretRedactor {
+    /// Evaluates component-wise, case-folded credential path rules and returns a safe rule label
+    /// (never echoing resolved symlink targets to the model context).
+    pub fn classify_sensitive_path(path: &str, scope: CredentialDenyScope) -> Option<&'static str> {
+        let norm = path.replace('\\', "/");
+        let segments: Vec<String> = norm
+            .split('/')
+            .filter(|s| !s.is_empty() && *s != ".")
+            .map(|s| s.to_ascii_lowercase())
+            .collect();
+        if segments.is_empty() {
+            return None;
+        }
+        let file_name = segments.last().map(String::as_str).unwrap_or("");
+
+        // Process-level high-value credential stores (blocked everywhere)
+        for (i, seg) in segments.iter().enumerate() {
+            let next = segments.get(i + 1).map(String::as_str);
+            if seg == ".ssh" {
+                return Some("SSH keys and config (~/.ssh)");
+            }
+            if seg == ".gnupg" {
+                return Some("GPG keyring (~/.gnupg)");
+            }
+            if (seg == ".heav3ns" || seg == ".codewhale")
+                && matches!(next, Some("credentials" | "secrets" | "config.json"))
+            {
+                return Some("Agent runtime credentials (~/.heav3ns)");
+            }
+            if seg == "library" && next == Some("keychains") {
+                return Some("macOS Keychain store (~/Library/Keychains)");
+            }
+        }
+        if matches!(file_name, ".anthropic_oauth.json" | "bws_cache.enc.json" | "id_rsa" | "id_ed25519" | "id_ecdsa") {
+            return Some("Private authentication key material");
+        }
+
+        if scope == CredentialDenyScope::Process {
+            return None;
+        }
+
+        // ModelContext-level secrets (blocked in model read/search/diff tools)
+        if file_name == ".env"
+            || (file_name.starts_with(".env.") && !ALLOWED_DOTENV_TEMPLATES.contains(&file_name))
+        {
+            return Some("Environment secret file (.env)");
+        }
+        if matches!(
+            file_name,
+            ".npmrc" | ".pypirc" | ".netrc" | ".git-credentials" | ".pgpass"
+        ) {
+            return Some("Package/registry credential file");
+        }
+
+        for (i, seg) in segments.iter().enumerate() {
+            let next = segments.get(i + 1).map(String::as_str);
+            if seg == ".aws" {
+                return Some("AWS credentials (~/.aws)");
+            }
+            if seg == ".kube" {
+                return Some("Kubernetes kubeconfig (~/.kube)");
+            }
+            if seg == ".azure" {
+                return Some("Azure CLI credentials (~/.azure)");
+            }
+            if seg == ".config" && next == Some("gcloud") {
+                return Some("Google Cloud credentials (~/.config/gcloud)");
+            }
+            if seg == ".docker" && next == Some("config.json") {
+                return Some("Docker registry auth (~/.docker/config.json)");
+            }
+            if seg == ".cargo" && matches!(next, Some("credentials" | "credentials.toml")) {
+                return Some("Cargo registry token (~/.cargo/credentials)");
+            }
+        }
+        None
+    }
+
     #[inline]
     pub fn is_sensitive_path(path: &str) -> bool {
-        let norm = path.replace('\\', "/");
-        DENIED_PATH_SUBSTRINGS.iter().any(|p| norm.contains(p))
+        Self::classify_sensitive_path(path, CredentialDenyScope::ModelContext).is_some()
     }
 
     pub fn redact(text: &str) -> String {
-        if text.len() < 12 {
+        if text.len() < 10 {
             return text.to_string();
         }
         static PATTERNS: OnceLock<Vec<(&'static str, Regex)>> = OnceLock::new();
@@ -62,12 +142,18 @@ impl DeterministicSecretRedactor {
                 ("anthropic_key", Regex::new(r"\b(sk-ant-[A-Za-z0-9_-]{20,})\b").unwrap()),
                 (
                     "openai_key",
-                    Regex::new(r"\b(sk-(?:proj-)?[A-Za-z0-9_-]{20,})\b").unwrap(),
+                    Regex::new(r"\b(sk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{20,})\b").unwrap(),
                 ),
-                ("github_token", Regex::new(r"\b(gh[pousr]_[A-Za-z0-9_]{36,})\b").unwrap()),
-                ("aws_key", Regex::new(r"\b(AKIA[0-9A-Z]{16})\b").unwrap()),
+                (
+                    "github_token",
+                    Regex::new(r"\b((?:gh[pousr]_[A-Za-z0-9_]{30,}|github_pat_[A-Za-z0-9_]{22,}))\b").unwrap(),
+                ),
+                ("gitlab_token", Regex::new(r"\b(glpat-[A-Za-z0-9_-]{20,})\b").unwrap()),
+                ("aws_key", Regex::new(r"\b((?:AKIA|ASIA)[0-9A-Z]{16})\b").unwrap()),
                 ("google_key", Regex::new(r"\b(AIza[0-9A-Za-z_-]{30,})\b").unwrap()),
                 ("hf_token", Regex::new(r"\b(hf_[A-Za-z0-9]{24,})\b").unwrap()),
+                ("npm_token", Regex::new(r"\b(npm_[A-Za-z0-9]{30,})\b").unwrap()),
+                ("pypi_token", Regex::new(r"\b(pypi-[A-Za-z0-9_-]{32,})\b").unwrap()),
                 (
                     "slack_token",
                     Regex::new(r"\b(xox[baprs]-[0-9A-Za-z-]{10,64})\b").unwrap(),
@@ -78,13 +164,42 @@ impl DeterministicSecretRedactor {
                 ),
             ]
         });
+        static BEARER_RE: OnceLock<Regex> = OnceLock::new();
+        static URL_AUTH_RE: OnceLock<Regex> = OnceLock::new();
+        static KV_SECRET_RE: OnceLock<Regex> = OnceLock::new();
+
+        let bearer_re = BEARER_RE.get_or_init(|| {
+            Regex::new(r"(?i)(\bBearer\s+)[A-Za-z0-9._~+/=-]{16,}").unwrap()
+        });
+        let url_auth_re = URL_AUTH_RE.get_or_init(|| {
+            Regex::new(r"(https?://[^/\s:@]+:)([^@\s/]{4,})(@)").unwrap()
+        });
+        let kv_re = KV_SECRET_RE.get_or_init(|| {
+            Regex::new(r#"(?i)(["']?(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|password|secret[_-]?key)["']?\s*[:=]\s*["']?)([A-Za-z0-9._~+/=-]{12,})(["']?)"#).unwrap()
+        });
+
         let mut out = text.to_string();
         for &(label, ref re) in rules {
             if re.is_match(&out) {
                 out = re.replace_all(&out, format!("[REDACTED:{label}]")).into_owned();
             }
         }
+        if bearer_re.is_match(&out) {
+            out = bearer_re.replace_all(&out, "${1}[REDACTED:bearer_token]").into_owned();
+        }
+        if url_auth_re.is_match(&out) {
+            out = url_auth_re.replace_all(&out, "${1}[REDACTED:url_auth]${3}").into_owned();
+        }
+        if kv_re.is_match(&out) {
+            out = kv_re.replace_all(&out, "${1}[REDACTED:secret_value]${3}").into_owned();
+        }
         out
+    }
+}
+
+impl ISecretRedactor for DeterministicSecretRedactor {
+    fn redact_secrets(&self, text: &str) -> String {
+        Self::redact(text)
     }
 }
 
@@ -93,14 +208,20 @@ pub struct SafetyPolicy;
 
 impl SafetyPolicy {
     pub fn check_command(cmd: &str) -> Result<(), String> {
+        Self::check_invisible_unicode(cmd)?;
         let lower = cmd.trim().to_lowercase();
         let forbidden = [
             "rm -rf /",
             "rm -rf /*",
+            "rm -fr /",
+            "rm -fr /*",
+            "rm -rf ~",
+            "rm -fr ~",
             "mkfs",
             "dd if=/dev/zero",
             ":(){:|:&};:",
             "chmod -r 777 /",
+            "> /dev/sda",
         ];
         for pat in forbidden {
             if lower.contains(pat) {
@@ -110,15 +231,54 @@ impl SafetyPolicy {
         Ok(())
     }
 
-    pub fn check_path(path: &Path) -> Result<(), String> {
-        let s = path.to_string_lossy();
-        if DeterministicSecretRedactor::is_sensitive_path(&s) {
-            return Err(format!("Safety policy blocked access to sensitive credential path: '{s}'"));
+    /// Refuses invisible/Trojan Source Unicode in shell commands and surfaces an explicit octal `printf` escape hint.
+    pub fn check_invisible_unicode(text: &str) -> Result<(), String> {
+        for (idx, ch) in text.chars().enumerate() {
+            let code = ch as u32;
+            let is_mid_bom = code == 0xFEFF && idx > 0;
+            if matches!(
+                code,
+                0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064 | 0x2066..=0x2069
+            ) || is_mid_bom
+            {
+                let mut buf = [0u8; 4];
+                let octal: String = ch
+                    .encode_utf8(&mut buf)
+                    .as_bytes()
+                    .iter()
+                    .map(|b| format!("\\{:03o}", b))
+                    .collect();
+                return Err(format!(
+                    "Safety policy refused hidden/Trojan Unicode U+{code:04X}. If intentional, pass explicit octal bytes via $(printf '{octal}')."
+                ));
+            }
         }
         Ok(())
     }
 
-    /// Detects writes to protected agent instruction files (`AGENTS.md`, `CLAUDE.md`, `SOUL.md`, `.cursorrules`).
+    /// Checks a filesystem path (and any canonicalized symlink target when `canonical_target` is provided)
+    /// against the Dual-Scope Credential Denylist without leaking symlink destination paths.
+    pub fn check_credential_path_with_target(
+        path: &Path,
+        canonical_target: Option<&Path>,
+        scope: CredentialDenyScope,
+    ) -> Result<(), String> {
+        if let Some(label) = DeterministicSecretRedactor::classify_sensitive_path(&path.to_string_lossy(), scope) {
+            return Err(format!("Safety policy blocked access to protected credential store: {label}"));
+        }
+        if let Some(canon) = canonical_target {
+            if let Some(label) = DeterministicSecretRedactor::classify_sensitive_path(&canon.to_string_lossy(), scope) {
+                return Err(format!("Safety policy blocked access to protected credential store: {label}"));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn check_path(path: &Path) -> Result<(), String> {
+        Self::check_credential_path_with_target(path, None, CredentialDenyScope::ModelContext)
+    }
+
+    /// Detects writes to protected agent instruction files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `SOUL.md`, `.cursorrules`).
     pub fn check_protected_instruction_write(path: &Path) -> Option<String> {
         let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_ascii_lowercase();
         if PROTECTED_INSTRUCTION_FILES.contains(&file_name.as_str()) {
@@ -132,12 +292,11 @@ impl SafetyPolicy {
 
     /// Scans skills, context files, or memory payloads for prompt injection, C2/Brainworm promptware,
     /// secret exfiltration, and invisible Unicode characters (`threat_patterns`).
-    /// `scope`: `"all"`, `"context"`, or `"strict"`.
     pub fn scan_for_threats(content: &str, scope: &str) -> Vec<String> {
         let mut findings = Vec::new();
         for ch in content.chars() {
             let code = ch as u32;
-            if matches!(code, 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064 | 0xFEFF) {
+            if matches!(code, 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064 | 0x2066..=0x2069 | 0xFEFF) {
                 findings.push(format!("invisible unicode character U+{code:04X}"));
                 break;
             }
@@ -217,8 +376,6 @@ impl SafetyPolicy {
         findings
     }
 
-    /// Detects shell-level backgrounding (`nohup`, `disown`, `setsid`, trailing `&`) and long-lived
-    /// dev servers (`npm run dev`, `vite`, `uvicorn`, `docker compose up`) in foreground execution.
     pub fn detect_foreground_background_guidance(cmd: &str) -> Option<String> {
         let trimmed = cmd.trim();
         if trimmed.is_empty() {
@@ -251,8 +408,6 @@ impl SafetyPolicy {
         None
     }
 
-    /// Strips blocking ANSI terminal queries (`ESC[5n`, `ESC[18t`, `ESC[6n`, `ESC[?<mode>$p`) from PTY output
-    /// and returns `(cleaned_output_bytes, synthesized_reply_bytes)`.
     pub fn strip_and_respond_pty_queries(data: &[u8], rows: u16, cols: u16) -> (Vec<u8>, Vec<u8>) {
         if !data.contains(&0x1b) {
             return (data.to_vec(), Vec::new());
@@ -306,15 +461,17 @@ impl SafetyPolicy {
         (cleaned, replies)
     }
 
-    /// `ADR-0015`: Detects heredoc file-write patterns (`cat << 'EOF' > file`, `tee file << EOF`, multiline compound commands, and closing-delimiter redirects)
-    /// while ignoring quoted `<<`, arithmetic shifts (`$((1 << 4))`), here-strings (`<<<`), and non-file interpreter heredocs.
     pub fn detect_heredoc_file_redirection(cmd: &str) -> Option<String> {
         ShellCommandGuard::detect_heredoc_file_redirection(cmd)
     }
 
-    /// `ADR-0016`: Detects terminal file-read dumps (`cat src/main.rs`, `cd dir && head -n 50 file`, `2>/dev/null`, `xargs cat`, `find -exec cat`, `bash -c "cat ..."`)
-    /// while allowing filter pipelines (`| grep`, `| rg`, `| jq`, `| wc`), stdout file redirection, `tail -f`, and `/proc/`, `/sys/`, `/dev/`, or `/etc/*-release`.
     pub fn detect_terminal_file_read(cmd: &str) -> Option<String> {
         ShellCommandGuard::detect_terminal_file_read(cmd)
+    }
+}
+
+impl ISafetyPolicy for SafetyPolicy {
+    fn scan_threats(&self, content: &str, scope: &str) -> Vec<String> {
+        Self::scan_for_threats(content, scope)
     }
 }

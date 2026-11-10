@@ -1,17 +1,19 @@
 // [LAYER: INFRASTRUCTURE]
-use crate::infrastructure::search_tools::{batch_replace_regex_files, build_directory_tree, execute_grep_search, extract_workspace_symbols, resolve_workspace_path, suggest_nearby_files, walk_find_files};
+use crate::infrastructure::search_tools::{atomic_write_file, batch_replace_regex_files, build_directory_tree, collect_source_files, execute_grep_search, extract_workspace_symbols, resolve_workspace_path, suggest_nearby_files, verify_model_path_access, walk_find_files};
 use crate::infrastructure::transaction_journal::TransactionJournal;
 use crate::infrastructure::vfs_store::SkillsIngestor;
 use crate::plumbing::fuzzy_patch::{heal_fuzzy_patch, maybe_correct_escape_drift, DeterministicPatchEngine};
 use crate::plumbing::hash_and_math::fnv1a_32;
 use crate::plumbing::secret_redactor::SafetyPolicy;
+use crate::plumbing::text_tokens::safe_utf8_slice;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
 
-/// Dispatches native filesystem, diff, symbol, grep, and skill tools against the workspace.
+/// Dispatches native filesystem, diff, symbol, grep, and skill tools against the workspace
+/// with dual-scope credential checks, UTF-8 safe offsets, atomic file writes, and complete journaling.
 pub fn dispatch_fs_tool(
     canonical: &str,
     args: &Map<String, Value>,
@@ -22,7 +24,7 @@ pub fn dispatch_fs_tool(
         "view_file" => {
             let raw_path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path'")?;
             let resolved = resolve_workspace_path(cwd, raw_path);
-            SafetyPolicy::check_path(&resolved)?;
+            verify_model_path_access(&resolved)?;
             let content = fs::read_to_string(&resolved).map_err(|e| {
                 let nearby = suggest_nearby_files(&resolved);
                 if nearby.is_empty() {
@@ -37,7 +39,7 @@ pub fn dispatch_fs_tool(
             })?;
             let offset = args.get("contentOffset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let sliced = if offset > 0 && offset < content.len() {
-                &content[offset..]
+                safe_utf8_slice(&content, offset, content.len())
             } else {
                 content.as_str()
             };
@@ -70,15 +72,11 @@ pub fn dispatch_fs_tool(
             let raw_path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path'")?;
             let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
             let resolved = resolve_workspace_path(cwd, raw_path);
-            SafetyPolicy::check_path(&resolved)?;
+            verify_model_path_access(&resolved)?;
             if let Ok(mut j) = journal.lock() {
                 j.record_mutation("write_file", &resolved);
             }
-            if let Some(parent) = resolved.parent() {
-                fs::create_dir_all(parent).map_err(|e| format!("Failed to create parent dirs: {e}"))?;
-            }
-            fs::write(&resolved, content.as_bytes())
-                .map_err(|e| format!("Failed to write '{}': {e}", resolved.display()))?;
+            atomic_write_file(&resolved, content.as_bytes())?;
             let mut out = json!({
                 "success": true,
                 "path": resolved.to_string_lossy(),
@@ -94,7 +92,7 @@ pub fn dispatch_fs_tool(
             let target = args.get("target").and_then(|v| v.as_str()).ok_or("Missing 'target'")?;
             let replacement = args.get("replacement").and_then(|v| v.as_str()).unwrap_or("");
             let resolved = resolve_workspace_path(cwd, raw_path);
-            SafetyPolicy::check_path(&resolved)?;
+            verify_model_path_access(&resolved)?;
             let original =
                 fs::read_to_string(&resolved).map_err(|e| format!("Failed to read '{}': {e}", resolved.display()))?;
             let (eff_target, eff_replacement, drift_kind) =
@@ -106,8 +104,7 @@ pub fn dispatch_fs_tool(
                 j.record_mutation("replace_file_content", &resolved);
             }
             let updated = original.replacen(&matched_target, &eff_replacement, 1);
-            fs::write(&resolved, updated.as_bytes())
-                .map_err(|e| format!("Failed to write '{}': {e}", resolved.display()))?;
+            atomic_write_file(&resolved, updated.as_bytes())?;
             Ok((
                 json!({
                     "success": true,
@@ -129,7 +126,7 @@ pub fn dispatch_fs_tool(
                 return Err("No replacement chunks provided".to_string());
             }
             let resolved = resolve_workspace_path(cwd, raw_path);
-            SafetyPolicy::check_path(&resolved)?;
+            verify_model_path_access(&resolved)?;
             let mut current =
                 fs::read_to_string(&resolved).map_err(|e| format!("Failed to read '{}': {e}", resolved.display()))?;
             let mut applied = 0usize;
@@ -153,8 +150,7 @@ pub fn dispatch_fs_tool(
             if let Ok(mut j) = journal.lock() {
                 j.record_mutation("multi_replace_file_content", &resolved);
             }
-            fs::write(&resolved, current.as_bytes())
-                .map_err(|e| format!("Failed to write '{}': {e}", resolved.display()))?;
+            atomic_write_file(&resolved, current.as_bytes())?;
             Ok((
                 json!({
                     "success": true,
@@ -173,7 +169,7 @@ pub fn dispatch_fs_tool(
                 .ok_or("Missing 'expectedAnchor'")?;
             let replacement = args.get("replacement").and_then(|v| v.as_str()).unwrap_or("");
             let resolved = resolve_workspace_path(cwd, raw_path);
-            SafetyPolicy::check_path(&resolved)?;
+            verify_model_path_access(&resolved)?;
             let original =
                 fs::read_to_string(&resolved).map_err(|e| format!("Failed to read '{}': {e}", resolved.display()))?;
             let mut lines: Vec<String> = original.lines().map(|s| s.to_string()).collect();
@@ -197,8 +193,7 @@ pub fn dispatch_fs_tool(
             if original.ends_with('\n') {
                 updated.push('\n');
             }
-            fs::write(&resolved, updated.as_bytes())
-                .map_err(|e| format!("Failed to write '{}': {e}", resolved.display()))?;
+            atomic_write_file(&resolved, updated.as_bytes())?;
             Ok((
                 json!({ "success": true, "path": resolved.to_string_lossy(), "line": line_num }),
                 false,
@@ -213,7 +208,7 @@ pub fn dispatch_fs_tool(
             let (mut modified, mut errors) = (Vec::new(), Vec::new());
             for op in &ops {
                 let resolved = resolve_workspace_path(cwd, &op.file_path);
-                if let Err(e) = SafetyPolicy::check_path(&resolved) {
+                if let Err(e) = verify_model_path_access(&resolved) {
                     errors.push(e);
                     continue;
                 }
@@ -230,10 +225,7 @@ pub fn dispatch_fs_tool(
                         if let Ok(mut j) = journal.lock() {
                             j.record_mutation("apply_unified_diff", &resolved);
                         }
-                        if let Some(p) = resolved.parent() {
-                            let _ = fs::create_dir_all(p);
-                        }
-                        match fs::write(&resolved, content.as_bytes()) {
+                        match atomic_write_file(&resolved, content.as_bytes()) {
                             Ok(_) => modified.push(op.file_path.clone()),
                             Err(e) => errors.push(format!("Failed to add '{}': {e}", op.file_path)),
                         }
@@ -244,7 +236,7 @@ pub fn dispatch_fs_tool(
                                 if let Ok(mut j) = journal.lock() {
                                     j.record_mutation("apply_unified_diff", &resolved);
                                 }
-                                match fs::write(&resolved, updated.as_bytes()) {
+                                match atomic_write_file(&resolved, updated.as_bytes()) {
                                     Ok(_) => modified.push(op.file_path.clone()),
                                     Err(e) => errors.push(format!("Failed to write '{}': {e}", op.file_path)),
                                 }
@@ -266,16 +258,23 @@ pub fn dispatch_fs_tool(
         "delete_file" => {
             let raw_path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path'")?;
             let resolved = resolve_workspace_path(cwd, raw_path);
-            SafetyPolicy::check_path(&resolved)?;
+            verify_model_path_access(&resolved)?;
             if !resolved.exists() {
                 return Err(format!("File '{}' does not exist", resolved.display()));
             }
-            if let Ok(mut j) = journal.lock() {
-                j.record_mutation("delete_file", &resolved);
-            }
             if resolved.is_dir() {
+                let mut child_files = Vec::new();
+                collect_source_files(&resolved, &mut child_files);
+                if let Ok(mut j) = journal.lock() {
+                    for f in &child_files {
+                        j.record_mutation("delete_file", f);
+                    }
+                }
                 fs::remove_dir_all(&resolved).map_err(|e| format!("Failed to remove directory: {e}"))?;
             } else {
+                if let Ok(mut j) = journal.lock() {
+                    j.record_mutation("delete_file", &resolved);
+                }
                 fs::remove_file(&resolved).map_err(|e| format!("Failed to delete file: {e}"))?;
             }
             Ok((json!({ "success": true, "path": resolved.to_string_lossy() }), false))
@@ -285,8 +284,12 @@ pub fn dispatch_fs_tool(
             let dst_raw = args.get("target").and_then(|v| v.as_str()).ok_or("Missing 'target'")?;
             let src = resolve_workspace_path(cwd, src_raw);
             let dst = resolve_workspace_path(cwd, dst_raw);
-            SafetyPolicy::check_path(&src)?;
-            SafetyPolicy::check_path(&dst)?;
+            verify_model_path_access(&src)?;
+            verify_model_path_access(&dst)?;
+            if let Ok(mut j) = journal.lock() {
+                j.record_mutation("move_file", &src);
+                j.record_mutation("move_file", &dst);
+            }
             if let Some(parent) = dst.parent() {
                 let _ = fs::create_dir_all(parent);
             }
@@ -304,10 +307,14 @@ pub fn dispatch_fs_tool(
         "list_dir" => {
             let raw_path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
             let resolved = resolve_workspace_path(cwd, raw_path);
+            verify_model_path_access(&resolved)?;
             let rd =
                 fs::read_dir(&resolved).map_err(|e| format!("Failed to list '{}': {e}", resolved.display()))?;
             let mut entries = Vec::new();
             for entry in rd.flatten() {
+                if verify_model_path_access(&entry.path()).is_err() {
+                    continue;
+                }
                 let meta = entry.metadata().ok();
                 entries.push(json!({
                     "name": entry.file_name().to_string_lossy(),
@@ -330,6 +337,7 @@ pub fn dispatch_fs_tool(
             let raw_path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
             let max_depth = args.get("maxDepth").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
             let resolved = resolve_workspace_path(cwd, raw_path);
+            verify_model_path_access(&resolved)?;
             let mut matches = Vec::new();
             walk_find_files(&resolved, &resolved, &query, 0, max_depth, &mut matches);
             matches.sort();
@@ -341,6 +349,7 @@ pub fn dispatch_fs_tool(
         "file_info" => {
             let raw_path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path'")?;
             let resolved = resolve_workspace_path(cwd, raw_path);
+            verify_model_path_access(&resolved)?;
             if !resolved.exists() {
                 return Ok((json!({ "exists": false, "path": resolved.to_string_lossy() }), false));
             }
@@ -371,6 +380,7 @@ pub fn dispatch_fs_tool(
             let raw_path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
             let max_depth = args.get("maxDepth").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
             let resolved = resolve_workspace_path(cwd, raw_path);
+            verify_model_path_access(&resolved)?;
             let mut lines = vec![resolved
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
@@ -400,6 +410,7 @@ pub fn dispatch_fs_tool(
             let kind_filter = args.get("kind").and_then(|v| v.as_str()).map(|s| s.to_lowercase());
             let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(60) as usize;
             let resolved = resolve_workspace_path(cwd, raw_path);
+            verify_model_path_access(&resolved)?;
             let symbols = extract_workspace_symbols(&resolved, cwd, &query, kind_filter.as_deref(), limit);
             Ok((json!({ "count": symbols.len(), "symbols": symbols }), false))
         }
@@ -409,6 +420,7 @@ pub fn dispatch_fs_tool(
             let raw_path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
             let dry_run = args.get("dryRun").and_then(|v| v.as_bool()).unwrap_or(false);
             let resolved = resolve_workspace_path(cwd, raw_path);
+            verify_model_path_access(&resolved)?;
             batch_replace_regex_files(cwd, &resolved, find_pat, replace_with, dry_run, journal)
         }
         "list_skills" => {

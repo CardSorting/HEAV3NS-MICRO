@@ -43,6 +43,14 @@ extension WorkspaceWindow {
                         if case .success(let data) = result, let selection = WorkspaceModelSelection(data) { self.updateModel(selection) }
                     }
                 }
+                if self.client.capabilities.contains("posture-dial-v1") {
+                    source.request("posture.get", params: [:]) { [weak self, weak source] result in
+                        guard let self, self.client === source else { return }
+                        if case .success(let data) = result, let slug = data["posture"] as? String, let parsed = ExecutionPostureStop.parse(slug) {
+                            self.activePosture = parsed; self.refreshPostureControl(); self.updateStatus()
+                        }
+                    }
+                }
                 self.probe?.connected(self)
             } else if value != "Connecting to LUMI…" {
                 self.walkthrough.projectTasksUnavailable("Connect to LUMI to view project tasks.")
@@ -207,136 +215,11 @@ extension WorkspaceWindow {
         modelPicker?.present(for: window)
     }
 
-    func buildActions() -> [WorkspaceAction] {
-        var actions = [
-            WorkspaceAction(title: "Open Workspace…", shortcut: "⌘O") { NSApp.sendAction(#selector(ApplicationDelegate.openFolder), to: NSApp.delegate, from: nil) },
-            WorkspaceAction(title: "Focus Composer", shortcut: "⌘L") { [weak self] in self?.focusComposer() },
-            WorkspaceAction(title: "Show Chats", shortcut: "⇧⌘C", keywords: ["chat", "conversations", "threads", "sidebar"]) { [weak self] in self?.showChats() },
-            WorkspaceAction(title: "Show Files", shortcut: "⌘1") { [weak self] in self?.showFiles() },
-            WorkspaceAction(title: "Show Changes", shortcut: "⌘2") { [weak self] in self?.showChanges() },
-            WorkspaceAction(title: "Show Recorded Runs", shortcut: "⌘3", keywords: ["history", "sessions"]) { [weak self] in self?.showSessions() },
-            WorkspaceAction(title: "Show Walkthrough", shortcut: "⌘6") { [weak self] in self?.showWalkthrough() },
-            WorkspaceAction(title: "Show Up Next", shortcut: "⌘4", keywords: ["queue", "pending instructions"]) { [weak self] in self?.showQueue() },
-            WorkspaceAction(title: "Toggle Navigation", shortcut: "⌘B", keywords: ["sidebar"]) { [weak self] in self?.toggleNavigation() },
-            WorkspaceAction(title: "Go to Line…", shortcut: "⌘G", keywords: ["jump", "line", "offset"]) { [weak self] in self?.showGoToLine() },
-            WorkspaceAction(title: "Go to Symbol in File…", shortcut: "⇧⌘O", keywords: ["symbol", "declaration", "method", "function"]) { [weak self] in self?.showGoToSymbol() },
-            WorkspaceAction(title: "Command Palette…", shortcut: "⌘K", keywords: ["commands", "palette", "actions"]) { [weak self] in self?.showCommandPalette() },
-            WorkspaceAction(title: "Refresh Current Destination", shortcut: "") { [weak self] in self?.refreshNavigation() }
-        ]
-        if reasoningPicker.isEnabled { actions.insert(WorkspaceAction(title: "Change Reasoning Level…", shortcut: "", keywords: ["effort", "thinking", "speed", "depth"]) { [weak self] in self?.reasoningPicker.performClick(nil) }, at: 1) }
-        if client.capabilities.contains("model-selection-v1") { actions.insert(WorkspaceAction(title: "Choose Model & Provider…", shortcut: "⇧⌘M", keywords: ["switch", "change", "AI"]) { [weak self] in self?.showModels() }, at: 1) }
-        if !client.isReady, client.process?.isRunning != true, !closing { actions.insert(WorkspaceAction(title: "Reconnect Workspace", shortcut: "", keywords: ["connection", "retry", "recover"]) { [weak self] in self?.reconnect() }, at: 0) }
-        if client.isReady, uncertainSubmission != nil, !checkingSubmission { actions.insert(WorkspaceAction(title: "Check Instruction Status", shortcut: "", keywords: ["retry", "submission", "recover"]) { [weak self] in self?.reconcileSubmission() }, at: 0) }
-        actions.append(WorkspaceAction(title: "Project Library…", shortcut: "", keywords: ["projects", "open recent"]) { [weak self] in self?.onProjects?() })
-        actions.append(WorkspaceAction(title: "ChatGPT Connection…", shortcut: "", keywords: ["account", "sign in", "authentication"]) { [weak self] in self?.onAccount?() })
-        actions.append(WorkspaceAction(title: "Sovereign Swarm Radar…", shortcut: "⌥⌘R", keywords: ["radar", "telemetry", "nodes", "edge", "latency", "swarm"]) { SwarmRadarWindow.shared.present() })
-        if canOpenFile { actions.insert(WorkspaceAction(title: "Open File…", shortcut: "⌘P") { [weak self] in self?.showQuickOpen() }, at: 1) }
-        if client.isReady && (swarmDeferEnabled || swarmDeferred) {
-            actions.insert(WorkspaceAction(title: swarmDeferred ? "Resume Agent Work" : "Defer Agent Work", shortcut: "", keywords: ["swarm", "pause", "resume", "safe boundary"]) { [weak self] in self?.toggleAgentDefer() }, at: 1)
-        }
-        if client.isReady {
-            actions.insert(WorkspaceAction(title: "Command Recovery…", shortcut: "", keywords: ["terminal", "command", "reconcile", "uncertain", "receipt"]) { [weak self] in self?.showCommandRecovery() }, at: 1)
-        }
-        if client.isReady {
-            actions.insert(WorkspaceAction(title: "Agent Swarm Settings…", shortcut: "", keywords: ["review", "legion", "defer", "agents"]) { [weak self] in self?.showAgentSwarmSettings() }, at: 1)
-            if criticalReviewEnabled {
-                actions.insert(WorkspaceAction(title: "Review Latest Completion…", shortcut: "", keywords: ["critical", "adversarial", "audit", "swarm"]) { [weak self] in self?.requestCriticalReview() }, at: 1)
-            }
-            if legionEnabled { actions.insert(WorkspaceAction(title: "Engage Specialist Team…", shortcut: "", keywords: ["swarm", "legion", "delegate", "agents"]) { [weak self] in self?.engageSpecialists() }, at: 1) }
-            actions.insert(WorkspaceAction(title: "Formation Status…", shortcut: "", keywords: ["swarm", "legion", "reports", "reconcile"]) { [weak self] in self?.showFormationStatus() }, at: 1)
-            actions.insert(WorkspaceAction(title: "Formation History…", shortcut: "", keywords: ["swarm", "legion", "past reports", "reconcile"]) { [weak self] in self?.showFormationHistory() }, at: 1)
-            actions.insert(WorkspaceAction(title: "Inspect Latest Specialist Stream…", shortcut: "", keywords: ["swarm", "legion", "transcript", "stream"]) { [weak self] in self?.showLatestSpecialistStream() }, at: 1)
-        }
-        if client.capabilities.contains("project-run-v1") { actions.insert(WorkspaceAction(title: "Run Project", shortcut: "⌘R") { [weak self] in self?.showProjectRun() }, at: 1) }
-        if client.capabilities.contains("checkpoints-v1") { actions.insert(WorkspaceAction(title: "Checkpoints", shortcut: "⌘7") { [weak self] in self?.showCheckpoints() }, at: 1) }
-        if canShowMemory { actions.insert(WorkspaceAction(title: "Conversation Memory…", shortcut: "⌘8", keywords: ["remember", "context", "facts", "preferences", "notes"]) { [weak self] in self?.showMemory() }, at: 1) }
-        if canShowContext { actions.insert(WorkspaceAction(title: "Conversation Context", shortcut: "⌘9", keywords: ["history", "summary", "retained", "memory", "inspect", "prompt", "tokens", "budget", "tools", "routing"]) { [weak self] in self?.showContext() }, at: 1) }
-        if canCheckCode { actions.insert(WorkspaceAction(title: "Check Code", shortcut: "", keywords: ["spider", "syntax", "imports", "cycles", "diagnostics"]) { [weak self] in self?.showCodeCheck() }, at: 1) }
-        if canShowSavedState { actions.insert(WorkspaceAction(title: "Saved State", shortcut: "", keywords: ["history", "storage", "integrity", "recovery", "runtime"]) { [weak self] in self?.showSavedState() }, at: 1) }
-        if canSwitchConversation { actions.insert(WorkspaceAction(title: "New Conversation", shortcut: "⌘N") { [weak self] in self?.newConversation() }, at: 1) }
-        if hasWork { actions.insert(WorkspaceAction(title: "Stop All Work", shortcut: "⌘.") { [weak self] in self?.stop() }, at: 1) }
-        if canReviewApproval { actions.insert(WorkspaceAction(title: "Review Request…", shortcut: "⌘5") { [weak self] in self?.showApprovalReview() }, at: 1) }
-        if canDecideApproval {
-            actions.insert(WorkspaceAction(title: "Allow Operation Once", shortcut: "⇧⌘A", keywords: ["approval", "permission", "allow", "run"]) { [weak self] in self?.allowOnce() }, at: 1)
-            actions.insert(WorkspaceAction(title: "Deny Operation", shortcut: "⇧⌘D", keywords: ["approval", "reject", "cancel"]) { [weak self] in self?.deny() }, at: 2)
-        }
-        if canContinueWork, let continuation = WorkspaceContinuation.latest(in: runs) {
-            actions.insert(WorkspaceAction(title: continuation.title, shortcut: "") { [weak self] in self?.continueWork(continuation) }, at: 0)
-        }
-        if showingInspector { actions.append(WorkspaceAction(title: "Reload Inspected Content", shortcut: "") { [weak self] in self?.refreshInspection() }) }
-        if canMaximizeContext { actions.append(WorkspaceAction(title: isContextMaximized ? "Restore Task Context Size" : "Maximize Task Context", shortcut: "⌃⌘M", keywords: ["maximize", "expand", "context", "panel", "preview", "run", "inspect"]) { [weak self] in self?.toggleMaximizeContext() }) }
-        if canInspectBack { actions.append(WorkspaceAction(title: "Back in Inspector", shortcut: "⌘[") { [weak self] in self?.inspectBack() }) }
-        if canInspectForward { actions.append(WorkspaceAction(title: "Forward in Inspector", shortcut: "⌘]") { [weak self] in self?.inspectForward() }) }
-        if canFindInInspection { actions.append(WorkspaceAction(title: "Find in Current Page", shortcut: "⌘F") { [weak self] in self?.findInInspection() }) }
-        else if canFindInWalkthrough { actions.append(WorkspaceAction(title: "Filter Walkthrough Activity", shortcut: "⌘F", keywords: ["find", "search", "walkthrough", "activity"]) { [weak self] in self?.findInWalkthrough() }) }
-        return actions
-    }
-
-    @objc func showActions() {
-        guard let window, window.attachedSheet == nil else { return }
-        palette?.cancelOperation(nil)
-        let actions = buildActions()
-        palette = ActionPalette(actions: actions); palette?.present(for: window)
-    }
-
-    @objc func showQuickOpen() { presentQuickOpen(mode: .files) }
-    @objc func showGoToLine() { presentQuickOpen(mode: .line) }
-    @objc func showGoToSymbol() { presentQuickOpen(mode: .symbols) }
-    @objc func showCommandPalette() { presentQuickOpen(mode: .actions) }
-
-    func presentQuickOpen(mode: OmnibarMode = .files) {
-        guard canOpenFile, let window else { return }
-        if let quickOpen, quickOpen.window?.isVisible == true {
-            quickOpen.window?.makeKeyAndOrderFront(nil)
-            quickOpen.present(for: window, mode: mode)
-            return
-        }
-        let picker = QuickOpenWindow(folder: folder, search: { [weak self] query, refresh, completion in
-            guard let self else { return }
-            self.client.request("files.search", params: ["query": query, "refresh": refresh], completion: completion)
-        }, actions: buildActions(), symbols: { [weak self] in
-            guard let self else { return [] }
-            let text = self.inspection.string as NSString
-            return self.declarations.enumerated().map { index, decl in
-                let safeLocation = min(decl.range.location, text.length)
-                let prefix = text.substring(to: safeLocation)
-                let line = prefix.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
-                let parts = decl.title.split(separator: " ").map(String.init)
-                let kind = parts.dropLast().joined(separator: " ").isEmpty ? "Declaration" : parts.dropLast().joined(separator: " ")
-                let name = parts.last ?? decl.title
-                return (name: name, kind: kind, line: line, index: index)
-            }
-        }, checkpoints: { [weak self] in
-            guard let self else { return [] }
-            var seen = Set<String>(); var result = [OmnibarCheckpointItem]()
-            for run in self.runs.reversed() {
-                let text = String((run["text"] as? String ?? "Instruction").replacingOccurrences(of: "\n", with: " ").prefix(60))
-                if let after = run["checkpointAfter"] as? String, !after.isEmpty, seen.insert(after).inserted { result.append(OmnibarCheckpointItem(id: after, title: "After: \(text)", detail: "Checkpoint \(String(after.prefix(8)))")) }
-                if let before = run["checkpointBefore"] as? String, !before.isEmpty, seen.insert(before).inserted { result.append(OmnibarCheckpointItem(id: before, title: "Before: \(text)", detail: "Checkpoint \(String(before.prefix(8)))")) }
-            }
-            return result
-        }, lines: { [weak self] in
-            guard let self, !self.inspection.string.isEmpty else { return [] }
-            return (self.inspection.string as NSString).components(separatedBy: "\n")
-        }, open: { [weak self] path in self?.readFile(path) })
-        picker.onSelectSymbol = { [weak self] index in
-            guard let self, self.declarations.indices.contains(index) else { return }
-            self.contextTabs.selectedSegment = 2; self.showingInspector = true; self.surfaces.selectedSegment = 1; self.adapt()
-            let range = self.declarations[index].range
-            self.inspection.setSelectedRange(range); self.inspection.scrollRangeToVisible(range)
-            self.window?.makeFirstResponder(self.inspection)
-        }
-        picker.onSelectCheckpoint = { [weak self] checkpoint in self?.openCheckpoints(selected: checkpoint) }
-        picker.onSelectLine = { [weak self] line, col in self?.goToLine(line, column: col) }
-        quickOpen = picker
-        quickOpen?.present(for: window, mode: mode)
-    }
-
     var canShowMemory: Bool { client.isReady && client.capabilities.contains("conversation-memory-v1") && !switchingConversation && !closing }
     var canShowContext: Bool { client.isReady && client.capabilities.contains("conversation-context-v1") && !switchingConversation && !closing }
     var canCheckCode: Bool {
         guard client.isReady, client.capabilities.contains("spider-check-v1"), !switchingConversation, !closing, let file = inspectedFile else { return false }
-        return ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"].contains((file as NSString).pathExtension.lowercased())
+        return ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "rs", "swift", "py", "go", "md"].contains((file as NSString).pathExtension.lowercased())
     }
 
     @objc func showCodeCheck() { if canCheckCode, let file = inspectedFile { inspect(.spider(file)) } }
@@ -614,7 +497,20 @@ extension WorkspaceWindow {
             if let conversation = payload["conversation"] as? String, conversation != currentConversation { return }
             mergeRun(payload); rebuildRows(); finishStopAndSend()
             if event["type"] as? String == "run.accepted" { walkthrough.followCurrentInstruction(); loadConversations() }
-            if let state = payload["state"] as? String, terminalStates.contains(state) { scheduleWorkspaceRefresh(); probe?.outcome(self, state: state) }
+            if let state = payload["state"] as? String, terminalStates.contains(state) {
+                if payload["unsentAuthRejected"] as? Bool == true, let unsentText = payload["text"] as? String, !unsentText.isEmpty {
+                    if composer.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        composer.string = unsentText
+                        saveDraft()
+                    }
+                    showNotice("Credentials were rejected before sending — your prompt has been restored to the composer.")
+                }
+                if let receiptDict = payload["receipt"] as? [String: Any], let pres = TurnReceiptPresentation(receiptDict) {
+                    receiptBar.update(with: pres)
+                }
+                scheduleWorkspaceRefresh()
+                probe?.outcome(self, state: state)
+            }
         } else if event["type"] as? String == "runtime.error" { showNotice(payload["message"] as? String ?? "Runtime state is unknown") }
     }
 

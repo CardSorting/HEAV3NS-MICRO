@@ -1,76 +1,120 @@
 // [LAYER: UI]
 use heav3ns_micro::core::engine::AgentEngine;
 use heav3ns_micro::core::flight_runner::{format_flight_test_report, run_agent_flight_test, run_micro_benchmarks};
-use heav3ns_micro::domain::types::runtime::{AgentConfig, EngineTickInput, EngineTickOutcome};
-use heav3ns_micro::infrastructure::http_provider::HttpProvider;
+use heav3ns_micro::domain::types::runtime::{AgentConfig, CancellationToken, EngineTickInput, EngineTickOutcome};
+use heav3ns_micro::infrastructure::http_provider::{probe_local_ollama_model, HttpProvider};
 use heav3ns_micro::ui::cli_presenter::{parse_args, print_help, run_stdio_worker, CliOptions, Heav3nsUserConfig, RunMode};
 use heav3ns_micro::ui::onboarding::{create_cli_progress_listener, format_auth_error_card, format_turn_summary, print_onboarding_notice, print_tool_catalog, print_welcome_banner, render_color_diff, run_doctor_cli, run_guided_demo, run_init_wizard, suggest_command};
 use serde_json::{json, Value};
-use std::env;
 use std::fs;
 use std::io::{self, Write};
 use std::sync::Arc;
 
-fn build_engine(opts: &CliOptions) -> (Arc<AgentEngine>, AgentConfig) {
-    Heav3nsUserConfig::load_dotenv(&opts.cwd);
+async fn build_engine(opts: &CliOptions) -> (Arc<AgentEngine>, AgentConfig) {
+    let dotenv = Heav3nsUserConfig::read_dotenv_map(&opts.cwd);
     let user_cfg = Heav3nsUserConfig::load();
-
     let mut cfg = AgentConfig::default();
 
-    // 1. Resolve Provider
-    if let Some(ref p) = opts.provider {
+    let explicit_provider = opts
+        .provider
+        .clone()
+        .or_else(|| user_cfg.as_ref().and_then(|c| c.provider.clone()));
+
+    if let Some(ref p) = explicit_provider {
         cfg.provider = p.clone();
-    } else if let Some(ref p) = user_cfg.as_ref().and_then(|c| c.provider.clone()) {
-        cfg.provider = p.clone();
+    } else if Heav3nsUserConfig::resolve_env_or_dotenv("ANTHROPIC_API_KEY", &dotenv).is_some()
+        && Heav3nsUserConfig::resolve_env_or_dotenv("OPENAI_API_KEY", &dotenv).is_none()
+    {
+        cfg.provider = "anthropic".to_string();
+    } else if (Heav3nsUserConfig::resolve_env_or_dotenv("GEMINI_API_KEY", &dotenv).is_some()
+        || Heav3nsUserConfig::resolve_env_or_dotenv("GOOGLE_API_KEY", &dotenv).is_some())
+        && Heav3nsUserConfig::resolve_env_or_dotenv("OPENAI_API_KEY", &dotenv).is_none()
+    {
+        cfg.provider = "gemini".to_string();
+    } else if Heav3nsUserConfig::resolve_env_or_dotenv("OPENROUTER_API_KEY", &dotenv).is_some()
+        && Heav3nsUserConfig::resolve_env_or_dotenv("OPENAI_API_KEY", &dotenv).is_none()
+    {
+        cfg.provider = "openrouter".to_string();
+    } else if Heav3nsUserConfig::resolve_env_or_dotenv("DEEPSEEK_API_KEY", &dotenv).is_some()
+        && Heav3nsUserConfig::resolve_env_or_dotenv("OPENAI_API_KEY", &dotenv).is_none()
+    {
+        cfg.provider = "deepseek".to_string();
     }
 
-    // 2. Resolve Model
+    let prov_lower = cfg.provider.to_ascii_lowercase();
     if let Some(ref m) = opts.model {
         cfg.model_name = m.clone();
     } else if let Some(ref m) = user_cfg.as_ref().and_then(|c| c.model.clone()) {
         cfg.model_name = m.clone();
-    } else if cfg.provider.eq_ignore_ascii_case("gemini") || cfg.provider.eq_ignore_ascii_case("google") {
-        cfg.model_name = "gemini-2.0-flash".to_string();
-    } else if cfg.provider.eq_ignore_ascii_case("anthropic") {
-        cfg.model_name = "claude-3-5-sonnet-20241022".to_string();
-    } else if cfg.provider.eq_ignore_ascii_case("ollama") {
-        cfg.model_name = "llama3.2".to_string();
+    } else {
+        cfg.model_name = match prov_lower.as_str() {
+            "gemini" | "google" => "gemini-2.0-flash".to_string(),
+            "anthropic" => "claude-3-5-sonnet-20241022".to_string(),
+            "openrouter" => "anthropic/claude-3.7-sonnet".to_string(),
+            "deepseek" => "deepseek-chat".to_string(),
+            "groq" => "llama-3.3-70b-versatile".to_string(),
+            "xai" => "grok-2-latest".to_string(),
+            "ollama" => "llama3.2".to_string(),
+            _ => cfg.model_name,
+        };
     }
 
-    // 3. Resolve Endpoint
     if let Some(ref ep) = opts.endpoint {
         cfg.api_endpoint = ep.clone();
     } else if let Some(ref ep) = user_cfg.as_ref().and_then(|c| c.endpoint.clone()) {
         cfg.api_endpoint = ep.clone();
-    } else if cfg.provider.eq_ignore_ascii_case("gemini") || cfg.provider.eq_ignore_ascii_case("google") {
-        cfg.api_endpoint = "https://generativelanguage.googleapis.com/v1beta".to_string();
-    } else if cfg.provider.eq_ignore_ascii_case("anthropic") {
-        cfg.api_endpoint = "https://api.anthropic.com/v1".to_string();
-    } else if cfg.provider.eq_ignore_ascii_case("ollama") {
-        cfg.api_endpoint = "http://localhost:11434/v1".to_string();
+    } else {
+        cfg.api_endpoint = match prov_lower.as_str() {
+            "gemini" | "google" => "https://generativelanguage.googleapis.com/v1beta".to_string(),
+            "anthropic" => "https://api.anthropic.com/v1".to_string(),
+            "openrouter" => "https://openrouter.ai/api/v1".to_string(),
+            "deepseek" => "https://api.deepseek.com/v1".to_string(),
+            "groq" => "https://api.groq.com/openai/v1".to_string(),
+            "xai" => "https://api.x.ai/v1".to_string(),
+            "ollama" => "http://localhost:11434/v1".to_string(),
+            _ => cfg.api_endpoint,
+        };
     }
 
-    // 4. Resolve API Key
-    if cfg.provider.eq_ignore_ascii_case("anthropic") {
-        cfg.api_key = env::var("ANTHROPIC_API_KEY")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .or_else(|| user_cfg.as_ref().and_then(|c| c.api_key.clone()));
-    } else if cfg.provider.eq_ignore_ascii_case("gemini") || cfg.provider.eq_ignore_ascii_case("google") {
-        cfg.api_key = env::var("GEMINI_API_KEY")
-            .or_else(|_| env::var("GOOGLE_API_KEY"))
-            .ok()
-            .filter(|s| !s.is_empty())
-            .or_else(|| user_cfg.as_ref().and_then(|c| c.api_key.clone()));
-    } else if !cfg.provider.eq_ignore_ascii_case("ollama") {
-        cfg.api_key = env::var("OPENAI_API_KEY")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .or_else(|| user_cfg.as_ref().and_then(|c| c.api_key.clone()));
+    cfg.api_key = match prov_lower.as_str() {
+        "anthropic" => Heav3nsUserConfig::resolve_env_or_dotenv("ANTHROPIC_API_KEY", &dotenv)
+            .or_else(|| user_cfg.as_ref().and_then(|c| c.api_key.clone())),
+        "gemini" | "google" => Heav3nsUserConfig::resolve_env_or_dotenv("GEMINI_API_KEY", &dotenv)
+            .or_else(|| Heav3nsUserConfig::resolve_env_or_dotenv("GOOGLE_API_KEY", &dotenv))
+            .or_else(|| user_cfg.as_ref().and_then(|c| c.api_key.clone())),
+        "openrouter" => Heav3nsUserConfig::resolve_env_or_dotenv("OPENROUTER_API_KEY", &dotenv)
+            .or_else(|| user_cfg.as_ref().and_then(|c| c.api_key.clone())),
+        "deepseek" => Heav3nsUserConfig::resolve_env_or_dotenv("DEEPSEEK_API_KEY", &dotenv)
+            .or_else(|| user_cfg.as_ref().and_then(|c| c.api_key.clone())),
+        "groq" => Heav3nsUserConfig::resolve_env_or_dotenv("GROQ_API_KEY", &dotenv)
+            .or_else(|| user_cfg.as_ref().and_then(|c| c.api_key.clone())),
+        "xai" => Heav3nsUserConfig::resolve_env_or_dotenv("XAI_API_KEY", &dotenv)
+            .or_else(|| user_cfg.as_ref().and_then(|c| c.api_key.clone())),
+        "ollama" => None,
+        _ => Heav3nsUserConfig::resolve_env_or_dotenv("OPENAI_API_KEY", &dotenv)
+            .or_else(|| user_cfg.as_ref().and_then(|c| c.api_key.clone())),
+    };
+
+    // Zero-config local Ollama fallback when no API key is present and no cloud provider was forced
+    if cfg.api_key.is_none() && explicit_provider.is_none() && opts.endpoint.is_none() {
+        if let Some(local_model) = probe_local_ollama_model().await {
+            cfg.provider = "ollama".to_string();
+            cfg.api_endpoint = "http://localhost:11434/v1".to_string();
+            if opts.model.is_none() {
+                cfg.model_name = local_model;
+            }
+        }
     }
+
+    let wire_provider = match cfg.provider.to_ascii_lowercase().as_str() {
+        "anthropic" => "anthropic",
+        "gemini" | "google" => "gemini",
+        "ollama" => "ollama",
+        _ => "openai",
+    };
 
     let provider = Arc::new(HttpProvider::new(
-        cfg.provider.clone(),
+        wire_provider,
         cfg.api_endpoint.clone(),
         cfg.api_key.clone(),
         cfg.provider_timeout_ms,
@@ -88,9 +132,26 @@ async fn main() {
             run_doctor_cli(&opts.cwd, opts.provider.as_deref(), opts.model.as_deref());
         }
         RunMode::Context => {
-            let (engine, _) = build_engine(&opts);
+            let (engine, _) = build_engine(&opts).await;
             let fmt = if opts.format.eq_ignore_ascii_case("json") { "json" } else { "" };
             println!("{}", engine.render_context_hud(fmt));
+        }
+        RunMode::PreviewRequest => {
+            let (engine, _) = build_engine(&opts).await;
+            let fmt = if opts.format.eq_ignore_ascii_case("json") { "json" } else { "" };
+            println!("{}", engine.render_request_manifest(fmt));
+        }
+        RunMode::Receipts => {
+            let (engine, _) = build_engine(&opts).await;
+            let arg = if opts.format.eq_ignore_ascii_case("json") {
+                "json"
+            } else if opts.last_only {
+                "last"
+            } else {
+                ""
+            };
+            let cmd = if arg.is_empty() { "/receipts".to_string() } else { format!("/receipts {arg}") };
+            println!("{}", engine.tick(EngineTickInput::new(cmd)).await.response);
         }
         RunMode::Init => {
             if let Err(e) = run_init_wizard(&opts.cwd) {
@@ -159,29 +220,20 @@ async fn main() {
                     "durationMs": flight.summary.duration_ms
                 }
             });
-
             if opts.stress || opts.tests_dir.is_some() {
                 let full = heav3ns_micro::core::benchmark_runner::run_full_benchmark_suite(opts.tests_dir.as_deref()).await;
                 payload["stressBenchmarks"] = full["stressBenchmarks"].clone();
                 payload["workspaceTasks"] = full["workspaceTasks"].clone();
                 payload["totalDurationMs"] = full["totalDurationMs"].clone();
             }
-
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&payload).unwrap_or_default()
-            );
+            println!("{}", serde_json::to_string_pretty(&payload).unwrap_or_default());
             if flight.summary.failed > 0 {
                 std::process::exit(1);
             }
         }
         RunMode::Smoke => {
-            let (engine, _) = build_engine(&opts);
-            let r1 = engine
-                .tick(EngineTickInput::new(
-                    "remember: HEAV3NS-MICRO uses a 16-MiB Arena slab.",
-                ))
-                .await;
+            let (engine, _) = build_engine(&opts).await;
+            let r1 = engine.tick(EngineTickInput::new("remember: HEAV3NS-MICRO uses a 16-MiB Arena slab.")).await;
             let r2 = engine.tick(EngineTickInput::new("/stats")).await;
             let r3 = engine.tick(EngineTickInput::new("/snapshot")).await;
             let flight = run_agent_flight_test().await;
@@ -201,12 +253,20 @@ async fn main() {
             }
         }
         RunMode::StdioWorker => {
-            let (engine, _) = build_engine(&opts);
+            let (engine, _) = build_engine(&opts).await;
             run_stdio_worker(engine).await;
         }
         RunMode::SinglePrompt => {
-            let (engine, cfg) = build_engine(&opts);
+            let (engine, cfg) = build_engine(&opts).await;
+            let cancel = CancellationToken::new();
+            let cancel_sig = cancel.clone();
+            tokio::spawn(async move {
+                if tokio::signal::ctrl_c().await.is_ok() {
+                    cancel_sig.cancel();
+                }
+            });
             let mut input = EngineTickInput::new(opts.prompt.unwrap_or_default());
+            input.cancel_token = Some(cancel);
             input.on_progress = Some(create_cli_progress_listener());
             let res = engine.tick(input).await;
             if res.outcome == EngineTickOutcome::Failed && (res.response.contains("401") || res.response.contains("API key") || res.response.contains("Authorization")) {
@@ -220,27 +280,27 @@ async fn main() {
             }
         }
         RunMode::Interactive => {
-            let (mut engine, mut cfg) = build_engine(&opts);
+            let (mut engine, mut cfg) = build_engine(&opts).await;
             let has_key = cfg.api_key.is_some();
             print_welcome_banner(&opts.cwd, &cfg.provider, &cfg.model_name, has_key);
             if !has_key && !cfg.provider.eq_ignore_ascii_case("ollama") {
                 print_onboarding_notice(&cfg.provider, &cfg.model_name);
             } else {
-                println!("Type /help for slash commands, /doctor to diagnose, /demo for offline tour, /exit to quit.\n");
+                println!("Type /help for slash commands, /mode to cycle posture, /receipts for audit receipts, /exit to quit.\n");
             }
 
             let valid_slash_cmds = [
-                "/help", "/context", "/prompt", "/stats", "/vfs", "/diff", "/commit", "/discard", "/tools",
-                "/guide", "/demo", "/memory", "/skills", "/soul", "/forge", "/doctor",
-                "/computer", "/spatial", "/browser", "/vision", "/legion", "/compact", "/model",
-                "/snapshot", "/snapshots", "/rewind", "/undo", "/clear", "/health",
-                "/pwd", "/workspace", "/cd",
+                "/help", "/mode", "/posture", "/preview-request", "/preview", "/receipts", "/turn", "/restore",
+                "/context", "/prompt", "/stats", "/vfs", "/diff", "/commit", "/discard", "/tools",
+                "/guide", "/quickstart", "/demo", "/memory", "/skills", "/soul", "/forge", "/doctor",
+                "/computer", "/spatial", "/browser", "/vision", "/legion", "/swarm", "/compact", "/model",
+                "/snapshot", "/snapshots", "/rewind", "/undo", "/clear", "/health", "/pwd", "/workspace", "/cd",
             ];
 
             let progress_cb = create_cli_progress_listener();
             let stdin = io::stdin();
             loop {
-                print!("heav3ns> ");
+                print!("heav3ns [{}]> ", engine.current_posture().slug());
                 let _ = io::stdout().flush();
                 let mut line = String::new();
                 match stdin.read_line(&mut line) {
@@ -254,52 +314,32 @@ async fn main() {
                             println!("Session ended. Goodbye!");
                             break;
                         }
-                        // Handle user-friendly aliases without leading slash
                         if matches!(trimmed, "pwd" | "/pwd" | "workspace" | "/workspace") {
                             println!("Active workspace root: {}", engine.workspace_root().display());
                             continue;
                         }
                         if trimmed.starts_with("cd ") || trimmed.starts_with("/cd ") || trimmed == "cd" || trimmed == "/cd" {
-                            let raw_target = if let Some(p) = trimmed.strip_prefix("/cd ") {
-                                p.trim()
-                            } else if let Some(p) = trimmed.strip_prefix("cd ") {
-                                p.trim()
-                            } else {
-                                "~"
-                            };
+                            let raw_target = trimmed.strip_prefix("/cd ").or_else(|| trimmed.strip_prefix("cd ")).map(str::trim).unwrap_or("~");
                             let clean_target = raw_target.trim_matches(|c| c == '\'' || c == '"');
                             let target_path = if clean_target == "~" || clean_target.starts_with("~/") {
                                 if let Ok(home) = std::env::var("HOME") {
-                                    if clean_target == "~" {
-                                        std::path::PathBuf::from(home)
-                                    } else {
-                                        std::path::PathBuf::from(home).join(&clean_target[2..])
-                                    }
+                                    if clean_target == "~" { std::path::PathBuf::from(home) } else { std::path::PathBuf::from(home).join(&clean_target[2..]) }
                                 } else {
                                     std::path::PathBuf::from(clean_target)
                                 }
                             } else {
                                 std::path::PathBuf::from(clean_target)
                             };
-                            let resolved = if target_path.is_absolute() {
-                                target_path
-                            } else {
-                                opts.cwd.join(target_path)
-                            };
+                            let resolved = if target_path.is_absolute() { target_path } else { opts.cwd.join(target_path) };
                             if resolved.is_dir() {
                                 opts.cwd = resolved.canonicalize().unwrap_or(resolved);
                                 println!("  ✔ Workspace switched to: {}\n", opts.cwd.display());
-                                let (new_engine, new_cfg) = build_engine(&opts);
+                                let (new_engine, new_cfg) = build_engine(&opts).await;
                                 engine = new_engine;
                                 cfg = new_cfg;
                             } else {
                                 println!("  ✖ Directory not found: {}\n", raw_target);
                             }
-                            continue;
-                        }
-                        if trimmed == "model" || trimmed == "/model" {
-                            println!("Active model: {} (provider: {})\n", cfg.model_name, cfg.provider);
-                            println!("Popular choices:\n  • gpt-5.6-terra (Default / Fast Reasoning)\n  • gpt-4o (High-Throughput Multimodal)\n  • gpt-4o-mini (Lightweight)\n  • gemini-2.0-flash (Google Gemini)\n  • claude-3-5-sonnet-20241022 (Claude)\n  • llama3.2 (Local Ollama)\n\nTo switch model: /model <name>");
                             continue;
                         }
                         if matches!(trimmed, "help" | "?") {
@@ -318,33 +358,11 @@ async fn main() {
                             print_tool_catalog();
                             continue;
                         }
-                        if matches!(trimmed, "stats") {
-                            println!("{}", engine.tick(EngineTickInput::new("/stats")).await.response);
-                            continue;
-                        }
-                        if matches!(trimmed, "context") {
-                            println!("{}", engine.render_context_hud(""));
-                            continue;
-                        }
-                        if matches!(trimmed, "prompt") {
-                            println!("{}", engine.render_prompt_inspector(""));
-                            continue;
-                        }
-                        if matches!(trimmed, "vfs") {
-                            println!("{}", engine.tick(EngineTickInput::new("/vfs")).await.response);
-                            continue;
-                        }
                         if matches!(trimmed, "diff" | "/diff") {
                             let diff_text = engine.tick(EngineTickInput::new("/diff")).await.response;
                             println!("{}", render_color_diff(&diff_text));
                             continue;
                         }
-                        if matches!(trimmed, "clear") {
-                            println!("{}", engine.tick(EngineTickInput::new("/clear")).await.response);
-                            continue;
-                        }
-
-                        // Check for unknown slash command typo and suggest
                         if trimmed.starts_with('/') {
                             let cmd_token = trimmed.split_whitespace().next().unwrap_or("");
                             if !valid_slash_cmds.contains(&cmd_token) {
@@ -355,16 +373,27 @@ async fn main() {
                             }
                         }
 
+                        let cancel = CancellationToken::new();
+                        let cancel_sig = cancel.clone();
+                        let sig_task = tokio::spawn(async move {
+                            if tokio::signal::ctrl_c().await.is_ok() {
+                                cancel_sig.cancel();
+                            }
+                        });
                         let mut input = EngineTickInput::new(trimmed);
+                        input.cancel_token = Some(cancel);
                         input.on_progress = Some(progress_cb.clone());
                         let res = engine.tick(input).await;
+                        sig_task.abort();
                         if res.outcome == EngineTickOutcome::Failed
                             && (res.response.contains("401") || res.response.contains("API key") || res.response.contains("Authorization"))
                         {
                             println!("{}", format_auth_error_card(&res.response, &cfg.provider, &cfg.model_name));
                         } else {
                             println!("\n{}", res.response);
-                            println!("{}", format_turn_summary(&res.active_model, res.duration_ms, res.tool_results.len()));
+                            if !res.is_slash_command {
+                                println!("{}", format_turn_summary(&res.active_model, res.duration_ms, res.tool_results.len()));
+                            }
                         }
                     }
                 }

@@ -160,11 +160,21 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         editItem.submenu = edit; main.addItem(editItem)
         let viewItem = NSMenuItem(); viewItem.title = "Workspace"; let view = NSMenu(title: "Workspace")
         let palette = view.addItem(withTitle: "Actions…", action: #selector(actions), keyEquivalent: "p"); palette.keyEquivalentModifierMask = [.command, .shift]; palette.target = self
-        let commandPalette = view.addItem(withTitle: "Command Palette…", action: #selector(actions), keyEquivalent: "k"); commandPalette.target = self
+        let commandPalette = view.addItem(withTitle: "Command Palette…", action: #selector(openCommandPalette), keyEquivalent: "k"); commandPalette.target = self
         let goToSymbol = view.addItem(withTitle: "Go to Symbol in File…", action: #selector(showGoToSymbol), keyEquivalent: "o"); goToSymbol.keyEquivalentModifierMask = [.command, .shift]; goToSymbol.target = self
         view.addItem(withTitle: "Toggle Navigation", action: #selector(toggleNavigation), keyEquivalent: "b").target = self
         let models = view.addItem(withTitle: "Model & Provider…", action: #selector(showModels), keyEquivalent: "m")
         models.keyEquivalentModifierMask = [.command, .shift]; models.target = self
+        if let f3Scalar = UnicodeScalar(NSF3FunctionKey) {
+            let fastModels = view.addItem(withTitle: "Fast Switch Model…", action: #selector(showModels), keyEquivalent: String(f3Scalar))
+            fastModels.keyEquivalentModifierMask = []; fastModels.target = self
+        }
+        let stepPostureItem = view.addItem(withTitle: "Cycle Execution Posture", action: #selector(stepPosture), keyEquivalent: "")
+        stepPostureItem.target = self
+        let undoTurnItem = view.addItem(withTitle: "Undo Last Turn Edits", action: #selector(undoLastTurn), keyEquivalent: "z")
+        undoTurnItem.keyEquivalentModifierMask = [.command, .option]; undoTurnItem.target = self
+        let previewItem = view.addItem(withTitle: "Preview Outbound Request", action: #selector(showRequestPreview), keyEquivalent: "i")
+        previewItem.keyEquivalentModifierMask = [.command, .shift]; previewItem.target = self
         view.addItem(withTitle: "Focus Composer", action: #selector(focusComposer), keyEquivalent: "l").target = self
         view.addItem(.separator())
         let chats = view.addItem(withTitle: "Chats", action: #selector(showChats), keyEquivalent: "c")
@@ -177,7 +187,8 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         view.addItem(withTitle: "Checkpoints", action: #selector(showCheckpoints), keyEquivalent: "7").target = self
         view.addItem(withTitle: "Conversation Memory…", action: #selector(showMemory), keyEquivalent: "8").target = self
         view.addItem(withTitle: "Conversation Context", action: #selector(showContext), keyEquivalent: "9").target = self
-        view.addItem(withTitle: "Check Code", action: #selector(showCodeCheck), keyEquivalent: "").target = self
+        let codeCheckItem = view.addItem(withTitle: "Check Code", action: #selector(showCodeCheck), keyEquivalent: "k")
+        codeCheckItem.keyEquivalentModifierMask = [.command, .shift]; codeCheckItem.target = self
         view.addItem(withTitle: "Saved State", action: #selector(showSavedState), keyEquivalent: "").target = self
         view.addItem(withTitle: "Up Next", action: #selector(showQueue), keyEquivalent: "4").target = self
         view.addItem(withTitle: "Review Request…", action: #selector(showApprovalReview), keyEquivalent: "5").target = self
@@ -379,6 +390,13 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         else { current?.findInInspection() }
     }
     @objc private func stop() { current?.stop() }
+    @objc private func stepPosture() { current?.stepPosture() }
+    @objc private func undoLastTurn() { current?.undoLastTurn() }
+    @objc private func showRequestPreview() { current?.showRequestPreview() }
+    @objc private func openCommandPalette() {
+        if let currentPods { currentPods.showActions() }
+        else if let current { current.showCommandPalette() } else { openFolder() }
+    }
     @objc private func actions() {
         if let currentPods { currentPods.showActions() }
         else if let current { current.showActions() } else { openFolder() }
@@ -423,7 +441,9 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         if menuItem.action == #selector(stop) { return current?.hasWork == true }
         if [#selector(allowOperation), #selector(denyOperation)].contains(menuItem.action) { return current?.canDecideApproval == true }
         if menuItem.action == #selector(showApprovalReview) { return currentPods.map { $0.hasRequests && $0.window?.attachedSheet == nil } ?? (current?.canReviewApproval == true) }
-        if [#selector(toggleNavigation), #selector(focusComposer), #selector(showChats), #selector(showFiles), #selector(showChanges), #selector(showSessions), #selector(showQueue), #selector(showWalkthrough), #selector(toggleMaximizeContext)].contains(menuItem.action) { return current != nil }
+        if [#selector(toggleNavigation), #selector(focusComposer), #selector(showChats), #selector(showFiles), #selector(showChanges), #selector(showSessions), #selector(showQueue), #selector(showWalkthrough), #selector(toggleMaximizeContext), #selector(stepPosture)].contains(menuItem.action) { return current != nil }
+        if menuItem.action == #selector(undoLastTurn) { return current?.client.isReady == true && current?.hasWork == false }
+        if menuItem.action == #selector(showRequestPreview) { return current?.client.isReady == true }
         return true
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

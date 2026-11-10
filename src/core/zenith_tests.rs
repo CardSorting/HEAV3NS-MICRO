@@ -194,8 +194,8 @@ mod tests {
         let ctx_json: Value =
             serde_json::from_str(&engine.tick(EngineTickInput::new("/context json")).await.response).unwrap();
         assert_eq!(ctx_json["profile"], "standard");
-        assert_eq!(ctx_json["toolTotalCount"], 29);
-        assert_eq!(ctx_json["toolActiveCount"], 15);
+        assert_eq!(ctx_json["toolTotalCount"], 31);
+        assert_eq!(ctx_json["toolActiveCount"], 17);
 
         let prefix_only = engine.tick(EngineTickInput::new("/prompt prefix")).await.response;
         assert!(prefix_only.contains("# Mandate & Loop"));

@@ -59,6 +59,14 @@ extension WorkspaceWindow {
         guard !composer.hasMarkedText() else { return }
         let text = composer.string.trimmingCharacters(in: .whitespacesAndNewlines)
         if text == "/compact" { compactContext(); return }
+        if text == "/undo" { composer.string = ""; saveDraft(); undoLastTurn(); return }
+        if text == "/receipts" { composer.string = ""; saveDraft(); showTurnReceipts(); return }
+        if text == "/preview" || text == "/preview-request" { composer.string = ""; saveDraft(); showRequestPreview(); return }
+        if let stop = ["/plan": ExecutionPostureStop.plan, "/ask": .ask, "/edits": .acceptEdits, "/auto": .autoReview, "/yolo": .fullAccess][text.lowercased()] {
+            composer.string = ""; saveDraft(); applyPosture(stop, syncRemote: true)
+            showNotice("Execution posture switched to \(stop.label).")
+            return
+        }
         if let question = Self.sideQuestion(from: text) { askSideQuestion(question, original: text); return }
         submitInstruction(text)
     }
@@ -170,7 +178,7 @@ extension WorkspaceWindow {
         recoverySubmission = submission
         guard saveDraft() else { recoverySubmission = nil; return }
         pendingRequest = id; updateStatus()
-        var parameters: [String: Any] = ["text": text, "attachments": attachmentBar.urls.map(\.path)]
+        var parameters: [String: Any] = ["text": text, "attachments": attachmentBar.urls.map(\.path), "posture": activePosture.rawValue]
         if client.capabilities.contains("conversations"), let currentConversation { parameters["conversation"] = currentConversation }
         if let continuation { parameters["continueFrom"] = ["run": continuation.run, "revision": continuation.revision] }
         if let repairLaunch { parameters["repairProject"] = ["launch": repairLaunch] }
@@ -244,6 +252,7 @@ extension WorkspaceWindow {
         approval.isHidden = currentApproval == nil
         reviewApprovalButton.isEnabled = canReviewApproval
         denyButton.isEnabled = canDecideApproval
+        allowSessionButton.isEnabled = canDecideApproval
         allowButton.isEnabled = canDecideApproval
         let summary = currentApproval.map { "\($0.tool)\n\($0.scope)" } ?? ""
         if approvalText.string != summary { approvalText.string = summary }
@@ -465,7 +474,7 @@ extension WorkspaceWindow {
     var canDecideApproval: Bool { currentApproval != nil && client.isReady && decidingApproval == nil && !cancelRequested && !closing && !switchingConversation }
 
     @discardableResult func resolveApproval(_ approval: ApprovalRequest, decision: String) -> Bool {
-        guard ["allow", "deny"].contains(decision), currentApproval == approval, client.isReady, decidingApproval == nil, !cancelRequested, !closing, !switchingConversation else { return false }
+        guard ["allow", "allow_once", "allow_session", "deny"].contains(decision), currentApproval == approval, client.isReady, decidingApproval == nil, !cancelRequested, !closing, !switchingConversation else { return false }
         let source = client, attempt = ApprovalDecision(request: approval, context: podContextID)
         decidingApproval = attempt; approvalFailure = nil; approvalFailureAttempt = nil; updateStatus()
         source.request("approval.resolve", params: ["operation": approval.operation, "run": approval.run, "decision": decision]) { [weak self] result in

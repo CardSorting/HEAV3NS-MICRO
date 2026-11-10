@@ -390,6 +390,7 @@ final class QuickOpenWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         guard items.indices.contains(row) else { return nil }
         let item = items[row], cell = NSTableCellView()
         let name: NSTextField, path: NSTextField, icon: NSImageView
+        var badgeText: String? = nil
         switch item {
         case .file(let filePath, let fileName):
             name = JourneyStyle.label(fileName, size: 13, weight: .medium)
@@ -398,13 +399,16 @@ final class QuickOpenWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
             cell.toolTip = filePath
         case .action(let action):
             name = JourneyStyle.label(action.title, size: 13, weight: .medium)
-            path = JourneyStyle.label(action.shortcut, size: 11, secondary: true)
+            let subtitle = action.keywords.isEmpty ? "Workspace command" : action.keywords.prefix(4).joined(separator: " · ")
+            path = JourneyStyle.label(subtitle, size: 11, secondary: true)
             icon = NSImageView(image: NSImage(systemSymbolName: "command", accessibilityDescription: nil)!)
-            cell.toolTip = action.title
+            if !action.shortcut.isEmpty { badgeText = action.shortcut }
+            cell.toolTip = action.shortcut.isEmpty ? action.title : "\(action.title) (\(action.shortcut))"
         case .symbol(let symbolName, let kind, let line, _):
             name = JourneyStyle.label(symbolName, size: 13, weight: .medium)
             path = JourneyStyle.label("\(kind) · Line \(line)", size: 11, secondary: true)
             icon = NSImageView(image: NSImage(systemSymbolName: "number", accessibilityDescription: nil)!)
+            badgeText = ":\(line)"
             cell.toolTip = "\(symbolName) (\(kind))"
         case .checkpoint(_, let title, let detail):
             name = JourneyStyle.label(title, size: 13, weight: .medium)
@@ -416,21 +420,38 @@ final class QuickOpenWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
             path = JourneyStyle.label(snippet.isEmpty ? "Jump to line in current inspected file" : snippet, size: 11, secondary: true)
             icon = NSImageView(image: NSImage(systemSymbolName: "arrow.down.to.line", accessibilityDescription: nil) ?? NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil)!)
             cell.toolTip = "Go to line \(line)"
-        case .modeGuide(_, let title, let detail):
+        case .modeGuide(let prefix, let title, let detail):
             name = JourneyStyle.label(title, size: 13, weight: .medium)
             path = JourneyStyle.label(detail, size: 11, secondary: true)
             icon = NSImageView(image: NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: nil) ?? NSImage(systemSymbolName: "command", accessibilityDescription: nil)!)
+            badgeText = prefix.isEmpty ? "⌘P" : prefix
             cell.toolTip = detail
         }
         for label in [name, path] { label.maximumNumberOfLines = 1; label.lineBreakMode = .byTruncatingMiddle }
         let labels = JourneyStyle.stack([name, path], spacing: 3)
+        labels.setContentHuggingPriority(.init(1), for: .horizontal)
+        labels.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         icon.widthAnchor.constraint(equalToConstant: 18).isActive = true
-        let content = JourneyStyle.stack([icon, labels], vertical: false, spacing: 10)
+        var rowViews: [NSView] = [icon, labels]
+        if let badgeText, !badgeText.isEmpty {
+            let badgeLabel = NSTextField(labelWithString: badgeText)
+            badgeLabel.font = .monospacedSystemFont(ofSize: 11, weight: .medium)
+            badgeLabel.textColor = .secondaryLabelColor
+            let badgePill = NSStackView(views: [badgeLabel])
+            badgePill.edgeInsets = NSEdgeInsets(top: 2, left: 6, bottom: 2, right: 6)
+            badgePill.wantsLayer = true; badgePill.layer?.cornerRadius = 4
+            badgePill.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
+            badgePill.setContentHuggingPriority(.required, for: .horizontal)
+            badgePill.setContentCompressionResistancePriority(.required, for: .horizontal)
+            rowViews.append(badgePill)
+        }
+        let content = JourneyStyle.stack(rowViews, vertical: false, spacing: 10)
         cell.addSubview(content); JourneyStyle.pin(content, to: cell, inset: 5)
         for label in [name, path] { label.widthAnchor.constraint(equalTo: labels.widthAnchor).isActive = true }
         cell.textField = name; cell.imageView = icon
         return cell
     }
+    func dispose() { dismiss(restoreFocus: false) }
     func searchProbe(_ query: String) {
         search.stringValue = query
         if query.hasPrefix(">") {

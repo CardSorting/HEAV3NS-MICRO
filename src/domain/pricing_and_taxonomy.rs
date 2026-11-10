@@ -1,0 +1,342 @@
+// [LAYER: DOMAIN]
+use crate::plumbing::hash_and_math::fnv1a_32;
+use serde::{Deserialize, Serialize};
+
+/// Abstract contract for honest provider token billing & error envelope classification.
+pub trait IBillingMeter {
+    fn honest_cost_summary(&self) -> String;
+}
+
+/// Abstract contract for structured HTTP/provider error recoverability classification.
+pub trait IErrorClassifier {
+    fn is_recoverable_error(&self) -> bool;
+}
+
+/// Exact or estimated token usage returned from an LLM completion call (`Pricing & Receipts`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProviderTokenUsage {
+    #[serde(rename = "promptTokens")]
+    pub prompt_tokens: usize,
+    #[serde(rename = "completionTokens")]
+    pub completion_tokens: usize,
+    #[serde(rename = "cachedPromptTokens")]
+    pub cached_prompt_tokens: usize,
+    #[serde(rename = "isExact")]
+    pub is_exact: bool,
+}
+
+impl ProviderTokenUsage {
+    pub fn accumulate(&mut self, other: &Self) {
+        self.prompt_tokens = self.prompt_tokens.saturating_add(other.prompt_tokens);
+        self.completion_tokens = self.completion_tokens.saturating_add(other.completion_tokens);
+        self.cached_prompt_tokens = self.cached_prompt_tokens.saturating_add(other.cached_prompt_tokens);
+        self.is_exact = self.is_exact && other.is_exact;
+    }
+}
+
+/// Codewhale Honest Pricing invariant (`pricing.rs`): an unrecognized model is NEVER shown as `$0.00`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BillingMetering {
+    Metered {
+        usd_cost: f64,
+        input_per_million: f64,
+        output_per_million: f64,
+        cached_per_million: f64,
+    },
+    LocalNoBill,
+    Subscription,
+    Unknown,
+}
+
+impl BillingMetering {
+    pub fn evaluate(provider: &str, model: &str, endpoint: &str, usage: &ProviderTokenUsage) -> Self {
+        let p = provider.trim().to_ascii_lowercase();
+        let m = model.trim().to_ascii_lowercase();
+        let ep = endpoint.trim().to_ascii_lowercase();
+
+        if p == "ollama"
+            || p.contains("apple")
+            || m.starts_with("apple-")
+            || m.starts_with("llama")
+            || m.starts_with("qwen")
+            || ep.contains("127.0.0.1:11434")
+            || ep.contains("localhost:11434")
+        {
+            return Self::LocalNoBill;
+        }
+        if p == "openai-codex" || p.contains("subscription") || p == "scripted" {
+            return Self::Subscription;
+        }
+
+        let quote: Option<(f64, f64, f64)> = if m.contains("gpt-4o-mini") || m.contains("gpt-4.1-mini") {
+            Some((0.15, 0.60, 0.075))
+        } else if m.contains("gpt-4.1-nano") {
+            Some((0.10, 0.40, 0.025))
+        } else if m.contains("gpt-4o") || m.contains("gpt-4.1") || m.contains("gpt-5") {
+            Some((2.50, 10.00, 1.25))
+        } else if m.starts_with("o3-mini") || m.starts_with("o4-mini") {
+            Some((1.10, 4.40, 0.275))
+        } else if m.starts_with("o1") || m.starts_with("o3") {
+            Some((10.00, 40.00, 2.50))
+        } else if m.contains("claude-opus") {
+            Some((15.00, 75.00, 1.50))
+        } else if m.contains("claude-sonnet") || m.contains("claude-3-5-sonnet") || m.contains("claude-3-7-sonnet") || m.contains("claude-4-sonnet") {
+            Some((3.00, 15.00, 0.30))
+        } else if m.contains("claude-haiku") || m.contains("claude-3-5-haiku") {
+            Some((0.80, 4.00, 0.08))
+        } else if m.contains("deepseek-reasoner") || m.contains("deepseek-r1") {
+            Some((0.55, 2.19, 0.14))
+        } else if m.contains("deepseek") {
+            Some((0.27, 1.10, 0.07))
+        } else if m.contains("gemini-2.5-pro") || m.contains("gemini-1.5-pro") {
+            Some((1.25, 10.00, 0.31))
+        } else if m.contains("gemini") && m.contains("flash") {
+            Some((0.15, 0.60, 0.0375))
+        } else {
+            None
+        };
+
+        let Some((in_rate, out_rate, cache_rate)) = quote else {
+            return Self::Unknown;
+        };
+
+        let uncached_in = usage.prompt_tokens.saturating_sub(usage.cached_prompt_tokens);
+        let raw_usd = (uncached_in as f64 * in_rate / 1_000_000.0)
+            + (usage.cached_prompt_tokens as f64 * cache_rate / 1_000_000.0)
+            + (usage.completion_tokens as f64 * out_rate / 1_000_000.0);
+        let usd_cost = if raw_usd.is_finite() && raw_usd >= 0.0 { raw_usd } else { 0.0 };
+
+        Self::Metered {
+            usd_cost,
+            input_per_million: in_rate,
+            output_per_million: out_rate,
+            cached_per_million: cache_rate,
+        }
+    }
+
+    pub fn format_honest(&self) -> String {
+        match self {
+            Self::Metered { usd_cost, .. } => format!("${usd_cost:.4}"),
+            Self::LocalNoBill => "$0.0000 (local)".to_string(),
+            Self::Subscription => "subscription".to_string(),
+            Self::Unknown => "unknown".to_string(),
+        }
+    }
+
+    pub fn kind_slug(&self) -> &'static str {
+        match self {
+            Self::Metered { .. } => "metered",
+            Self::LocalNoBill => "local_no_bill",
+            Self::Subscription => "subscription",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// Structured error taxonomy distilled from Codewhale (`crates/error-taxonomy`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorCategory {
+    Authentication,
+    Authorization,
+    Budget,
+    RateLimit,
+    Timeout,
+    Network,
+    ContextOverflow,
+    InvalidInput,
+    ServerTransient,
+    Cancelled,
+}
+
+pub const CREDENTIAL_REJECTED_UNSENT_CODE: &str = "llm_auth_rejected_unsent";
+
+/// Actionable error envelope distinguishing non-recoverable 402/spent-balance from retryable 429 rate limits.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ErrorEnvelope {
+    pub category: ErrorCategory,
+    pub recoverable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    pub message: String,
+    pub remediation: String,
+}
+
+impl ErrorEnvelope {
+    pub fn classify_http(status: u16, body: &str, had_side_effects: bool) -> Self {
+        let lower = body.to_ascii_lowercase();
+        let is_spent_balance = status == 402
+            || lower.contains("insufficient_quota")
+            || lower.contains("credit balance is too low")
+            || lower.contains("billing_hard_limit_reached")
+            || lower.contains("exceeded your current quota");
+
+        if is_spent_balance {
+            return Self {
+                category: ErrorCategory::Budget,
+                recoverable: false,
+                code: Some("spent_balance_or_quota".to_string()),
+                message: format!("HTTP {status}: Account quota or credit balance exhausted."),
+                remediation: "Top up provider billing credits or switch provider/model via `/model` (`F3`).".to_string(),
+            };
+        }
+
+        match status {
+            401 => Self {
+                category: ErrorCategory::Authentication,
+                recoverable: false,
+                code: if !had_side_effects {
+                    Some(CREDENTIAL_REJECTED_UNSENT_CODE.to_string())
+                } else {
+                    Some("auth_invalid_key".to_string())
+                },
+                message: "HTTP 401: Missing or rejected API key.".to_string(),
+                remediation: "Configure a valid key via `heav3ns-micro init`, environment variable, or Model Picker (`F3`).".to_string(),
+            },
+            403 => Self {
+                category: ErrorCategory::Authorization,
+                recoverable: false,
+                code: if !had_side_effects {
+                    Some(CREDENTIAL_REJECTED_UNSENT_CODE.to_string())
+                } else {
+                    Some("auth_forbidden".to_string())
+                },
+                message: "HTTP 403: Provider refused access to the requested model or endpoint.".to_string(),
+                remediation: "Verify model access permissions or switch models with `/model`.".to_string(),
+            },
+            429 => Self {
+                category: ErrorCategory::RateLimit,
+                recoverable: true,
+                code: Some("rate_limited".to_string()),
+                message: "HTTP 429: Provider rate limit reached; applying jittered backoff.".to_string(),
+                remediation: "Automatic exponential backoff active; switch to a secondary model if sustained.".to_string(),
+            },
+            400 | 413 if lower.contains("context_length") || lower.contains("too many tokens") || lower.contains("maximum context") => Self {
+                category: ErrorCategory::ContextOverflow,
+                recoverable: false,
+                code: Some("context_window_exceeded".to_string()),
+                message: format!("HTTP {status}: Request exceeded model context window."),
+                remediation: "Run `/compact` to compress session history or switch to a larger-context model.".to_string(),
+            },
+            408 | 504 => Self {
+                category: ErrorCategory::Timeout,
+                recoverable: true,
+                code: Some("upstream_timeout".to_string()),
+                message: format!("HTTP {status}: Upstream gateway timeout."),
+                remediation: "Retrying with bounded backoff.".to_string(),
+            },
+            500 | 502 | 503 | 529 => Self {
+                category: ErrorCategory::ServerTransient,
+                recoverable: true,
+                code: Some("upstream_transient".to_string()),
+                message: format!("HTTP {status}: Transient provider capacity/server error."),
+                remediation: "Retrying with jittered backoff.".to_string(),
+            },
+            _ => Self {
+                category: ErrorCategory::InvalidInput,
+                recoverable: false,
+                code: Some(format!("http_{status}")),
+                message: format!("HTTP {status}: {body}"),
+                remediation: "Inspect model name (`heav3ns-micro doctor`) and outbound payload (`/preview-request`).".to_string(),
+            },
+        }
+    }
+}
+
+/// Computes bounded exponential backoff with deterministic `50%..100%` jitter, honoring `Retry-After` headers.
+pub fn compute_retry_delay_ms(
+    attempt: u32,
+    category: ErrorCategory,
+    retry_after_ms: Option<u64>,
+    is_scripted_provider: bool,
+) -> u64 {
+    if is_scripted_provider {
+        return 1;
+    }
+    if let Some(ra) = retry_after_ms {
+        return ra.clamp(50, 30_000);
+    }
+    let base_ms: u64 = match category {
+        ErrorCategory::RateLimit => 600u64.saturating_mul(1u64 << attempt.min(5)),
+        _ => 250u64.saturating_mul(1u64 << attempt.min(4)),
+    };
+    let capped = base_ms.min(15_000);
+    let jitter_pct = 50 + (fnv1a_32(&attempt.to_le_bytes()) as u64 % 51);
+    (capped * jitter_pct) / 100
+}
+
+/// Same-provider model routing receipt (`/model auto`) — NEVER cross-routes incompatible provider model IDs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoRouteDecision {
+    pub selected_model: String,
+    pub tier: String,
+    pub reason: String,
+}
+
+/// Resolves a safe fallback model strictly compatible with the active provider so Anthropic/Gemini/Ollama
+/// never fail by sending OpenAI's default `"gpt-4o-mini"` model ID!
+pub fn resolve_compatible_fallback_model(provider: &str, primary_model: &str, configured_fallback: Option<&str>) -> Option<String> {
+    let p = provider.trim().to_ascii_lowercase();
+    if p == "scripted" {
+        return configured_fallback.filter(|f| *f != primary_model).map(String::from);
+    }
+    if let Some(fb) = configured_fallback {
+        let fb_low = fb.to_ascii_lowercase();
+        let cross_provider_mismatch = (p.contains("anthropic") && !fb_low.contains("claude"))
+            || ((p.contains("gemini") || p == "google") && !fb_low.contains("gemini"))
+            || (p == "deepseek" && !fb_low.contains("deepseek"))
+            || (p == "ollama" && (fb_low.starts_with("gpt-") || fb_low.contains("claude") || fb_low.contains("gemini")));
+        if !cross_provider_mismatch && fb != primary_model {
+            return Some(fb.to_string());
+        }
+    }
+    match p.as_str() {
+        "anthropic" => Some("claude-3-5-haiku-latest".to_string()).filter(|m| m != primary_model),
+        "gemini" | "google" => Some("gemini-2.5-flash".to_string()).filter(|m| m != primary_model),
+        "deepseek" => Some("deepseek-chat".to_string()).filter(|m| m != primary_model),
+        _ => None,
+    }
+}
+
+/// Evaluates `/model auto` routing within the active provider family.
+pub fn select_auto_routed_model(provider: &str, configured_model: &str, prompt: &str) -> AutoRouteDecision {
+    if !configured_model.eq_ignore_ascii_case("auto") {
+        return AutoRouteDecision {
+            selected_model: configured_model.to_string(),
+            tier: "declared".to_string(),
+            reason: "Explicitly configured model".to_string(),
+        };
+    }
+    let p = provider.trim().to_ascii_lowercase();
+    let lower = prompt.to_ascii_lowercase();
+    let needs_deep = prompt.len() > 600
+        || lower.contains("architect")
+        || lower.contains("refactor")
+        || lower.contains("audit")
+        || lower.contains("bug")
+        || lower.contains("security")
+        || lower.contains("implement");
+
+    let (fast, strong) = match p.as_str() {
+        "anthropic" => ("claude-3-5-haiku-latest", "claude-sonnet-4-20250514"),
+        "gemini" | "google" => ("gemini-2.5-flash", "gemini-2.5-pro"),
+        "deepseek" => ("deepseek-chat", "deepseek-reasoner"),
+        "ollama" => ("llama3.2", "llama3.2"),
+        _ => ("gpt-4o-mini", "gpt-4o"),
+    };
+
+    if needs_deep {
+        AutoRouteDecision {
+            selected_model: strong.to_string(),
+            tier: "strong".to_string(),
+            reason: "Multi-step engineering/audit complexity detected".to_string(),
+        }
+    } else {
+        AutoRouteDecision {
+            selected_model: fast.to_string(),
+            tier: "fast".to_string(),
+            reason: "Direct lightweight query routed to fast tier".to_string(),
+        }
+    }
+}

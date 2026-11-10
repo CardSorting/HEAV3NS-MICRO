@@ -3,20 +3,24 @@ use crate::core::request_queue::{PromptComposer, RuntimeRequestQueue};
 use crate::core::session_store::{SessionCompactor, SessionStore};
 use crate::core::tool_registry::ToolRegistry;
 use crate::domain::compaction::CompactionPolicy;
-use crate::domain::interfaces::{ILlmProvider, ProgressCallback};
+use crate::domain::interfaces::{ILlmProvider, IWorkspaceSnapshotCas, ProgressCallback};
 use crate::domain::memory::{GameStateSnapshot, MemoryStore};
+use crate::domain::prefix_and_manifest::{PrefixFingerprint, PrefixStabilityTracker};
+use crate::domain::pricing_and_taxonomy::{select_auto_routed_model, ProviderTokenUsage, CREDENTIAL_REJECTED_UNSENT_CODE};
+use crate::domain::turn_receipt::TurnReceipt;
 use crate::domain::types::messages::{Role, SessionMessage};
 use crate::domain::types::progress::{EngineProgressEvent, EngineProgressMetadata, EngineProgressPhase, EngineProgressStatus, ToolExecutionRecord};
-use crate::domain::types::runtime::{AgentConfig, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel};
+use crate::domain::types::runtime::{AgentConfig, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel, ExecutionPosture};
 use crate::domain::types::tick_result::{EngineTickResult, ProviderError, ProviderRequest};
 use crate::domain::types::tool_schedule::ScheduledToolCall;
 use crate::infrastructure::http_provider::HttpProvider;
 use crate::infrastructure::vfs_store::SessionVfs;
+use crate::infrastructure::workspace_cas::WorkspaceSnapshotCas;
 use crate::plumbing::hash_and_math::now_ms;
 use crate::plumbing::secret_redactor::DeterministicSecretRedactor;
 use crate::plumbing::text_tokens::{canonical_tool_name, estimate_text_tokens};
 use serde_json::{json, Value};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -26,7 +30,7 @@ pub fn compute_workspace_revision(root: &Path) -> String {
     crate::infrastructure::vfs_store::workspace_revision(root)
 }
 
-/// Core Agent Engine orchestrating turns, tool waves, topological swarms, and deterministic state snapshots.
+/// Core Agent Engine orchestrating turns, KV-pinned prefix stability, posture gates, CAS receipts, and swarms.
 pub struct AgentEngine {
     workspace_root: PathBuf,
     config: Mutex<AgentConfig>,
@@ -35,9 +39,16 @@ pub struct AgentEngine {
     memory: Arc<Mutex<MemoryStore>>,
     compactor: SessionCompactor,
     tools: Arc<ToolRegistry>,
-    provider: Arc<dyn ILlmProvider>,
+    provider: Mutex<Arc<dyn ILlmProvider>>,
     queue: Arc<RuntimeRequestQueue>,
     snapshots: Mutex<Vec<GameStateSnapshot>>,
+    snapshot_cas_map: Mutex<BTreeMap<usize, String>>,
+    pub(crate) cas: Mutex<WorkspaceSnapshotCas>,
+    pub(crate) prefix_tracker: Mutex<PrefixStabilityTracker>,
+    pub(crate) pinned_system_prompt: Mutex<Option<String>>,
+    pub(crate) last_prefix_status: Mutex<String>,
+    pub(crate) active_posture: Mutex<Option<ExecutionPosture>>,
+    pub(crate) turn_receipts: Mutex<Vec<TurnReceipt>>,
     frame_counter: AtomicU64,
     event_seq: AtomicU64,
     forbid_swarm_delegation: bool,
@@ -64,6 +75,8 @@ impl AgentEngine {
     ) -> Self {
         let mut session = SessionStore::new("default", &workspace_root, None);
         session.add_message(SessionMessage::new(Role::System, config.system_prompt.clone()));
+        let cas = WorkspaceSnapshotCas::open(&workspace_root);
+        let initial_receipts = cas.load_recent_receipts(32);
         Self {
             workspace_root,
             config: Mutex::new(config),
@@ -72,9 +85,16 @@ impl AgentEngine {
             memory,
             compactor: SessionCompactor::default(),
             tools,
-            provider,
+            provider: Mutex::new(provider),
             queue: Arc::new(RuntimeRequestQueue::default()),
             snapshots: Mutex::new(Vec::new()),
+            snapshot_cas_map: Mutex::new(BTreeMap::new()),
+            cas: Mutex::new(cas),
+            prefix_tracker: Mutex::new(PrefixStabilityTracker::default()),
+            pinned_system_prompt: Mutex::new(None),
+            last_prefix_status: Mutex::new("uninitialized".to_string()),
+            active_posture: Mutex::new(None),
+            turn_receipts: Mutex::new(initial_receipts),
             frame_counter: AtomicU64::new(0),
             event_seq: AtomicU64::new(0),
             forbid_swarm_delegation: false,
@@ -101,44 +121,47 @@ impl AgentEngine {
         Self::new(workspace_root, config, provider)
     }
 
-    pub fn workspace_root(&self) -> &Path {
-        &self.workspace_root
+    pub fn workspace_root(&self) -> &Path { &self.workspace_root }
+    pub fn tools(&self) -> &Arc<ToolRegistry> { &self.tools }
+    pub fn session(&self) -> &Mutex<SessionStore> { &self.session }
+    pub fn vfs(&self) -> &Mutex<SessionVfs> { &self.vfs }
+    pub fn memory(&self) -> &Arc<Mutex<MemoryStore>> { &self.memory }
+    pub fn queue(&self) -> &Arc<RuntimeRequestQueue> { &self.queue }
+    pub fn compactor(&self) -> &SessionCompactor { &self.compactor }
+
+    pub(crate) fn provider_arc(&self) -> Arc<dyn ILlmProvider> {
+        Arc::clone(&self.provider.lock().unwrap())
     }
 
-    pub fn tools(&self) -> &Arc<ToolRegistry> {
-        &self.tools
-    }
-
-    pub fn session(&self) -> &Mutex<SessionStore> {
-        &self.session
-    }
-
-    pub fn vfs(&self) -> &Mutex<SessionVfs> {
-        &self.vfs
-    }
-
-    pub fn memory(&self) -> &Arc<Mutex<MemoryStore>> {
-        &self.memory
-    }
-
-    pub fn queue(&self) -> &Arc<RuntimeRequestQueue> {
-        &self.queue
-    }
-
-    pub(crate) fn provider(&self) -> &Arc<dyn ILlmProvider> {
-        &self.provider
-    }
-
-    pub fn compactor(&self) -> &SessionCompactor {
-        &self.compactor
+    pub fn swap_provider_and_config(&self, new_cfg: AgentConfig, new_provider: Arc<dyn ILlmProvider>) {
+        *self.config.lock().unwrap() = new_cfg;
+        *self.provider.lock().unwrap() = new_provider;
+        *self.pinned_system_prompt.lock().unwrap() = None;
+        self.prefix_tracker.lock().unwrap().declare_repin("provider_or_model_switch");
     }
 
     pub fn config_snapshot(&self) -> AgentConfig {
         self.config.lock().unwrap().clone()
     }
 
+    pub fn set_posture(&self, posture: ExecutionPosture) {
+        *self.active_posture.lock().unwrap() = Some(posture);
+    }
+
+    pub fn current_posture(&self) -> ExecutionPosture {
+        self.active_posture.lock().unwrap().unwrap_or(ExecutionPosture::AcceptEdits)
+    }
+
+    pub fn step_posture(&self) -> ExecutionPosture {
+        let next = self.current_posture().step_next();
+        self.set_posture(next);
+        next
+    }
+
     pub(crate) fn set_active_model_name(&self, name: &str) {
         self.config.lock().unwrap().model_name = name.to_string();
+        *self.pinned_system_prompt.lock().unwrap() = None;
+        self.prefix_tracker.lock().unwrap().declare_repin("model_switch");
     }
 
     pub fn snapshots_list(&self) -> Vec<GameStateSnapshot> {
@@ -149,12 +172,21 @@ impl AgentEngine {
         self.snapshots.lock().unwrap().len()
     }
 
+    pub(crate) fn snapshot_cas_map_clone(&self) -> BTreeMap<usize, String> {
+        self.snapshot_cas_map.lock().unwrap().clone()
+    }
+
     pub fn create_snapshot(&self) -> GameStateSnapshot {
         let session = self.session.lock().unwrap();
         let vfs = self.vfs.lock().unwrap();
         let memory = self.memory.lock().unwrap();
         let snap = session.create_snapshot(&vfs, &memory);
-        self.snapshots.lock().unwrap().push(snap.clone());
+        let mut snaps = self.snapshots.lock().unwrap();
+        let idx = snaps.len();
+        snaps.push(snap.clone());
+        if let Ok(cas_id) = self.cas.lock().unwrap().capture_snapshot(&snap.snapshot_id, snap.frame_index) {
+            self.snapshot_cas_map.lock().unwrap().insert(idx, cas_id);
+        }
         snap
     }
 
@@ -166,6 +198,11 @@ impl AgentEngine {
                 .cloned()
                 .ok_or_else(|| format!("Snapshot #{index} not found (total: {})", snaps.len()))?
         };
+        if let Some(cas_id) = self.snapshot_cas_map.lock().unwrap().get(&index).cloned() {
+            let _ = self.cas.lock().unwrap().restore_full_snapshot(&cas_id);
+            self.tools.cache.lock().unwrap().clear();
+            self.tools.read_tracker.lock().unwrap().reset_stamps();
+        }
         let mut session = self.session.lock().unwrap();
         let mut vfs = self.vfs.lock().unwrap();
         let mut memory = self.memory.lock().unwrap();
@@ -173,7 +210,8 @@ impl AgentEngine {
         Ok(snap)
     }
 
-    fn emit_progress(
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn emit_progress_internal(
         &self,
         cb: &Option<ProgressCallback>,
         activity_id: &str,
@@ -201,44 +239,28 @@ impl AgentEngine {
         }
     }
 
-    pub async fn ask_side_question(&self, question: &str) -> Result<String, ProviderError> {
-        let cfg = self.config.lock().unwrap().clone();
-        let facts = crate::infrastructure::vfs_store::WorkspacePromptProbe::probe_cached(&self.workspace_root);
-        let side_sys = crate::domain::prompt_spec::SystemPromptSpec::for_side_question().render(&cfg, &self.workspace_root, &facts, &[]);
-        let req = ProviderRequest {
-            model: cfg.model_name,
-            messages: vec![
-                SessionMessage::new(Role::System, side_sys),
-                SessionMessage::new(Role::User, question),
-            ],
-            tools: Vec::new(),
-            max_tokens: cfg.max_output_tokens.min(2048),
-            temperature: cfg.temperature,
-        };
-        let resp = self.provider.complete(req, None).await?;
-        Ok(resp.content.unwrap_or_default())
-    }
-
     pub async fn tick(&self, input: EngineTickInput) -> EngineTickResult {
         let started_ms = now_ms();
         let frame_index = self.frame_counter.fetch_add(1, Ordering::Relaxed) + 1;
         let turn_activity_id = format!("turn-{frame_index}");
         let cfg = self.config.lock().unwrap().clone();
         let authority = input.execution_authority.unwrap_or(ExecutionAuthorityLevel::Autonomous);
+        let effective_posture = if let Some(p) = input.posture {
+            p
+        } else if let Some(explicit) = *self.active_posture.lock().unwrap() {
+            explicit
+        } else {
+            match authority {
+                ExecutionAuthorityLevel::Strict | ExecutionAuthorityLevel::Interactive => ExecutionPosture::Ask,
+                ExecutionAuthorityLevel::Balanced => ExecutionPosture::AcceptEdits,
+                ExecutionAuthorityLevel::HighThroughput | ExecutionAuthorityLevel::Autonomous => ExecutionPosture::AutoReview,
+            }
+        };
 
         let _permit = match self.queue.try_acquire(input.prompt.len()) {
             Ok(p) => p,
             Err(err_msg) => {
-                self.emit_progress(
-                    &input.on_progress,
-                    &turn_activity_id,
-                    EngineProgressPhase::Failed,
-                    EngineProgressStatus::Failed,
-                    &err_msg,
-                    None,
-                    started_ms,
-                    None,
-                );
+                self.emit_progress_internal(&input.on_progress, &turn_activity_id, EngineProgressPhase::Failed, EngineProgressStatus::Failed, &err_msg, None, started_ms, None);
                 return EngineTickResult {
                     frame_index,
                     outcome: EngineTickOutcome::Failed,
@@ -250,22 +272,14 @@ impl AgentEngine {
                     tool_results: Vec::new(),
                     safe_to_retry: Some(true),
                     duration_ms: now_ms().saturating_sub(started_ms),
+                    receipt: None,
                 };
             }
         };
 
         if input.should_defer.as_ref().map(|f| f()).unwrap_or(false) {
             let msg = "Turn deferred due to higher-priority host activity.".to_string();
-            self.emit_progress(
-                &input.on_progress,
-                &turn_activity_id,
-                EngineProgressPhase::Deferred,
-                EngineProgressStatus::Deferred,
-                &msg,
-                None,
-                started_ms,
-                None,
-            );
+            self.emit_progress_internal(&input.on_progress, &turn_activity_id, EngineProgressPhase::Deferred, EngineProgressStatus::Deferred, &msg, None, started_ms, None);
             return EngineTickResult {
                 frame_index,
                 outcome: EngineTickOutcome::Deferred,
@@ -277,21 +291,13 @@ impl AgentEngine {
                 tool_results: Vec::new(),
                 safe_to_retry: Some(true),
                 duration_ms: now_ms().saturating_sub(started_ms),
+                receipt: None,
             };
         }
 
         if let Some(reply) = self.handle_slash_command(&input.prompt) {
             let active_model = self.config.lock().unwrap().model_name.clone();
-            self.emit_progress(
-                &input.on_progress,
-                &turn_activity_id,
-                EngineProgressPhase::Completed,
-                EngineProgressStatus::Completed,
-                "Slash command executed",
-                None,
-                started_ms,
-                None,
-            );
+            self.emit_progress_internal(&input.on_progress, &turn_activity_id, EngineProgressPhase::Completed, EngineProgressStatus::Completed, "Slash command executed", None, started_ms, None);
             return EngineTickResult {
                 frame_index,
                 outcome: EngineTickOutcome::Completed,
@@ -303,6 +309,7 @@ impl AgentEngine {
                 tool_results: Vec::new(),
                 safe_to_retry: Some(true),
                 duration_ms: now_ms().saturating_sub(started_ms),
+                receipt: None,
             };
         }
 
@@ -313,11 +320,7 @@ impl AgentEngine {
             .map(str::trim)
             .filter(|s| !s.is_empty())
         {
-            let entry = self
-                .memory
-                .lock()
-                .unwrap()
-                .save_memory(format!("fact_{}", now_ms()), fact, "fact");
+            let entry = self.memory.lock().unwrap().save_memory(format!("fact_{}", now_ms()), fact, "fact");
             let reply = format!("Saved to LUMI-MEMORY/1 ({}): {}", entry.key, entry.value);
             return EngineTickResult {
                 frame_index,
@@ -330,6 +333,7 @@ impl AgentEngine {
                 tool_results: Vec::new(),
                 safe_to_retry: Some(true),
                 duration_ms: now_ms().saturating_sub(started_ms),
+                receipt: None,
             };
         }
 
@@ -349,18 +353,32 @@ impl AgentEngine {
             }
             turn
         };
+
+        let constitution = Self::load_constitution(&self.workspace_root);
+        self.tools.configure_turn_security(Some(effective_posture), constitution, input.approval_callback.clone());
         self.tools.begin_turn(turn_num);
 
-        let max_rounds = cfg.max_tool_rounds.unwrap_or(32).max(1);
+        let snap_before = self
+            .cas
+            .lock()
+            .unwrap()
+            .capture_snapshot("pre-turn", turn_num)
+            .ok();
 
-        let mut active_model = cfg.model_name.clone();
+        let max_rounds = cfg.max_tool_rounds.unwrap_or(32).max(1);
+        let auto_decision = select_auto_routed_model(&cfg.provider, &cfg.model_name, &input.prompt);
+        let mut active_model = auto_decision.selected_model;
         let mut is_fallback_model = false;
         let mut all_tool_results: Vec<ToolExecutionRecord> = Vec::new();
         let mut tools_admitted = false;
         let mut last_composed_summary = String::new();
         let mut final_response = String::new();
+        let mut accumulated_usage = ProviderTokenUsage::default();
+        let mut last_prefix_hash = String::new();
+        let mut last_prefix_status = "pinned_initial".to_string();
+        let mut completed_with_assistant_reply = false;
 
-        self.emit_progress(
+        self.emit_progress_internal(
             &input.on_progress,
             &turn_activity_id,
             EngineProgressPhase::Planning,
@@ -381,15 +399,15 @@ impl AgentEngine {
         for round in 0..max_rounds {
             if input.cancel_token.as_ref().map(|t| t.is_cancelled()).unwrap_or(false) {
                 let msg = "Turn cancelled by user.".to_string();
-                self.emit_progress(
-                    &input.on_progress,
-                    &turn_activity_id,
-                    EngineProgressPhase::Cancelled,
-                    EngineProgressStatus::Cancelled,
-                    &msg,
-                    None,
-                    started_ms,
-                    None,
+                {
+                    let mut sess = self.session.lock().unwrap();
+                    Self::heal_dangling_tools(&mut sess, "[Turn cancelled by user]");
+                }
+                self.emit_progress_internal(&input.on_progress, &turn_activity_id, EngineProgressPhase::Cancelled, EngineProgressStatus::Cancelled, &msg, None, started_ms, None);
+                let dur = now_ms().saturating_sub(started_ms);
+                let receipt = self.build_and_persist_turn_receipt(
+                    turn_num, frame_index, &cfg.provider, &cfg.api_endpoint, &active_model, effective_posture,
+                    EngineTickOutcome::Cancelled, dur, accumulated_usage, last_prefix_hash, last_prefix_status, snap_before, &all_tool_results,
                 );
                 return EngineTickResult {
                     frame_index,
@@ -401,21 +419,22 @@ impl AgentEngine {
                     response: msg,
                     tool_results: all_tool_results,
                     safe_to_retry: Some(!tools_admitted),
-                    duration_ms: now_ms().saturating_sub(started_ms),
+                    duration_ms: dur,
+                    receipt: Some(receipt),
                 };
             }
 
             if round > 0 && input.should_defer.as_ref().map(|f| f()).unwrap_or(false) {
                 let msg = "Turn deferred between tool rounds.".to_string();
-                self.emit_progress(
-                    &input.on_progress,
-                    &turn_activity_id,
-                    EngineProgressPhase::Deferred,
-                    EngineProgressStatus::Deferred,
-                    &msg,
-                    None,
-                    started_ms,
-                    None,
+                {
+                    let mut sess = self.session.lock().unwrap();
+                    Self::heal_dangling_tools(&mut sess, "[Turn deferred between tool rounds]");
+                }
+                self.emit_progress_internal(&input.on_progress, &turn_activity_id, EngineProgressPhase::Deferred, EngineProgressStatus::Deferred, &msg, None, started_ms, None);
+                let dur = now_ms().saturating_sub(started_ms);
+                let receipt = self.build_and_persist_turn_receipt(
+                    turn_num, frame_index, &cfg.provider, &cfg.api_endpoint, &active_model, effective_posture,
+                    EngineTickOutcome::Deferred, dur, accumulated_usage, last_prefix_hash, last_prefix_status, snap_before, &all_tool_results,
                 );
                 return EngineTickResult {
                     frame_index,
@@ -427,167 +446,148 @@ impl AgentEngine {
                     response: msg,
                     tool_results: all_tool_results,
                     safe_to_retry: Some(!tools_admitted),
-                    duration_ms: now_ms().saturating_sub(started_ms),
+                    duration_ms: dur,
+                    receipt: Some(receipt),
                 };
             }
 
+            let unlocked_before = self.tools.unlocked_tools.lock().unwrap().len();
             let routing_hint = {
                 let sess = self.session.lock().unwrap();
                 let tail = sess.messages().last().map(|m| m.content.as_str()).unwrap_or("");
                 format!("{}\n{}", input.prompt, tail)
             };
             let openai_tools = self.tools.select_tool_schemas_for(&routing_hint, self.forbid_swarm_delegation);
+            let unlocked_after = self.tools.unlocked_tools.lock().unwrap().len();
+            if unlocked_after != unlocked_before {
+                self.prefix_tracker.lock().unwrap().declare_repin("tool_schema_unlock");
+            }
+
             let tool_defs_tokens = estimate_text_tokens(&Value::Array(openai_tools.clone()).to_string());
             let soul = Some(self.tools.skill_catalog.lock().unwrap().active_soul.clone());
             let spec = crate::domain::prompt_spec::SystemPromptSpec::for_turn(&cfg, authority, soul);
+            let pinned_sys = self.pinned_system_prompt.lock().unwrap().clone();
             let (messages_for_provider, composed_summary) = {
                 let sess = self.session.lock().unwrap();
                 let mem = self.memory.lock().unwrap();
-                PromptComposer::compose_with_spec(&cfg, &self.workspace_root, &sess, &mem, tool_defs_tokens, &spec)
+                PromptComposer::compose_with_posture(
+                    &cfg,
+                    &self.workspace_root,
+                    &sess,
+                    &mem,
+                    tool_defs_tokens,
+                    &spec,
+                    effective_posture,
+                    pinned_sys.as_deref(),
+                )
             };
-            last_composed_summary = composed_summary;
-
-            let max_attempts: u32 = if tools_admitted { 1 } else { 2 };
-            let mut provider_resp = None;
-            let mut last_err = None;
-
-            for attempt in 1..=max_attempts {
-                let conn_id = format!("provider-r{round}-a{attempt}");
-                if attempt == 2 {
-                    if let Some(ref fb) = cfg
-                        .fallback_model
-                        .as_ref()
-                        .filter(|m| !m.is_empty() && **m != active_model)
-                    {
-                        active_model = (*fb).clone();
-                        is_fallback_model = true;
-                    }
-                }
-                self.emit_progress(
-                    &input.on_progress,
-                    &conn_id,
-                    EngineProgressPhase::Connecting,
-                    EngineProgressStatus::Started,
-                    format!("Requesting completion from {active_model} (attempt {attempt})"),
-                    None,
-                    started_ms,
-                    Some(EngineProgressMetadata {
-                        source: Some("provider".to_string()),
-                        scope: Some("turn".to_string()),
-                        attempt: Some(attempt),
-                        item_type: None,
-                        completed_steps: Some(round),
-                        total_steps: Some(max_rounds),
-                    }),
-                );
-
-                let req = ProviderRequest {
-                    model: active_model.clone(),
-                    messages: messages_for_provider.clone(),
-                    tools: openai_tools.clone(),
-                    max_tokens: cfg.max_output_tokens,
-                    temperature: cfg.temperature,
-                };
-
-                match self.provider.complete(req, input.cancel_token.clone()).await {
-                    Ok(resp) => {
-                        self.emit_progress(
-                            &input.on_progress,
-                            &conn_id,
-                            EngineProgressPhase::Thinking,
-                            EngineProgressStatus::InProgress,
-                            "Received model response",
-                            None,
-                            started_ms,
-                            None,
-                        );
-                        provider_resp = Some(resp);
-                        break;
-                    }
-                    Err(err) => {
-                        if err.is_cancelled()
-                            || input.cancel_token.as_ref().map(|t| t.is_cancelled()).unwrap_or(false)
-                        {
-                            let msg = "Turn cancelled by user.".to_string();
-                            self.emit_progress(
-                                &input.on_progress,
-                                &turn_activity_id,
-                                EngineProgressPhase::Cancelled,
-                                EngineProgressStatus::Cancelled,
-                                &msg,
-                                None,
-                                started_ms,
-                                None,
-                            );
-                            return EngineTickResult {
-                                frame_index,
-                                outcome: EngineTickOutcome::Cancelled,
-                                active_model,
-                                is_fallback_model,
-                                is_slash_command: false,
-                                composed_prompt: last_composed_summary,
-                                response: msg,
-                                tool_results: all_tool_results,
-                                safe_to_retry: Some(!tools_admitted),
-                                duration_ms: now_ms().saturating_sub(started_ms),
-                            };
-                        }
-                        let can_retry = !tools_admitted && err.is_retryable() && attempt < max_attempts;
-                        self.emit_progress(
-                            &input.on_progress,
-                            &conn_id,
-                            EngineProgressPhase::Connecting,
-                            EngineProgressStatus::Failed,
-                            format!("Provider attempt {attempt} failed: {err}"),
-                            None,
-                            started_ms,
-                            Some(EngineProgressMetadata {
-                                source: Some("provider".to_string()),
-                                scope: Some("turn".to_string()),
-                                attempt: Some(attempt),
-                                item_type: None,
-                                completed_steps: Some(round),
-                                total_steps: Some(max_rounds),
-                            }),
-                        );
-                        last_err = Some(err);
-                        if !can_retry {
-                            break;
-                        }
-                    }
+            if pinned_sys.is_none() {
+                if let Some(sys_msg) = messages_for_provider.first().filter(|m| m.role == Role::System) {
+                    *self.pinned_system_prompt.lock().unwrap() = Some(sys_msg.content.clone());
                 }
             }
+            let sys_str = messages_for_provider.first().map(|m| m.content.as_str()).unwrap_or("");
+            let fp = PrefixFingerprint::from_wire_prefix(sys_str, &openai_tools);
+            last_prefix_hash = fp.combined_hash.clone();
+            last_prefix_status = self.prefix_tracker.lock().unwrap().record_prefix(fp).label();
+            *self.last_prefix_status.lock().unwrap() = last_prefix_status.clone();
+            last_composed_summary = composed_summary;
 
-            let Some(resp) = provider_resp else {
-                let err_str = last_err
-                    .map(|e| e.to_string())
-                    .unwrap_or_else(|| "Unknown provider error".to_string());
-                self.emit_progress(
+            let resp = match self
+                .complete_round_with_backoff(
+                    &cfg,
+                    round,
+                    max_rounds,
+                    tools_admitted,
+                    &mut active_model,
+                    &mut is_fallback_model,
+                    &messages_for_provider,
+                    &openai_tools,
+                    &input.cancel_token,
                     &input.on_progress,
-                    &turn_activity_id,
-                    EngineProgressPhase::Failed,
-                    EngineProgressStatus::Failed,
-                    &err_str,
-                    None,
                     started_ms,
-                    None,
-                );
-                return EngineTickResult {
-                    frame_index,
-                    outcome: EngineTickOutcome::Failed,
-                    active_model,
-                    is_fallback_model,
-                    is_slash_command: false,
-                    composed_prompt: last_composed_summary,
-                    response: err_str,
-                    tool_results: all_tool_results,
-                    safe_to_retry: Some(!tools_admitted),
-                    duration_ms: now_ms().saturating_sub(started_ms),
-                };
+                )
+                .await
+            {
+                Ok(r) => r,
+                Err((ProviderError::Cancelled, _)) => {
+                    let msg = "Turn cancelled by user.".to_string();
+                    {
+                        let mut sess = self.session.lock().unwrap();
+                        Self::heal_dangling_tools(&mut sess, "[Turn cancelled by user]");
+                    }
+                    self.emit_progress_internal(&input.on_progress, &turn_activity_id, EngineProgressPhase::Cancelled, EngineProgressStatus::Cancelled, &msg, None, started_ms, None);
+                    let dur = now_ms().saturating_sub(started_ms);
+                    let receipt = self.build_and_persist_turn_receipt(
+                        turn_num, frame_index, &cfg.provider, &cfg.api_endpoint, &active_model, effective_posture,
+                        EngineTickOutcome::Cancelled, dur, accumulated_usage, last_prefix_hash, last_prefix_status, snap_before, &all_tool_results,
+                    );
+                    return EngineTickResult {
+                        frame_index,
+                        outcome: EngineTickOutcome::Cancelled,
+                        active_model,
+                        is_fallback_model,
+                        is_slash_command: false,
+                        composed_prompt: last_composed_summary,
+                        response: msg,
+                        tool_results: all_tool_results,
+                        safe_to_retry: Some(!tools_admitted),
+                        duration_ms: dur,
+                        receipt: Some(receipt),
+                    };
+                }
+                Err((err, envelope)) => {
+                    let is_unsent_auth = envelope
+                        .as_ref()
+                        .and_then(|e| e.code.as_deref())
+                        == Some(CREDENTIAL_REJECTED_UNSENT_CODE);
+                    if is_unsent_auth {
+                        let mut sess = self.session.lock().unwrap();
+                        sess.truncate_active_messages(1);
+                    } else {
+                        let mut sess = self.session.lock().unwrap();
+                        Self::heal_dangling_tools(&mut sess, "[Turn halted due to provider error]");
+                    }
+                    let err_str = if let Some(env) = envelope {
+                        let code_tag = env.code.as_deref().map(|c| format!("[{c}] ")).unwrap_or_default();
+                        format!("{code_tag}{} — {}", env.message, env.remediation)
+                    } else {
+                        err.to_string()
+                    };
+                    self.emit_progress_internal(&input.on_progress, &turn_activity_id, EngineProgressPhase::Failed, EngineProgressStatus::Failed, &err_str, None, started_ms, None);
+                    let dur = now_ms().saturating_sub(started_ms);
+                    let receipt = self.build_and_persist_turn_receipt(
+                        turn_num, frame_index, &cfg.provider, &cfg.api_endpoint, &active_model, effective_posture,
+                        EngineTickOutcome::Failed, dur, accumulated_usage, last_prefix_hash, last_prefix_status, snap_before, &all_tool_results,
+                    );
+                    return EngineTickResult {
+                        frame_index,
+                        outcome: EngineTickOutcome::Failed,
+                        active_model,
+                        is_fallback_model,
+                        is_slash_command: false,
+                        composed_prompt: last_composed_summary,
+                        response: err_str,
+                        tool_results: all_tool_results,
+                        safe_to_retry: Some(!tools_admitted),
+                        duration_ms: dur,
+                        receipt: Some(receipt),
+                    };
+                }
             };
+
+            let req_for_usage = ProviderRequest {
+                model: active_model.clone(),
+                messages: messages_for_provider,
+                tools: openai_tools,
+                max_tokens: cfg.max_output_tokens,
+                temperature: cfg.temperature,
+            };
+            Self::accumulate_usage(&mut accumulated_usage, &req_for_usage, &resp);
 
             if resp.tool_calls.is_empty() {
                 final_response = resp.content.unwrap_or_default();
+                completed_with_assistant_reply = true;
                 let mut sess = self.session.lock().unwrap();
                 sess.add_message(SessionMessage::new(Role::Assistant, final_response.clone()));
                 if sess.messages().len() > cfg.max_turns {
@@ -637,7 +637,7 @@ impl AgentEngine {
                 .collect();
 
             let batch_id = format!("tools-r{round}");
-            self.emit_progress(
+            self.emit_progress_internal(
                 &input.on_progress,
                 &batch_id,
                 EngineProgressPhase::Tool,
@@ -679,6 +679,9 @@ impl AgentEngine {
                         }
                         (governed.output_text, governed.spill_id)
                     };
+                    if canonical_tool_name(&rec.name) == "tool_search" {
+                        self.prefix_tracker.lock().unwrap().declare_repin("tool_search_unlock");
+                    }
 
                     let wire_payload = if rec.success {
                         json!({ "success": true, "output": out_text, "spillId": spill_id })
@@ -703,13 +706,10 @@ impl AgentEngine {
                 .iter()
                 .rev()
                 .take(resp.tool_calls.len())
-                .map(|r| {
-                    let status = if r.success { "ok" } else { "err" };
-                    format!("{} ({}, {}ms)", r.name, status, r.duration_ms)
-                })
+                .map(|r| format!("{} ({}, {}ms)", r.name, if r.success { "ok" } else { "err" }, r.duration_ms))
                 .collect();
 
-            self.emit_progress(
+            self.emit_progress_internal(
                 &input.on_progress,
                 &batch_id,
                 EngineProgressPhase::Tool,
@@ -728,30 +728,28 @@ impl AgentEngine {
             );
         }
 
-        self.emit_progress(
-            &input.on_progress,
-            &turn_activity_id,
-            EngineProgressPhase::Completed,
-            EngineProgressStatus::Completed,
-            "Turn completed",
-            None,
-            started_ms,
-            None,
-        );
-
         if final_response.trim().is_empty() {
             final_response = if !all_tool_results.is_empty() {
                 let success_count = all_tool_results.iter().filter(|r| r.success).count();
                 let tool_names: Vec<String> = all_tool_results.iter().map(|r| r.name.clone()).collect();
-                format!(
-                    "Completed {} tool action(s) successfully: {}.",
-                    success_count,
-                    tool_names.join(", ")
-                )
+                format!("Completed {} tool action(s) successfully: {}.", success_count, tool_names.join(", "))
             } else {
                 "Turn completed with no text response from model.".to_string()
             };
         }
+
+        // Heal dangling Role::Tool tail if max_rounds was reached without a final text message!
+        if !completed_with_assistant_reply {
+            let mut sess = self.session.lock().unwrap();
+            Self::heal_dangling_tools(&mut sess, &final_response);
+        }
+
+        self.emit_progress_internal(&input.on_progress, &turn_activity_id, EngineProgressPhase::Completed, EngineProgressStatus::Completed, "Turn completed", None, started_ms, None);
+        let dur = now_ms().saturating_sub(started_ms);
+        let receipt = self.build_and_persist_turn_receipt(
+            turn_num, frame_index, &cfg.provider, &cfg.api_endpoint, &active_model, effective_posture,
+            EngineTickOutcome::Completed, dur, accumulated_usage, last_prefix_hash, last_prefix_status, snap_before, &all_tool_results,
+        );
 
         EngineTickResult {
             frame_index,
@@ -763,7 +761,8 @@ impl AgentEngine {
             response: final_response,
             tool_results: all_tool_results,
             safe_to_retry: Some(!tools_admitted),
-            duration_ms: now_ms().saturating_sub(started_ms),
+            duration_ms: dur,
+            receipt: Some(receipt),
         }
     }
 }

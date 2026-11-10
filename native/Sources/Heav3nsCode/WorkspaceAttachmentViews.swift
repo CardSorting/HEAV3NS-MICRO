@@ -66,6 +66,7 @@ final class AttachmentTokenBar: NSStackView {
 final class ComposerView: NSTextView {
     var submit: (() -> Void)?
     var onFileDropped: ((URL) -> Void)?
+    var onStepPosture: (() -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -103,15 +104,23 @@ final class ComposerView: NSTextView {
         super.draw(dirtyRect)
         guard string.isEmpty, !hasMarkedText() else { return }
         let origin = NSPoint(x: textContainerOrigin.x + (textContainer?.lineFragmentPadding ?? 5), y: textContainerOrigin.y)
-        ("Message LUMI…" as NSString).draw(at: origin, withAttributes: [.font: font ?? NSFont.systemFont(ofSize: 14), .foregroundColor: NSColor.placeholderTextColor])
+        ("Message LUMI… (⇧⇥ posture · ⌘K commands · /plan · /undo · /btw)" as NSString).draw(at: origin, withAttributes: [.font: font ?? NSFont.systemFont(ofSize: 14), .foregroundColor: NSColor.placeholderTextColor])
     }
     override func didChangeText() { super.didChangeText(); needsDisplay = true }
+    override func doCommand(by selector: Selector) {
+        if selector == #selector(NSResponder.insertBacktab(_:)), !hasMarkedText() {
+            onStepPosture?()
+            return
+        }
+        super.doCommand(by: selector)
+    }
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 36, !hasMarkedText(), !event.modifierFlags.contains(.shift) {
             submit?(); return
         }
         super.keyDown(with: event)
     }
+    func dispose() { submit = nil; onFileDropped = nil; onStepPosture = nil }
 }
 
 final class TranscriptScrollView: NSScrollView {

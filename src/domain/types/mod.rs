@@ -3,6 +3,7 @@ pub mod computer_use_types;
 pub mod environmental_types;
 pub mod learned_knowledge_types;
 pub mod messages;
+pub mod posture_types;
 pub mod progress;
 pub mod runtime;
 pub mod skill_types;
@@ -17,8 +18,9 @@ pub use crate::domain::types::computer_use_types::{IUiElement, IVirtualWindow, U
 pub use crate::domain::types::environmental_types::{BehavioralAffordance, EnvironmentalObservation, EnvironmentalRegion, IBehavioralAffordance, IEnvironmentalObservation, RegionKind};
 pub use crate::domain::types::learned_knowledge_types::{EnvironmentalReconciliationReport, ILearnedPattern, IReconciliationReport, LearnedInteractionPattern, LearnedWorkflowProcedure};
 pub use crate::domain::types::messages::{estimate_messages_tokens, extract_text_tool_calls, Role, SessionMessage, ToolCall, ToolCallFunction};
+pub use crate::domain::types::posture_types::{evaluate_tool_posture, AuthorizationVerdict, ExecutionPosture, PostureEvaluation, RepoConstitution, RepoConstitutionRule, UserApprovalChoice};
 pub use crate::domain::types::progress::{EngineProgressEvent, EngineProgressMetadata, EngineProgressPhase, EngineProgressStatus, ToolExecutionRecord};
-pub use crate::domain::types::runtime::{AgentConfig, CancellationToken, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel};
+pub use crate::domain::types::runtime::{AgentConfig, ApprovalGateCallback, CancellationToken, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel};
 pub use crate::domain::types::skill_types::{GovernedOutput, SkillManifest, WorkspacePromptFacts};
 pub use crate::domain::types::spatial_types::{AssuranceVerdict, SpatialActionContract, SpatialError, SpatialScene, SpatialTarget, TargetProvenance};
 pub use crate::domain::types::swarm_intelligence_types::{ConsultationRiskLevel, ISpecialistInsight, ISwarmConsultationResponse, SpecialistInsight, SwarmConsultationRequest, SwarmConsultationResponse};
@@ -26,4 +28,3 @@ pub use crate::domain::types::tick_result::{finalize_provider_response, is_retry
 pub use crate::domain::types::tool_schedule::{MutationTransaction, RollbackResult, ScheduledToolCall};
 pub use crate::domain::types::tool_types::{ParamSchema, ParamType, SchemaValidationResult, ToolSpec};
 pub use crate::domain::types::vfs_types::{VfsDiskBaseline, VfsFileOverlay};
-

@@ -147,6 +147,7 @@ impl ILlmProvider for ScriptedProvider {
                     status,
                     body: message,
                     retryable: is_retryable_http_status(status),
+                    retry_after_ms: None,
                 }),
                 ProviderStep::WaitForAbort => {
                     if let Some(token) = cancel {

@@ -1,7 +1,12 @@
 // [LAYER: CORE]
 use crate::domain::types::tool_types::{ParamSchema, ParamType, ToolSpec};
 
-/// Returns the 29 built-in tool specifications registered by [`ToolRegistry`](crate::core::tool_registry::ToolRegistry).
+/// Abstract contract for built-in and plugin tool specification providers.
+pub trait IToolSpecProvider {
+    fn provide_specs(&self) -> Vec<ToolSpec>;
+}
+
+/// Returns the 31 built-in tool specifications registered by [`ToolRegistry`](crate::core::tool_registry::ToolRegistry).
 pub fn builtin_tool_specs() -> Vec<ToolSpec> {
     use ParamType::*;
     vec![
@@ -246,6 +251,26 @@ pub fn builtin_tool_specs() -> Vec<ToolSpec> {
                 ),
                 ("startLine", ParamSchema::opt(Integer, "1-indexed start line")),
                 ("endLine", ParamSchema::opt(Integer, "1-indexed end line")),
+            ],
+        },
+        ToolSpec {
+            name: "tool_search",
+            description: "Search and unlock deferred specialist tools (browser, GUI, vision, diff, anchored edit, swarm, skills) into the bounded active schema set",
+            is_mutating: false,
+            is_core: true,
+            parameters: vec![
+                ("query", ParamSchema::req(String, "Capability keyword or tool name to search (e.g. 'browser', 'diff', 'vision')")),
+                ("limit", ParamSchema::opt(Integer, "Maximum matching tools to unlock (default 4, max 8)")),
+            ],
+        },
+        ToolSpec {
+            name: "execute_tools",
+            description: "Execute a declarative batch of up to 32 tool calls in dependency-safe parallel waves without round-trip latency",
+            is_mutating: true,
+            is_core: true,
+            parameters: vec![
+                ("calls", ParamSchema::req(Array, "Array of { tool, args } objects to execute in sequence/parallel waves")),
+                ("stopOnError", ParamSchema::opt(Boolean, "Stop remaining waves if any step fails (default true)")),
             ],
         },
         ToolSpec {

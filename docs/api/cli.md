@@ -26,6 +26,8 @@ USAGE:
 | :--- | :--- | :--- |
 | *(none)* | *(default)* | Starts an interactive pair-programming REPL session in the terminal. |
 | `context` | `context [--json]` | Displays the visual Context & Prompt Inspector HUD (or JSON telemetry). |
+| `preview-request` | `preview-request [--json]` | Emits the outbound `RequestManifest` (`heav3ns.request_manifest/v1`) byte breakdown & KV-cache pin status without calling a provider. |
+| `receipts` | `receipts [--json]` | Lists auditable `TurnReceipt` (`heav3ns.receipt/v1`) records from `.heav3ns/receipts.jsonl`. |
 | `doctor` | `doctor` | Runs comprehensive diagnostic audit across credentials, SLA, and substrate. |
 | `init` | `init` | Interactive credential and provider onboarding wizard. |
 | `demo` | `demo` | Runs offline guided tour and substrate self-test. |
@@ -87,6 +89,14 @@ When running in interactive REPL mode, commands starting with `/` execute determ
 | `/vision` | `[PATH]` | Inspects image metadata or generates synthetic test SVG/BMP assets. |
 | `/forge` | `[CMD]` | Interacts with the evolutionary Skill DAG and Soul Drop Vault. |
 | `/soul` | *(none)* | Inspects active `SoulProfile` axioms and operational directives. |
+| `/posture` | `[ask\|accept-edits\|plan\|auto\|yolo\|next]` | Inspects or steps the 5-stop `ExecutionPosture` dial without mutating KV-cached tool schemas. |
+| `/plan` / `/ask` / `/auto` | *(none)* | Instant shortcuts to switch into `Plan`, `Ask`, or `AutoReview` execution posture. |
+| `/undo` | `[--force]` | Undoes the last turn's file edits via `WorkspaceSnapshotCas` (`WouldBlock`-protected against post-turn manual edits). |
+| `/restore` | `<SNAPSHOT_ID>` | Restores workspace files from a content-addressed CAS snapshot. |
+| `/diff` | *(none)* | Renders positional LCS unified diffs across modified workspace files (works with or without Git). |
+| `/receipts` | `[N]` | Displays recent `TurnReceipt` (`heav3ns.receipt/v1`) summaries, honest billing, and claim ceilings. |
+| `/preview-request` | `[json]` | Inspects exact canonical outbound wire byte breakdown (`heav3ns.request_manifest/v1`). |
+| `/model` | `[NAME\|auto]` | Switches model (declaring an authorized KV-cache repin) or probes local Ollama via `/model auto`. |
 | `/legion` | `[TASK]` | Classifies task into a 7-specialist topological swarm formation. |
 
 ---

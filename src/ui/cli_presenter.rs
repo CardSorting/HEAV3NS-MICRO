@@ -1,5 +1,6 @@
 // [LAYER: UI]
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::io;
@@ -36,14 +37,26 @@ impl Heav3nsUserConfig {
     pub fn save(&self) -> io::Result<()> {
         let dir = Self::config_dir();
         fs::create_dir_all(&dir)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
+        }
         let path = Self::config_path();
         let json_str = serde_json::to_string_pretty(self)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        fs::write(path, json_str)
+        fs::write(&path, json_str)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+        }
+        Ok(())
     }
 
-    /// Loads key-value pairs from workspace `.env` file if it exists, without overriding existing env vars.
-    pub fn load_dotenv(workspace: &Path) {
+    /// Parses workspace `.env` into an immutable map without mutating process-wide `std::env` (thread-safe under Tokio).
+    pub fn read_dotenv_map(workspace: &Path) -> BTreeMap<String, String> {
+        let mut map = BTreeMap::new();
         let env_file = workspace.join(".env");
         if let Ok(content) = fs::read_to_string(env_file) {
             for line in content.lines() {
@@ -51,15 +64,25 @@ impl Heav3nsUserConfig {
                 if trimmed.is_empty() || trimmed.starts_with('#') {
                     continue;
                 }
-                if let Some((k, v)) = trimmed.split_once('=') {
+                let stripped = trimmed.strip_prefix("export ").unwrap_or(trimmed).trim();
+                if let Some((k, v)) = stripped.split_once('=') {
                     let key = k.trim();
                     let val = v.trim().trim_matches('"').trim_matches('\'');
-                    if env::var(key).is_err() && !val.is_empty() {
-                        env::set_var(key, val);
+                    if !key.is_empty() && !val.is_empty() {
+                        map.insert(key.to_string(), val.to_string());
                     }
                 }
             }
         }
+        map
+    }
+
+    /// Resolves an environment variable first from `std::env`, then from the parsed workspace `.env` map.
+    pub fn resolve_env_or_dotenv(key: &str, dotenv: &BTreeMap<String, String>) -> Option<String> {
+        env::var(key)
+            .ok()
+            .filter(|s| !s.is_empty())
+            .or_else(|| dotenv.get(key).cloned().filter(|s| !s.is_empty()))
     }
 }
 
@@ -74,6 +97,7 @@ pub struct CliOptions {
     pub endpoint: Option<String>,
     pub prompt: Option<String>,
     pub stress: bool,
+    pub last_only: bool,
     pub tests_dir: Option<PathBuf>,
 }
 
@@ -87,6 +111,8 @@ pub enum RunMode {
     Interactive,
     Doctor,
     Context,
+    Receipts,
+    PreviewRequest,
     Init,
     Demo,
     Tools,
@@ -111,6 +137,7 @@ pub fn parse_args_from(args: Vec<String>) -> CliOptions {
         endpoint: None,
         prompt: None,
         stress: false,
+        last_only: false,
         tests_dir: None,
     };
 
@@ -126,6 +153,15 @@ pub fn parse_args_from(args: Vec<String>) -> CliOptions {
             }
             "context" | "--context" => {
                 opts.mode = RunMode::Context;
+            }
+            "receipts" | "--receipts" => {
+                opts.mode = RunMode::Receipts;
+            }
+            "preview-request" | "--preview-request" => {
+                opts.mode = RunMode::PreviewRequest;
+            }
+            "--last" => {
+                opts.last_only = true;
             }
             "init" | "--init" | "setup" => {
                 opts.mode = RunMode::Init;
@@ -243,7 +279,9 @@ START HERE:
   heav3ns-micro demo             Run instant zero-key guided tour of tools, VFS & memory
   heav3ns-micro doctor           Audit environment credentials, local AI, and runtime SLA
   heav3ns-micro context          Inspect token budget HUD, KV-cache prefix, and tool routing
-  heav3ns-micro tools            Explore 29 built-in tools across all 7 Sovereign Pillars
+  heav3ns-micro preview-request  Zero-side-effect outbound wire manifest & byte accounting
+  heav3ns-micro receipts         Inspect prose-free CAS turn receipts (--last, --json)
+  heav3ns-micro tools            Explore 31 built-in tools across all 7 Sovereign Pillars
 
 CORE COMMANDS:
   run <PROMPT>                   Execute a single agent turn and output the result
@@ -252,14 +290,16 @@ CORE COMMANDS:
   flight                         Run the 5-scenario Agent Flight Test suite (FT-01..FT-05)
   bench                          Run substrate micro-benchmarks + flight suite
   smoke                          Run deterministic runtime self-check & smoke verification
-  stdio                          Run headless newline-delimited JSONL stdio worker protocol
+  stdio                          Run multiplexed async JSONL stdio worker protocol
 
 OPTIONS:
   -m, --model <NAME>             Model name (e.g. gpt-5.6-terra, gemini-2.0-flash, llama3.2)
-  --provider <NAME>              Provider wire protocol: openai, gemini, anthropic, ollama
+  --provider <NAME>              Provider: openai, gemini, anthropic, openrouter, deepseek, groq, xai, ollama
   --endpoint <URL>               Custom API endpoint URL (default depends on provider)
   --cwd <DIR>                    Workspace root directory (default: current directory)
   -p, --prompt <TEXT>            Execute single agent prompt and exit
+  --last                         Show only the latest turn receipt (with `receipts`)
+  --json                         Emit machine-readable JSON output
   --format <text|json>           Output format for flight and bench (default: text)
   -o, --output <PATH>            Write flight report JSON to file
   -h, --help                     Show this help message
@@ -268,15 +308,17 @@ SUPPORTED PROVIDERS:
   • OpenAI:        export OPENAI_API_KEY=\"sk-...\" (default model: gpt-5.6-terra)
   • Google Gemini: export GEMINI_API_KEY=\"...\"   (heav3ns-micro --provider gemini -m gemini-2.0-flash)
   • Anthropic:     export ANTHROPIC_API_KEY=\"...\" (heav3ns-micro --provider anthropic -m claude-3-5-sonnet-20241022)
-  • Ollama:        Zero key needed! (heav3ns-micro --provider ollama -m llama3.2)
+  • OpenRouter:    export OPENROUTER_API_KEY=\"...\" (heav3ns-micro --provider openrouter -m anthropic/claude-3.7-sonnet)
+  • DeepSeek/Groq: export DEEPSEEK_API_KEY / GROQ_API_KEY / XAI_API_KEY
+  • Ollama:        Zero key needed! Auto-detected on localhost:11434 (heav3ns-micro --provider ollama -m llama3.2)
   • Local/vLLM:    heav3ns-micro --endpoint http://localhost:8000/v1 -m custom-model
 
 INTERACTIVE REPL SLASH COMMANDS:
-  /help       List all 25+ slash commands     /context    Visual token budget & prompt HUD
-  /prompt     Inspect rendered system prompt  /diff       Unified diff of staged changes
-  /demo       Run offline guided tour         /commit     Commit staged VFS changes to disk
-  /doctor     Inspect SLA and environment     /discard    Discard staged changes safely
-  /tools      Core vs on-demand tool routing  /memory     Inspect long-term LUMI-MEMORY
+  /help       List all 28+ slash commands     /mode       Step 5-stop execution posture
+  /context    Visual token budget & prompt HUD/preview    Outbound wire manifest & bytes
+  /receipts   Prose-free CAS turn receipts    /undo       Path-scoped CAS turn rollback
+  /diff       Unified LCS diff of changes     /commit     Commit staged VFS changes to disk
+  /doctor     Inspect SLA and environment     /tools      Core + 8-LRU deferred tool status
   /stats      Arena & token allocation stats  /exit       Exit interactive REPL
 
 EXAMPLES:
@@ -340,5 +382,13 @@ mod tests {
         assert_eq!(opt_ver.mode, RunMode::Version);
         let opt_v = parse_args_from(vec!["-v".into()]);
         assert_eq!(opt_v.mode, RunMode::Version);
+
+        let opt_rec = parse_args_from(vec!["receipts".into(), "--last".into(), "--json".into()]);
+        assert_eq!(opt_rec.mode, RunMode::Receipts);
+        assert!(opt_rec.last_only);
+        assert_eq!(opt_rec.format, "json");
+
+        let opt_prev = parse_args_from(vec!["preview-request".into(), "--json".into()]);
+        assert_eq!(opt_prev.mode, RunMode::PreviewRequest);
     }
 }
