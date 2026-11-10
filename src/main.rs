@@ -87,6 +87,11 @@ async fn main() {
         RunMode::Doctor => {
             run_doctor_cli(&opts.cwd, opts.provider.as_deref(), opts.model.as_deref());
         }
+        RunMode::Context => {
+            let (engine, _) = build_engine(&opts);
+            let fmt = if opts.format.eq_ignore_ascii_case("json") { "json" } else { "" };
+            println!("{}", engine.render_context_hud(fmt));
+        }
         RunMode::Init => {
             if let Err(e) = run_init_wizard(&opts.cwd) {
                 eprintln!("Initialization wizard error: {e}");
@@ -225,9 +230,9 @@ async fn main() {
             }
 
             let valid_slash_cmds = [
-                "/help", "/stats", "/vfs", "/diff", "/commit", "/discard", "/tools",
+                "/help", "/context", "/prompt", "/stats", "/vfs", "/diff", "/commit", "/discard", "/tools",
                 "/guide", "/demo", "/memory", "/skills", "/soul", "/forge", "/doctor",
-                "/computer", "/browser", "/vision", "/legion", "/compact", "/model",
+                "/computer", "/spatial", "/browser", "/vision", "/legion", "/compact", "/model",
                 "/snapshot", "/snapshots", "/rewind", "/undo", "/clear", "/health",
                 "/pwd", "/workspace", "/cd",
             ];
@@ -315,6 +320,14 @@ async fn main() {
                         }
                         if matches!(trimmed, "stats") {
                             println!("{}", engine.tick(EngineTickInput::new("/stats")).await.response);
+                            continue;
+                        }
+                        if matches!(trimmed, "context") {
+                            println!("{}", engine.render_context_hud(""));
+                            continue;
+                        }
+                        if matches!(trimmed, "prompt") {
+                            println!("{}", engine.render_prompt_inspector(""));
                             continue;
                         }
                         if matches!(trimmed, "vfs") {

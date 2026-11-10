@@ -22,3 +22,17 @@ pub struct GovernedOutput {
     pub was_truncated: bool,
     pub spill_id: Option<String>,
 }
+
+/// Cached, zero-I/O snapshot of workspace manifests, Joyzoning topology, and sanitized governance digest.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WorkspacePromptFacts {
+    pub manifests: Vec<String>,
+    pub joyzoning_detected: bool,
+    pub os: String,
+    pub shell: String,
+    pub governance_digest: Option<String>,
+    #[serde(default)]
+    pub governance_sources: Vec<String>,
+    #[serde(default)]
+    pub governance_warnings: Vec<String>,
+}

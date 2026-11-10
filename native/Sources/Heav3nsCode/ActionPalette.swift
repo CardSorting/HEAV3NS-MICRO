@@ -7,12 +7,29 @@ struct WorkspaceAction {
     var keywords: [String] = []
     let perform: () -> Void
 
+    private func matchesInitialism(_ token: String) -> Bool {
+        guard token.count >= 2, token.allSatisfy({ $0.isLetter || $0.isNumber }) else { return false }
+        let initials = title
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .compactMap(\.first)
+        guard token.count <= initials.count else { return false }
+        var idx = initials.startIndex
+        for ch in token {
+            guard let found = initials[idx...].firstIndex(of: ch) else { return false }
+            idx = initials.index(after: found)
+        }
+        return true
+    }
+
     func matches(_ query: String) -> Bool {
         let terms = query.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
             .split(whereSeparator: { $0.isWhitespace })
         let searchable = ([title] + keywords).joined(separator: " ")
             .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-        return terms.allSatisfy { searchable.contains($0) }
+        if terms.allSatisfy({ searchable.contains($0) }) { return true }
+        if terms.count == 1, let single = terms.first { return matchesInitialism(String(single)) }
+        return false
     }
 
     func matchScore(_ query: String) -> Int {
@@ -26,6 +43,7 @@ struct WorkspaceAction {
         if foldedTitle.contains(foldedQuery) { return 200 }
         let terms = foldedQuery.split(whereSeparator: { $0.isWhitespace })
         if terms.allSatisfy({ foldedTitle.contains($0) }) { return 150 }
+        if terms.count == 1, matchesInitialism(foldedQuery) { return 120 }
         return 50
     }
 }

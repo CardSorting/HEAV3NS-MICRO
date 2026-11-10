@@ -86,6 +86,7 @@ pub enum RunMode {
     SinglePrompt,
     Interactive,
     Doctor,
+    Context,
     Init,
     Demo,
     Tools,
@@ -122,6 +123,9 @@ pub fn parse_args_from(args: Vec<String>) -> CliOptions {
         match args[i].as_str() {
             "doctor" | "--doctor" => {
                 opts.mode = RunMode::Doctor;
+            }
+            "context" | "--context" => {
+                opts.mode = RunMode::Context;
             }
             "init" | "--init" | "setup" => {
                 opts.mode = RunMode::Init;
@@ -228,7 +232,7 @@ pub fn parse_args_from(args: Vec<String>) -> CliOptions {
 pub fn print_help() {
     println!(
         "HEAV3NS-MICRO v0.1.0 — Sovereign Agentic Coding Runtime
-Distilled from LUMI-NEW (zero bloat, 16-MiB Arena slab, self-healing tool parser, 28 native tools)
+Distilled from LUMI-NEW (zero bloat, 16-MiB Arena slab, self-healing tool parser, 29 native tools)
 
 USAGE:
   heav3ns-micro [COMMAND] [OPTIONS] [PROMPT]
@@ -238,7 +242,8 @@ START HERE:
   heav3ns-micro init             Run interactive setup wizard to configure providers & keys
   heav3ns-micro demo             Run instant zero-key guided tour of tools, VFS & memory
   heav3ns-micro doctor           Audit environment credentials, local AI, and runtime SLA
-  heav3ns-micro tools            Explore 28 built-in tools across all 7 Sovereign Pillars
+  heav3ns-micro context          Inspect token budget HUD, KV-cache prefix, and tool routing
+  heav3ns-micro tools            Explore 29 built-in tools across all 7 Sovereign Pillars
 
 CORE COMMANDS:
   run <PROMPT>                   Execute a single agent turn and output the result
@@ -267,10 +272,11 @@ SUPPORTED PROVIDERS:
   • Local/vLLM:    heav3ns-micro --endpoint http://localhost:8000/v1 -m custom-model
 
 INTERACTIVE REPL SLASH COMMANDS:
-  /help       List all 22+ slash commands     /diff       Unified diff of staged changes
+  /help       List all 25+ slash commands     /context    Visual token budget & prompt HUD
+  /prompt     Inspect rendered system prompt  /diff       Unified diff of staged changes
   /demo       Run offline guided tour         /commit     Commit staged VFS changes to disk
   /doctor     Inspect SLA and environment     /discard    Discard staged changes safely
-  /tools      List registered built-in tools  /memory     Inspect long-term LUMI-MEMORY
+  /tools      Core vs on-demand tool routing  /memory     Inspect long-term LUMI-MEMORY
   /stats      Arena & token allocation stats  /exit       Exit interactive REPL
 
 EXAMPLES:
@@ -302,6 +308,10 @@ mod tests {
     fn test_parse_args_subcommands() {
         let opt_doc = parse_args_from(vec!["doctor".into()]);
         assert_eq!(opt_doc.mode, RunMode::Doctor);
+
+        let opt_ctx = parse_args_from(vec!["context".into(), "--json".into()]);
+        assert_eq!(opt_ctx.mode, RunMode::Context);
+        assert_eq!(opt_ctx.format, "json");
 
         let opt_init = parse_args_from(vec!["init".into()]);
         assert_eq!(opt_init.mode, RunMode::Init);

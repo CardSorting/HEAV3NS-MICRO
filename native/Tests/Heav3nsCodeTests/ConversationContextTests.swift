@@ -46,4 +46,19 @@ final class ConversationContextTests: XCTestCase {
         XCTAssertEqual(history.back(), .context("thread")); XCTAssertEqual(history.back(), .file("test.txt"))
         XCTAssertEqual(history.forward(), .context("thread"))
     }
+    func testContextDisplaysPromptAndToolRoutingMetadataWhenPresent() throws {
+        var enriched = snapshot
+        enriched["promptProfile"] = "standard"
+        enriched["cachePrefixHash"] = "8f4a2c10"
+        enriched["activeTools"] = 17
+        enriched["totalTools"] = 29
+        enriched["governanceSources"] = ["SOUL.md"]
+        enriched["governanceWarnings"] = [".clinerules (quarantined: prompt_injection)"]
+        let details = try XCTUnwrap(ConversationContextDetails(enriched, conversation: "thread"))
+        XCTAssertTrue(details.text.contains("Prompt & tool routing"))
+        XCTAssertTrue(details.text.contains("Profile: standard · prefix fnv1a:8f4a2c10."))
+        XCTAssertTrue(details.text.contains("17 of 29 tools active (12 specialist tools loaded on demand)."))
+        XCTAssertTrue(details.text.contains("Governance rules: SOUL.md."))
+        XCTAssertTrue(details.text.contains("Quarantined rules: .clinerules (quarantined: prompt_injection)."))
+    }
 }

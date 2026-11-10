@@ -74,7 +74,8 @@ pub fn build_hello_response(ws_id: &str, sess_id: &str, workspace_root: &Path) -
             "vision-inspect-v1",
             "skill-forge-v1",
             "soul-vault-v1",
-            "heredoc-defense-v1"
+            "heredoc-defense-v1",
+            "prompt-inspect-v1"
         ]
     })
 }
@@ -266,6 +267,7 @@ pub fn build_context_inspect_response(conversation: &str, engine: &AgentEngine) 
     };
     let saved_memories = engine.memory().lock().unwrap().list_memories().len();
     let q = engine.queue().snapshot();
+    let snap = engine.inspect_context_snapshot("");
     json!({
         "conversation": conversation,
         "activeMessages": active_msgs,
@@ -273,7 +275,30 @@ pub fn build_context_inspect_response(conversation: &str, engine: &AgentEngine) 
         "savedMemories": saved_memories,
         "queued": q.pending_count.min(32),
         "working": q.active,
-        "observedAt": now
+        "observedAt": now,
+        "promptProfile": snap.profile,
+        "modelFamily": snap.model_family,
+        "cachePrefixHash": snap.cache_prefix_hash,
+        "systemTokens": snap.system_total_tokens,
+        "staticPrefixTokens": snap.static_prefix_tokens,
+        "toolSchemaTokens": snap.tool_schema_tokens,
+        "activeTools": snap.tool_active_count,
+        "totalTools": snap.tool_total_count,
+        "contextWindowTokens": snap.context_window_tokens,
+        "usedInputTokens": snap.used_input_tokens,
+        "headroomTokens": snap.headroom_tokens,
+        "governanceSources": snap.governance_sources,
+        "governanceWarnings": snap.governance_warnings
+    })
+}
+
+pub fn build_prompt_inspect_response(mode: &str, engine: &AgentEngine) -> Value {
+    let snap = engine.inspect_context_snapshot("");
+    let rendered = engine.render_prompt_inspector(mode);
+    json!({
+        "snapshot": snap,
+        "rendered": rendered,
+        "observedAt": now_ms() as f64
     })
 }
 

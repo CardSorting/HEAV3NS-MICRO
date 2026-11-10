@@ -5,7 +5,7 @@ use crate::domain::compaction::CompactionPolicy;
 use crate::domain::swarm::{classify_task_for_legion, SwarmAssignment};
 use crate::domain::types::runtime::{CancellationToken, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel};
 use crate::plumbing::hash_and_math::{fnv1a_32, now_ms};
-use crate::ui::rpc_dispatch::{build_context_history_response, build_context_inspect_response, build_hello_response, build_model_catalog, build_model_discovery, build_model_selection, build_spider_check_response, build_state_inspect_response, handle_files_rpc, handle_memory_rpc, progress_to_walkthrough_activity, sha256_hex};
+use crate::ui::rpc_dispatch::{build_context_history_response, build_context_inspect_response, build_hello_response, build_model_catalog, build_model_discovery, build_model_selection, build_prompt_inspect_response, build_spider_check_response, build_state_inspect_response, handle_files_rpc, handle_memory_rpc, progress_to_walkthrough_activity, sha256_hex};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::io::{self, BufRead, Write};
@@ -310,7 +310,12 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>) {
                 let task_desc = params.get("objective").or_else(|| params.get("task")).and_then(|v| v.as_str()).unwrap_or("Verify system architecture and execute requested changes");
                 let strategy = params.get("strategy").and_then(|v| v.as_str());
                 let max_spec = params.get("maxSpecialists").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
-                let legion_plan = classify_task_for_legion(task_desc, &[], strategy, max_spec);
+                let target_files: Vec<String> = params
+                    .get("targetFiles")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                    .unwrap_or_default();
+                let legion_plan = classify_task_for_legion(task_desc, &target_files, strategy, max_spec);
                 println!("{}", json!({ "v": 1, "kind": "response", "id": req_id, "result": legion_plan }));
             }
             "computer.action" | "computer.capture" | "computer.health" => {
@@ -417,6 +422,10 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>) {
             "context.inspect" => {
                 let conv = params.get("conversation").and_then(|v| v.as_str()).unwrap_or(&current_conversation);
                 println!("{}", json!({ "v": 1, "kind": "response", "id": req_id, "result": build_context_inspect_response(conv, &engine) }));
+            }
+            "prompt.inspect" => {
+                let mode = params.get("mode").and_then(|v| v.as_str()).unwrap_or("");
+                println!("{}", json!({ "v": 1, "kind": "response", "id": req_id, "result": build_prompt_inspect_response(mode, &engine) }));
             }
             "context.history" => {
                 let conv = params.get("conversation").and_then(|v| v.as_str()).unwrap_or(&current_conversation);

@@ -113,13 +113,15 @@ pub struct AgentConfig {
     pub api_key: Option<String>,
 }
 
+pub const DEFAULT_SYSTEM_PROMPT: &str = "You are HEAV3NS-MICRO, a sovereign local-first software engineering agent. Own the requested outcome from inspection through verified completion.";
+
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             provider: "openai".to_string(),
             model_name: "gpt-5.6-terra".to_string(),
             fallback_model: Some("gpt-4o-mini".to_string()),
-            system_prompt: "You are HEAV3NS-MICRO, a hyper-efficient local-first coding agent runtime. Inspect context, make scoped changes, verify evidence, and hand control back cleanly.".to_string(),
+            system_prompt: DEFAULT_SYSTEM_PROMPT.to_string(),
             max_turns: 40,
             max_tool_rounds: Some(32),
             context_window_tokens: 128_000,

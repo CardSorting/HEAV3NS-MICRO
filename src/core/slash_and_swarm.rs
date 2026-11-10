@@ -1,18 +1,64 @@
 // [LAYER: CORE]
 use crate::core::engine::AgentEngine;
 use crate::domain::compaction::CompactionPolicy;
+use crate::domain::prompt_spec::SystemPromptSpec;
 use crate::domain::swarm::{classify_task_for_legion, SwarmAssignment, SwarmFormationResult, SwarmItemReport};
 use crate::domain::types::messages::{estimate_messages_tokens, Role, SessionMessage};
+use crate::domain::types::progress::ToolExecutionRecord;
 use crate::domain::types::runtime::{CancellationToken, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel};
-use crate::infrastructure::vfs_store::{workspace_revision, SkillsIngestor};
+use crate::domain::types::tool_schedule::ScheduledToolCall;
+use crate::infrastructure::vfs_store::{workspace_revision, SkillsIngestor, WorkspacePromptProbe};
 use crate::plumbing::hash_and_math::now_ms;
-use serde_json::json;
+use crate::plumbing::text_tokens::canonical_tool_name;
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 pub type SwarmSlashOrchestrator = AgentEngine;
 
 impl AgentEngine {
+    pub(crate) async fn execute_turn_tool_batch(
+        &self,
+        scheduled_calls: &[ScheduledToolCall],
+        authority: ExecutionAuthorityLevel,
+        cancel_token: Option<&CancellationToken>,
+    ) -> Vec<ToolExecutionRecord> {
+        if self.forbids_swarm_delegation()
+            && scheduled_calls.iter().any(|c| canonical_tool_name(&c.name) == "engage_swarm")
+        {
+            let mut records = Vec::with_capacity(scheduled_calls.len());
+            for call in scheduled_calls {
+                if canonical_tool_name(&call.name) == "engage_swarm" {
+                    records.push(ToolExecutionRecord {
+                        name: call.name.clone(),
+                        call_id: Some(call.id.clone()),
+                        args: Some(call.args.clone()),
+                        output: Value::Null,
+                        success: false,
+                        denied: Some(true),
+                        output_limited: None,
+                        error: Some(
+                            "Recursive swarm delegation ('engage_swarm') is forbidden inside a Legion specialist."
+                                .to_string(),
+                        ),
+                        duration_ms: 0,
+                    });
+                } else {
+                    records.push(
+                        self.tools()
+                            .execute_single(call, self.workspace_root(), authority, cancel_token)
+                            .await,
+                    );
+                }
+            }
+            records
+        } else {
+            self.tools()
+                .execute_batch(scheduled_calls, self.workspace_root(), authority, cancel_token)
+                .await
+        }
+    }
+
     /// Executes a dependency-ordered multi-agent swarm formation in topological waves.
     pub async fn run_swarm(
         &self,
@@ -75,6 +121,8 @@ impl AgentEngine {
             }
 
             waves += 1;
+            let swarm_facts = WorkspacePromptProbe::probe_cached(self.workspace_root());
+            let swarm_skills = SkillsIngestor::discover(self.workspace_root());
             let mut wave_futs = Vec::with_capacity(ready_ids.len());
             for id in ready_ids {
                 let assign = pending.remove(&id).unwrap();
@@ -85,10 +133,8 @@ impl AgentEngine {
                     .collect();
 
                 let mut child_cfg = self.config_snapshot();
-                child_cfg.system_prompt = format!(
-                    "{}\n[Swarm Specialist Role: {}]\nParent Objective: {}",
-                    child_cfg.system_prompt, assign.role, objective
-                );
+                let spec = SystemPromptSpec::for_specialist(&assign.role, &objective, assign.assigned_files.clone());
+                child_cfg.system_prompt = spec.render(&child_cfg, self.workspace_root(), &swarm_facts, &swarm_skills);
 
                 let child_engine = AgentEngine::with_shared_substrate(
                     self.workspace_root().to_path_buf(),
@@ -96,17 +142,10 @@ impl AgentEngine {
                     Arc::clone(self.provider()),
                     Arc::clone(self.memory()),
                     Arc::clone(self.tools()),
-                );
+                )
+                .without_swarm_delegation();
 
-                let prompt = if dep_context.is_empty() {
-                    assign.objective.clone()
-                } else {
-                    format!(
-                        "{}\n\n[Upstream Specialist Results]\n{}",
-                        assign.objective,
-                        dep_context.join("\n")
-                    )
-                };
+                let prompt = SystemPromptSpec::format_swarm_task_prompt(&assign.objective, &dep_context);
 
                 let tok = cancel_token.clone();
                 let def = should_defer.clone();
@@ -173,12 +212,14 @@ impl AgentEngine {
         let reply = match cmd.as_str() {
             "/help" => [
                 "Available slash commands:",
+                "  /context [json]     - Visual token budget HUD, KV-cache prefix, and tool routing",
+                "  /prompt [mode]      - Inspect active system prompt (prefix|compact|specialist|json)",
                 "  /stats              - Session, arena, cache, and token statistics",
                 "  /vfs                - Show staged Virtual File System changes",
                 "  /diff               - Render unified diff of staged VFS or workspace changes",
                 "  /commit             - Commit staged VFS mutations to disk",
                 "  /discard            - Discard staged VFS mutations",
-                "  /tools              - List registered built-in tools across 7 Sovereign Pillars",
+                "  /tools              - List core, unlocked, and on-demand built-in tools (29 total)",
                 "  /guide              - Display quickstart setup and onboarding guide",
                 "  /demo               - Information on running the offline interactive tour",
                 "  /memory [query]     - List or search persistent LUMI-MEMORY/1 facts",
@@ -187,11 +228,12 @@ impl AgentEngine {
                 "  /forge <prompt>     - Synthesize a new custom skill into the Skill Tree DAG",
                 "  /doctor             - Audit Computer Use SLA health and Skill Tree DAG integrity",
                 "  /computer [action]  - Capture or inspect Set-of-Marks Virtual Display state",
+                "  /spatial [target]   - Audit spatial grounding health or ground a UI selector",
                 "  /browser [url]      - Navigate or snapshot interactive Set-of-Marks DOM tree",
                 "  /vision [path]      - Decode binary image header metadata or generate test SVG",
                 "  /legion <objective> - Classify task into The Legion 7-specialist swarm DAG",
                 "  /compact            - Force rolling LUMI-CONTEXT/1 compaction",
-                "  /model [name]       - Inspect or switch the active model",
+                "  /model [name]       - Inspect or switch the active model and prompt profile",
                 "  /snapshot           - Capture a holistic session + VFS + arena snapshot",
                 "  /snapshots          - List captured snapshots",
                 "  /rewind [index|n]   - Rewind to snapshot or drop last N messages",
@@ -200,6 +242,8 @@ impl AgentEngine {
                 "  /health             - Runtime health, workspace revision, and queue diagnostics",
             ]
             .join("\n"),
+            "/context" => self.render_context_hud(arg),
+            "/prompt" => self.render_prompt_inspector(arg),
             "/stats" => {
                 let sess = self.session().lock().unwrap();
                 let mem = self.memory().lock().unwrap();
@@ -255,14 +299,7 @@ impl AgentEngine {
                 self.vfs().lock().unwrap().clear();
                 "Discarded all staged VFS changes.".to_string()
             }
-            "/tools" => {
-                let specs = crate::core::tool_specs::builtin_tool_specs();
-                let mut lines = vec![format!("Registered Built-in Tools ({} available):", specs.len())];
-                for s in specs {
-                    lines.push(format!("  {:26} - {}", s.name, s.description));
-                }
-                lines.join("\n")
-            }
+            "/tools" => self.render_tools_status(),
             "/guide" | "/quickstart" => [
                 "HEAV3NS-MICRO Quickstart Guide:",
                 "  1. Configure AI Provider:",

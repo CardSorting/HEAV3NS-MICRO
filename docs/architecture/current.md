@@ -1,7 +1,7 @@
 <!-- [LAYER: UI] -->
 # Architecture (Current) — `HEAV3NS-MICRO` & The Seven Sovereign Pillars
 
-This document describes the unified architecture of **HEAV3NS-MICRO** (`v0.1.0`), the distilled intelligence runtime of **[`HEAV3NS — The Sovereign Intelligence Architecture`](../../doc.md)**, encompassing the 64-module Rust substrate and the AppKit Native Desktop IDE client (`HEAV3NS-CODE`) across all five Joyzoning zones (`PLUMBING`, `DOMAIN`, `INFRASTRUCTURE`, `CORE`, `UI`).
+This document describes the unified architecture of **HEAV3NS-MICRO** (`v0.1.0`), the distilled intelligence runtime of **[`HEAV3NS — The Sovereign Intelligence Architecture`](../../doc.md)**, encompassing the 70-module Rust substrate and the AppKit Native Desktop IDE client (`HEAV3NS-CODE`) across all five Joyzoning zones (`PLUMBING`, `DOMAIN`, `INFRASTRUCTURE`, `CORE`, `UI`).
 
 ---
 
@@ -66,14 +66,15 @@ The system operates across two tightly interlaced layers uniting the seven sover
 
 ## 2. Complete Module Inventory
 
-### Rust Substrate Modules (`src/` — 64 Modules, All `< 800` Lines Tier 1 Optimal)
+### Rust Substrate Modules (`src/` — 70 Modules, All `< 800` Lines Tier 1 Optimal)
 
 | Module | Zone | Sovereign Pillar & Architectural Responsibility |
 | :--- | :--- | :--- |
 | `src/plumbing/hash_and_math.rs` | `PLUMBING` | `THE HARNESS`: `now_ms`, `fnv1a_32`, `levenshtein` distance |
 | `src/plumbing/text_tokens.rs` | `PLUMBING` | `THE HARNESS`: `estimate_text_tokens`, token budgeting, `render_unified_diff`, `encode_base64`, `canonical_tool_name` |
 | `src/plumbing/json_repair.rs` | `PLUMBING` | `HEAV3NS-MICRO`: `extract_json_roots`, `repair_json_string`, streaming tool deduplication |
-| `src/plumbing/secret_redactor.rs` | `PLUMBING` | `THE HARNESS`: `DeterministicSecretRedactor` (8 secret families) & `SafetyPolicy` (Trojan Source, SSRF, `ADR-0015`/`0016`, C2 scanner) |
+| `src/plumbing/secret_redactor.rs` | `PLUMBING` | `THE HARNESS`: `DeterministicSecretRedactor` (8 secret families) & `SafetyPolicy` (Trojan Source, SSRF, C2 scanner) |
+| `src/plumbing/shell_guard.rs` | `PLUMBING` | `THE HARNESS`: `ShellCommandGuard` (`ADR-0015` quote/compound heredoc file-write interdiction & `ADR-0016` compound/pipeline terminal file-read guard) |
 | `src/plumbing/fuzzy_patch.rs` | `PLUMBING` | `THE HARNESS`: `heal_fuzzy_patch`, `DeterministicPatchEngine` (V4A multi-file patch parser & applier) |
 | `src/plumbing/vision_and_dom.rs` | `PLUMBING` | `COMPUTER USE`: `decode_image_metadata` (PNG/JPEG/GIF/WebP/BMP/SVG), `snapshot_html_dom`, `validate_navigation_url` (SSRF/IMDSv2 guard), synthetic SVG/BMP generators |
 | `src/plumbing/spatial_geometry.rs` | `PLUMBING` | `COMPUTER USE`: `SpatialPoint`, `SpatialRect` (15% safe center, IoU), `ViewportTransform` (scroll & DPR), `calculate_rectangles_union_area` (exact 2D sweep-line union), `validate_trajectory` |
@@ -82,6 +83,7 @@ The system operates across two tightly interlaced layers uniting the seven sover
 | `src/plumbing/mod.rs` | `PLUMBING` | Stateless plumbing module exports |
 | `src/domain/interfaces/mod.rs` | `DOMAIN` | `19` core port traits (`ILlmProvider`, `IHttpProvider`, `IScriptedProvider`, `IToolExecutor`, `ISessionPersistence`, `IFileSessionPersistence`, `ISessionVfs`, `ISkillsIngestor`, `ITransactionJournal`, `ISpatialMediator`, `ISpatialGroundingGate`, `IExecutionAssuranceGate`, `IEnvironmentalObserver`, `IBehavioralKnowledgeStore`, `IBehavioralStore`, `ISwarmIntelligenceConsultant`, `IEnvironmentalDiffer`, `ISpatialGeometry`, `IComputerUseOrchestrator`) |
 | `src/domain/types/*.rs` (`14` files) | `DOMAIN` | Pure value & behavioral domain types (`messages.rs`, `runtime.rs`, `progress.rs`, `tick_result.rs`, `vfs_types.rs`, `tool_types.rs`, `tool_schedule.rs`, `skill_types.rs`, `computer_use_types.rs` [`UiElement`, `VirtualWindow`], `spatial_types.rs`, `environmental_types.rs`, `swarm_intelligence_types.rs`, `learned_knowledge_types.rs`, `mod.rs`) |
+| `src/domain/prompt_spec.rs` | `DOMAIN` | `HEAV3NS-MICRO`: `SystemPromptSpec` (`Standard`, `Compact`, `SwarmSpecialist`, `SideQuestion`), KV-cache-deterministic `static_prefix`, `ModelPromptFamily`, & `format_bounded_handoff_item` |
 | `src/domain/arena.rs` | `DOMAIN` | `REWIND`: 16-MiB 4-byte aligned bump-pointer `ArenaAllocator` & `SlabBufferSnapshot` |
 | `src/domain/memory.rs` | `DOMAIN` | `BROCCOLI`: `MemoryStore` (hybrid TF-IDF + FNV-1a recall), `MemoryEntry`, `GameStateSnapshot` |
 | `src/domain/compaction.rs` | `DOMAIN` | `HEAV3NS-MICRO`: `CompactionPolicy`, `CompactionReport`, `ContextBudgetInfo` |
@@ -101,20 +103,21 @@ The system operates across two tightly interlaced layers uniting the seven sover
 | `src/infrastructure/fs_tools.rs` | `INFRASTRUCTURE` | `THE HARNESS`: `dispatch_fs_tool` (filesystem read/write/patch/rollback tool handlers) |
 | `src/infrastructure/search_tools.rs` | `INFRASTRUCTURE` | `SPIDER`: `resolve_workspace_path`, `suggest_nearby_files`, `execute_grep_search`, `extract_workspace_symbols` |
 | `src/infrastructure/mod.rs` | `INFRASTRUCTURE` | Infrastructure adapter exports |
-| `src/core/engine.rs` | `CORE` | `HEAV3NS-MICRO`: `AgentEngine` multi-turn ReAct state machine, context compaction, and model failover |
+| `src/core/engine.rs` | `CORE` | `HEAV3NS-MICRO`: `AgentEngine` multi-turn ReAct state machine, sticky tool routing, specialist isolation, context compaction, and model failover |
+| `src/core/context_inspector.rs` | `CORE` | `HEAV3NS-MICRO`: `ContextInspectionSnapshot`, `/context` token budget HUD, `/prompt` prefix/profile inspector, and `/tools` routing breakdown |
 | `src/core/computer_use_orchestrator.rs` | `CORE` | `COMPUTER USE` · `SPIDER` · `SYNTHETIC SWARM`: `ComputerUseOrchestrator` 9-stage closed loop, modal auto-intercept, auto-focus planning, and 5-specialist Swarm consultation |
 | `src/core/spatial_engine.rs` | `CORE` | `COMPUTER USE`: `SpatialInteractionEngine` (Double-Wrapped dispatch, automatic off-screen pre-scroll, multi-step `execute_plan`, DOM/visual reconciliation, directional queries) |
-| `src/core/slash_and_swarm.rs` | `CORE` | `SYNTHETIC SWARM`: `AgentEngine::run_swarm` topological wave execution & 16 interactive slash commands |
+| `src/core/slash_and_swarm.rs` | `CORE` | `SYNTHETIC SWARM`: `AgentEngine::run_swarm` topological wave execution (exclusive file reservations & recursive delegation guard) & 19 interactive slash commands |
 | `src/core/session_store.rs` | `CORE` | `REWIND`: `SessionStore` (Arena + JSONL persistence) & `SessionCompactor` |
 | `src/core/tool_governor.rs` | `CORE` | `THE HARNESS`: `ToolOutputGovernor` (65%/35% head/tail truncation + disk spill), `ToolLoopBreaker`, `ToolExecutionCache` |
 | `src/core/tool_specs.rs` | `CORE` | `THE HARNESS`: `builtin_tool_specs` (29 built-in tool schemas) |
-| `src/core/tool_registry.rs` | `CORE` | `THE HARNESS`: `ToolRegistry` & parallel read / exclusive write wave scheduler (`partition_waves`) |
-| `src/core/request_queue.rs` | `CORE` | `THE HARNESS`: `RuntimeRequestQueue` & `PromptComposer` |
-| `src/core/flight_runner.rs` | `CORE` | `THE HARNESS`: `run_agent_flight_test` (`FT-01..FT-05`) & `run_micro_benchmarks` |
-| `src/core/substrate_tests.rs`, `spatial_tests.rs`, `computer_use_tests.rs`, `mod.rs` | `CORE` | 49 unit, spatial, computer-use, and integration test suites |
-| `src/ui/cli_presenter.rs` | `UI` | CLI parser, terminal REPL presenter, `--desktop-worker` and `--desktop-account` routing |
-| `src/ui/stdio_worker.rs` | `UI` | Stdio JSON-RPC worker protocol engine (`v: 1` framing, handshakes, token checks) |
-| `src/ui/rpc_dispatch.rs` | `UI` | Desktop JSON-RPC method handlers (`files.*`, `changes.*`, `spider.*`, `memory.*`, `task.*`, `swarm.*`, `spatial.*`, `cua.*`) |
+| `src/core/tool_registry.rs` | `CORE` | `THE HARNESS`: `ToolRegistry`, sticky on-demand specialist schema routing (`15` core + `14` on-demand), & parallel read / exclusive write wave scheduler (`partition_waves`) |
+| `src/core/request_queue.rs` | `CORE` | `THE HARNESS`: `RuntimeRequestQueue` & `PromptComposer` (`compose_with_spec`, `LUMI-MEMORY/1`, `LUMI-CONTEXT/1`) |
+| `src/core/flight_runner.rs` & `benchmark_runner.rs` | `CORE` | `THE HARNESS`: `run_agent_flight_test` (`FT-01..FT-05`), `run_micro_benchmarks`, & full benchmark suite |
+| `src/core/substrate_tests.rs`, `spatial_tests.rs`, `computer_use_tests.rs`, `zenith_tests.rs`, `mod.rs` | `CORE` | 66 unit, spatial, computer-use, prompt/shell-guard zenith, and integration test suites |
+| `src/ui/cli_presenter.rs` & `onboarding.rs` | `UI` | CLI parser (`context`, `doctor`, `demo`, `init`), terminal REPL presenter, `--desktop-worker` and `--desktop-account` routing |
+| `src/ui/stdio_worker.rs` | `UI` | Stdio JSON-RPC worker protocol engine (`v: 1` framing, `prompt-inspect-v1` capability, handshakes, token checks) |
+| `src/ui/rpc_dispatch.rs` | `UI` | Desktop JSON-RPC method handlers (`files.*`, `changes.*`, `spider.*`, `memory.*`, `context.inspect`, `prompt.inspect`, `task.*`, `swarm.*`, `spatial.*`, `cua.*`) |
 | `src/ui/mod.rs`, `src/lib.rs`, `src/main.rs` | `UI` | UI module and binary/library Composition Roots |
 
 ### Native macOS Client Modules (`native/Sources/Heav3nsCode/`)

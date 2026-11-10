@@ -1,7 +1,7 @@
 // [LAYER: CORE]
 use crate::domain::types::tool_types::{ParamSchema, ParamType, ToolSpec};
 
-/// Returns the 28 built-in tool specifications registered by [`ToolRegistry`](crate::core::tool_registry::ToolRegistry).
+/// Returns the 29 built-in tool specifications registered by [`ToolRegistry`](crate::core::tool_registry::ToolRegistry).
 pub fn builtin_tool_specs() -> Vec<ToolSpec> {
     use ParamType::*;
     vec![
@@ -264,7 +264,7 @@ pub fn builtin_tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "computer_use",
-            description: "Operate virtual or native GUI display via Set-of-Marks, background-first delivery, Verify-Escalate ladder, desktop lease fence, delta preview driver, clipboard engine, AX traversal, and window controls (capture, click, double_click, right_click, middle_click, type, set_value, key, wait, drag, scroll, hover, mouse_down, mouse_up, clipboard_read, clipboard_write, clipboard_paste, ax_query, window_minimize, window_maximize, window_restore, window_resize, window_move, window_close, focus_window, focus_app, list_windows, list_apps, list_elements, read_window_below, drive_preview, annotate_preview, lease_acquire, lease_release, lease_status, register_window, search_dsl, audit_health, undo, redo)",
+            description: "Operate virtual or native GUI display via Set-of-Marks, background-first delivery, Verify-Escalate ladder, desktop lease fence, preview driver, clipboard, AX traversal, window controls, and undo/redo",
             is_mutating: false,
             is_core: false,
             parameters: vec![
@@ -353,7 +353,7 @@ pub fn builtin_tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "spatial_interact",
-            description: "First-class spatial action architecture mediating grounded GUI/DOM interactions with Double-Wrapped Action Mediation (Wrapper A: Spatial Grounding, Wrapper B: Execution Assurance), occlusion detection, coordinate normalization, and observable postcondition verification",
+            description: "Mediate grounded GUI/DOM actions via Wrapper A (Spatial Grounding) and Wrapper B (Execution Assurance) with occlusion checks, coordinate normalization, and postcondition verification",
             is_mutating: false,
             is_core: false,
             parameters: vec![

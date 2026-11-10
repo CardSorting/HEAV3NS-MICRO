@@ -28,6 +28,16 @@ final class ActionPaletteTests: XCTestCase {
         for query in ["provider model", "SWITCH provider", "resume", "  \n "] { XCTAssertTrue(action.matches(query), query) }
         for query in ["delete provider", "modle", "nonexistent"] { XCTAssertFalse(action.matches(query), query) }
     }
+    func testInitialismAcronymMatchingAcceleratesNavigationWithoutFalsePositives() {
+        let chooseModel = WorkspaceAction(title: "Choose Model & Provider…", shortcut: "⇧⌘M") {}
+        let swarmRadar = WorkspaceAction(title: "Sovereign Swarm Radar…", shortcut: "⌥⌘R") {}
+        XCTAssertTrue(chooseModel.matches("cmp"))
+        XCTAssertTrue(chooseModel.matches("cp"))
+        XCTAssertEqual(chooseModel.matchScore("cmp"), 120)
+        XCTAssertTrue(swarmRadar.matches("ssr"))
+        XCTAssertFalse(chooseModel.matches("pmc"))
+        XCTAssertFalse(chooseModel.matches("cmpx"))
+    }
     func testFilteringPreservesSelectionAndEmptyResultsCannotActivateOldRows() throws {
         _ = NSApplication.shared
         var opened = [String]()

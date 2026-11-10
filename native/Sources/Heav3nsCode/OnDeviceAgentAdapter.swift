@@ -197,8 +197,13 @@ enum InstructionDigest {
     }
 
     private static func stripFencedBlocks(_ text: String) -> String {
-        guard let regex = try? NSRegularExpression(pattern: "```[\\s\\S]*?```") else { return text }
-        return regex.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "")
+        var result = text
+        for pattern in ["```[\\s\\S]*?```", "<available_skills[^>]*>[\\s\\S]*?</available_skills>"] {
+            if let regex = try? NSRegularExpression(pattern: pattern) {
+                result = regex.stringByReplacingMatches(in: result, range: NSRange(result.startIndex..., in: result), withTemplate: "")
+            }
+        }
+        return result
     }
 }
 

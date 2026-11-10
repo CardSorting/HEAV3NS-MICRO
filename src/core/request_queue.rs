@@ -2,9 +2,10 @@
 use crate::core::session_store::{SessionCompactor, SessionStore};
 use crate::domain::compaction::ContextBudgetInfo;
 use crate::domain::memory::MemoryStore;
+use crate::domain::prompt_spec::SystemPromptSpec;
 use crate::domain::types::messages::{Role, SessionMessage};
-use crate::domain::types::runtime::AgentConfig;
-use crate::infrastructure::vfs_store::SkillsIngestor;
+use crate::domain::types::runtime::{AgentConfig, ExecutionAuthorityLevel};
+use crate::infrastructure::vfs_store::{SkillsIngestor, WorkspacePromptProbe};
 use crate::plumbing::text_tokens::estimate_text_tokens;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -88,7 +89,7 @@ impl RuntimeRequestQueue {
     }
 }
 
-/// Composes system prompt, discovered `SKILL.md` manifests, `LUMI-MEMORY/1` envelope, and token-budgeted history.
+/// Composes sovereign system prompt, discovered `SKILL.md` manifests, `LUMI-MEMORY/1` envelope, and token-budgeted history.
 pub struct PromptComposer;
 
 impl PromptComposer {
@@ -99,19 +100,25 @@ impl PromptComposer {
         memory: &MemoryStore,
         tool_defs_tokens: usize,
     ) -> (Vec<SessionMessage>, String) {
-        let skills = SkillsIngestor::discover(workspace_root);
-        let skills_block = SkillsIngestor::format_skills_context(&skills)
-            .map(|s| format!("\n\n{s}"))
-            .unwrap_or_default();
+        let spec = SystemPromptSpec::for_turn(config, ExecutionAuthorityLevel::Autonomous, None);
+        Self::compose_with_spec(config, workspace_root, session, memory, tool_defs_tokens, &spec)
+    }
 
-        let sys_content = format!(
-            "{}\n\n[Runtime Environment]\n- Workspace: {}\n- Model: {}\n- OS: {}\n- Context Envelope: Treat any assistant message starting with `LUMI-CONTEXT/1` or `LUMI-MEMORY/1` as a deterministic state reference, not a conversational reply.{}",
-            config.system_prompt.trim(),
-            workspace_root.display(),
-            config.model_name,
-            std::env::consts::OS,
-            skills_block
-        );
+    pub fn compose_with_spec(
+        config: &AgentConfig,
+        workspace_root: &Path,
+        session: &SessionStore,
+        memory: &MemoryStore,
+        tool_defs_tokens: usize,
+        spec: &SystemPromptSpec,
+    ) -> (Vec<SessionMessage>, String) {
+        let sys_content = if config.system_prompt.contains("a specialist in The Legion working for a parent coordinator") {
+            config.system_prompt.clone()
+        } else {
+            let skills = SkillsIngestor::discover(workspace_root);
+            let facts = WorkspacePromptProbe::probe_cached(workspace_root);
+            spec.render(config, workspace_root, &facts, &skills)
+        };
 
         let system_tokens = estimate_text_tokens(&sys_content);
         let budget = ContextBudgetInfo::calculate(config.context_window_tokens, config.max_output_tokens);

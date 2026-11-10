@@ -1,5 +1,6 @@
 // [LAYER: UI]
 use crate::core::compute_workspace_revision;
+use crate::core::engine::AgentEngine;
 use crate::core::tool_specs::builtin_tool_specs;
 use crate::domain::types::progress::{EngineProgressEvent, EngineProgressPhase, EngineProgressStatus};
 use crate::plumbing::hash_and_math::{levenshtein, now_ms};
@@ -225,10 +226,32 @@ pub fn run_doctor_cli(cwd: &Path, opts_provider: Option<&str>, opts_model: Optio
     println!("  {} Workspace Content Revision: {}", green("✔"), dim(&rev));
     println!();
 
-    // 4. Substrate & Tool Registry SLA
-    println!("{}", bold("4. Substrate & Tool Registry SLA"));
+    // 4. Substrate, Prompt Hygiene & Tool Registry SLA
+    println!("{}", bold("4. Substrate, Prompt Hygiene & Tool Registry SLA"));
     let tools = builtin_tool_specs();
-    println!("  {} Built-in Tool Specifications: {} registered", green("✔"), cyan(&tools.len().to_string()));
+    let probe_engine = AgentEngine::with_defaults(cwd);
+    let ctx_snap = probe_engine.inspect_context_snapshot("");
+    println!(
+        "  {} Built-in Tool Specifications: {} registered ({} core active / {} on-demand)",
+        green("✔"),
+        cyan(&tools.len().to_string()),
+        ctx_snap.tool_active_count,
+        ctx_snap.deferred_specialist_tools.len()
+    );
+    println!(
+        "  {} Lean System Prompt: {}t total (fnv1a:{} KV-cache prefix · profile={})",
+        green("✔"),
+        ctx_snap.system_total_tokens,
+        ctx_snap.cache_prefix_hash,
+        ctx_snap.profile
+    );
+    if !ctx_snap.governance_warnings.is_empty() {
+        println!(
+            "  {} Quarantined Governance Rules: {}",
+            yellow("⚠"),
+            ctx_snap.governance_warnings.join("; ")
+        );
+    }
     println!("  {} Arena Slab Memory Buffer: 16-MiB sovereign capacity", green("✔"));
     println!("  {} Self-Healing JSON Repair & VFS Sandboxing: Operational", green("✔"));
     println!("  {} Set-of-Marks Computer Use & Spatial Grounding: Operational", green("✔"));

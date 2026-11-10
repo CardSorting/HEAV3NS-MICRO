@@ -1,4 +1,5 @@
 // [LAYER: PLUMBING]
+use crate::plumbing::shell_guard::ShellCommandGuard;
 use regex::Regex;
 use std::path::Path;
 use std::sync::OnceLock;
@@ -305,77 +306,15 @@ impl SafetyPolicy {
         (cleaned, replies)
     }
 
-    /// `ADR-0015`: Detects heredoc file-write patterns (`cat << 'EOF' > file`, `tee file << EOF`)
-    /// while ignoring arithmetic shifts (`$((1 << 4))`), here-strings (`<<<`), and non-file interpreter heredocs.
+    /// `ADR-0015`: Detects heredoc file-write patterns (`cat << 'EOF' > file`, `tee file << EOF`, multiline compound commands, and closing-delimiter redirects)
+    /// while ignoring quoted `<<`, arithmetic shifts (`$((1 << 4))`), here-strings (`<<<`), and non-file interpreter heredocs.
     pub fn detect_heredoc_file_redirection(cmd: &str) -> Option<String> {
-        let trimmed = cmd.trim();
-        if !trimmed.contains("<<") {
-            return None;
-        }
-        let first_line = trimmed.lines().next().unwrap_or(trimmed);
-        if first_line.contains("<<<") || first_line.contains("$((") || first_line.contains("((") {
-            return None;
-        }
-        let has_heredoc_op = {
-            static HEREDOC_RE: OnceLock<Regex> = OnceLock::new();
-            let re = HEREDOC_RE.get_or_init(|| Regex::new(r"<<-?\s*['\x22]?[A-Za-z_][A-Za-z0-9_]*['\x22]?").unwrap());
-            re.is_match(first_line)
-        };
-        if !has_heredoc_op {
-            return None;
-        }
-        static REDIR_RE: OnceLock<Regex> = OnceLock::new();
-        let redir_re = REDIR_RE.get_or_init(|| {
-            Regex::new(r"(?:>>?\s*([^\s;&|]+))|(?:\|\s*tee\s+(?:-a\s+)?([^\s;&|]+))|(?:^\s*(?:cat|tee)\s+>\s*([^\s;&|<]+))").unwrap()
-        });
-        if let Some(caps) = redir_re.captures(first_line) {
-            let target = caps
-                .get(1)
-                .or_else(|| caps.get(2))
-                .or_else(|| caps.get(3))
-                .map(|m| m.as_str())
-                .unwrap_or("file");
-            if !target.starts_with("/dev/null") && !target.starts_with('&') {
-                return Some(format!(
-                    "[ADR-0015 Advisory] Heredoc file-write to '{target}' detected. Prefer `write_file` or `replace_file_content` for atomic VFS journaling and rollback."
-                ));
-            }
-        }
-        None
+        ShellCommandGuard::detect_heredoc_file_redirection(cmd)
     }
 
-    /// `ADR-0016`: Detects bare terminal file-read dumps (`cat src/main.rs`, `head -n 50 file`)
-    /// while allowing filter pipelines (`| grep`, `| rg`, `| jq`, `| wc`), `tail -f`, and `/proc/` or `/sys/`.
+    /// `ADR-0016`: Detects terminal file-read dumps (`cat src/main.rs`, `cd dir && head -n 50 file`, `2>/dev/null`, `xargs cat`, `find -exec cat`, `bash -c "cat ..."`)
+    /// while allowing filter pipelines (`| grep`, `| rg`, `| jq`, `| wc`), stdout file redirection, `tail -f`, and `/proc/`, `/sys/`, `/dev/`, or `/etc/*-release`.
     pub fn detect_terminal_file_read(cmd: &str) -> Option<String> {
-        let trimmed = cmd.trim();
-        if trimmed.is_empty() || trimmed.contains("<<") || trimmed.contains('>') {
-            return None;
-        }
-        if trimmed.contains('|') {
-            let post_pipe = trimmed.split('|').skip(1).collect::<Vec<_>>().join("|");
-            let allowed_filters = ["grep", "rg", "awk", "sed", "jq", "wc", "sort", "uniq", "cut", "tr", "shasum", "sha256sum", "md5"];
-            if allowed_filters.iter().any(|f| post_pipe.contains(f)) {
-                return None;
-            }
-        }
-        let tokens: Vec<&str> = trimmed.split_whitespace().collect();
-        if tokens.len() < 2 {
-            return None;
-        }
-        let prog = tokens[0];
-        if !matches!(prog, "cat" | "head" | "tail" | "less" | "more" | "bat" | "nl") {
-            return None;
-        }
-        if prog == "tail" && tokens.iter().any(|t| *t == "-f" || *t == "-F" || *t == "--follow") {
-            return None;
-        }
-        if let Some(&target) = tokens.last() {
-            if !target.starts_with('-') && !target.starts_with("/proc/") && !target.starts_with("/sys/") && !target.starts_with("/dev/") {
-                return Some(format!(
-                    "[ADR-0016 Advisory] Terminal file dump `{prog} {target}` detected. Prefer `view_file` or `grep_search` for line-numbered, token-governed inspection."
-                ));
-            }
-        }
-        None
+        ShellCommandGuard::detect_terminal_file_read(cmd)
     }
 }

@@ -43,6 +43,11 @@ pub trait ISkillsIngestor: Send + Sync {
     fn discover_manifests(workspace_root: &Path) -> Vec<SkillManifest>;
 }
 
+/// Contractual sovereignty interface for cached workspace environment and governance probing.
+pub trait IWorkspacePromptProbe: Send + Sync {
+    fn probe_workspace(&self, workspace_root: &Path) -> crate::domain::types::skill_types::WorkspacePromptFacts;
+}
+
 /// Contractual sovereignty interface for atomic file mutation journaling and rollback.
 pub trait ITransactionJournal: Send + Sync {
     fn record_file_mutation(&mut self, tool_name: &str, target_path: &Path) -> String;

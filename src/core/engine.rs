@@ -40,6 +40,7 @@ pub struct AgentEngine {
     snapshots: Mutex<Vec<GameStateSnapshot>>,
     frame_counter: AtomicU64,
     event_seq: AtomicU64,
+    forbid_swarm_delegation: bool,
 }
 
 impl AgentEngine {
@@ -76,7 +77,17 @@ impl AgentEngine {
             snapshots: Mutex::new(Vec::new()),
             frame_counter: AtomicU64::new(0),
             event_seq: AtomicU64::new(0),
+            forbid_swarm_delegation: false,
         }
+    }
+
+    pub fn without_swarm_delegation(mut self) -> Self {
+        self.forbid_swarm_delegation = true;
+        self
+    }
+
+    pub fn forbids_swarm_delegation(&self) -> bool {
+        self.forbid_swarm_delegation
     }
 
     pub fn with_defaults(workspace_root: impl Into<PathBuf>) -> Self {
@@ -126,17 +137,8 @@ impl AgentEngine {
         self.config.lock().unwrap().clone()
     }
 
-    pub fn inspect_or_switch_model(&self, arg: &str) -> String {
-        let mut cfg = self.config.lock().unwrap();
-        if arg.is_empty() {
-            format!(
-                "Active model: {} (provider: {}, fallback: {:?})",
-                cfg.model_name, cfg.provider, cfg.fallback_model
-            )
-        } else {
-            cfg.model_name = arg.to_string();
-            format!("Switched active model to: {}", cfg.model_name)
-        }
+    pub(crate) fn set_active_model_name(&self, name: &str) {
+        self.config.lock().unwrap().model_name = name.to_string();
     }
 
     pub fn snapshots_list(&self) -> Vec<GameStateSnapshot> {
@@ -145,28 +147,6 @@ impl AgentEngine {
 
     pub(crate) fn snapshot_count(&self) -> usize {
         self.snapshots.lock().unwrap().len()
-    }
-
-    pub(crate) fn format_snapshots_list(&self) -> String {
-        let snaps = self.snapshots.lock().unwrap();
-        if snaps.is_empty() {
-            "No snapshots recorded.".to_string()
-        } else {
-            snaps
-                .iter()
-                .enumerate()
-                .map(|(i, s)| {
-                    format!(
-                        "#{i}: id={} frame={} msgs={} arena={}B",
-                        s.snapshot_id,
-                        s.frame_index,
-                        s.messages.len(),
-                        s.slab_snapshot.allocated_bytes
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        }
     }
 
     pub fn create_snapshot(&self) -> GameStateSnapshot {
@@ -223,10 +203,12 @@ impl AgentEngine {
 
     pub async fn ask_side_question(&self, question: &str) -> Result<String, ProviderError> {
         let cfg = self.config.lock().unwrap().clone();
+        let facts = crate::infrastructure::vfs_store::WorkspacePromptProbe::probe_cached(&self.workspace_root);
+        let side_sys = crate::domain::prompt_spec::SystemPromptSpec::for_side_question().render(&cfg, &self.workspace_root, &facts, &[]);
         let req = ProviderRequest {
             model: cfg.model_name,
             messages: vec![
-                SessionMessage::new(Role::System, cfg.system_prompt),
+                SessionMessage::new(Role::System, side_sys),
                 SessionMessage::new(Role::User, question),
             ],
             tools: Vec::new(),
@@ -369,8 +351,6 @@ impl AgentEngine {
         };
         self.tools.begin_turn(turn_num);
 
-        let openai_tools = self.tools.openai_tool_schemas();
-        let tool_defs_tokens = estimate_text_tokens(&Value::Array(openai_tools.clone()).to_string());
         let max_rounds = cfg.max_tool_rounds.unwrap_or(32).max(1);
 
         let mut active_model = cfg.model_name.clone();
@@ -451,10 +431,19 @@ impl AgentEngine {
                 };
             }
 
+            let routing_hint = {
+                let sess = self.session.lock().unwrap();
+                let tail = sess.messages().last().map(|m| m.content.as_str()).unwrap_or("");
+                format!("{}\n{}", input.prompt, tail)
+            };
+            let openai_tools = self.tools.select_tool_schemas_for(&routing_hint, self.forbid_swarm_delegation);
+            let tool_defs_tokens = estimate_text_tokens(&Value::Array(openai_tools.clone()).to_string());
+            let soul = Some(self.tools.skill_catalog.lock().unwrap().active_soul.clone());
+            let spec = crate::domain::prompt_spec::SystemPromptSpec::for_turn(&cfg, authority, soul);
             let (messages_for_provider, composed_summary) = {
                 let sess = self.session.lock().unwrap();
                 let mem = self.memory.lock().unwrap();
-                PromptComposer::compose(&cfg, &self.workspace_root, &sess, &mem, tool_defs_tokens)
+                PromptComposer::compose_with_spec(&cfg, &self.workspace_root, &sess, &mem, tool_defs_tokens, &spec)
             };
             last_composed_summary = composed_summary;
 
@@ -667,13 +656,7 @@ impl AgentEngine {
             );
 
             let records = self
-                .tools
-                .execute_batch(
-                    &scheduled_calls,
-                    &self.workspace_root,
-                    authority,
-                    input.cancel_token.as_ref(),
-                )
+                .execute_turn_tool_batch(&scheduled_calls, authority, input.cancel_token.as_ref())
                 .await;
 
             {

@@ -26,7 +26,7 @@ use crate::plumbing::text_tokens::canonical_tool_name;
 use crate::plumbing::vision_and_dom::{decode_image_metadata, generate_synthetic_bmp, generate_synthetic_svg};
 use futures::future::join_all;
 use serde_json::{json, Map, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -46,6 +46,7 @@ pub struct ToolRegistry {
     pub behavioral_store: Arc<Mutex<BehavioralKnowledgeStore>>,
     pub computer_orchestrator: Arc<ComputerUseOrchestrator>,
     pub skill_catalog: Mutex<SkillTreeCatalog>,
+    pub unlocked_tools: Mutex<BTreeSet<&'static str>>,
     pub max_concurrency: usize,
 }
 
@@ -81,6 +82,7 @@ impl ToolRegistry {
             behavioral_store,
             computer_orchestrator,
             skill_catalog: Mutex::new(SkillTreeCatalog::new()),
+            unlocked_tools: Mutex::new(BTreeSet::new()),
             max_concurrency: 8,
         };
         for spec in builtin_tool_specs() {
@@ -106,40 +108,67 @@ impl ToolRegistry {
         self.list_specs().iter().map(|s| s.to_openai_tool()).collect()
     }
 
-    /// Context-aware dynamic tool router: always includes core tools and activates domain tools matching prompt intent.
+    /// Context-aware sticky dynamic tool router: always includes core tools, unlocks domain tools matching prompt intent, and retains session-unlocked tools across turns.
     pub fn select_relevant_tool_schemas(&self, prompt: &str) -> Vec<Value> {
-        let lower = prompt.to_lowercase();
+        self.select_tool_schemas_for(prompt, false)
+    }
+
+    /// Selects relevant OpenAI tool schemas with optional structural exclusion of `engage_swarm` for child Legion specialists.
+    pub fn select_tool_schemas_for(&self, prompt: &str, forbid_swarm: bool) -> Vec<Value> {
+        let lower = prompt.trim().to_lowercase();
+        if lower.is_empty() {
+            return self
+                .list_specs()
+                .into_iter()
+                .filter(|spec| !forbid_swarm || spec.name != "engage_swarm")
+                .map(|s| s.to_openai_tool())
+                .collect();
+        }
+        let mut unlocked = self.unlocked_tools.lock().unwrap();
+        for spec in self.list_specs() {
+            if spec.is_core || (forbid_swarm && spec.name == "engage_swarm") {
+                continue;
+            }
+            let matched = lower.contains(spec.name)
+                || (matches!(spec.name, "list_skills" | "use_skill" | "skill_forge")
+                    && (lower.contains("skill") || lower.contains("workflow") || lower.contains("soul") || lower.contains("forge") || lower.contains("dag")))
+                || (spec.name == "computer_use"
+                    && (lower.contains("computer") || lower.contains("click") || lower.contains("window") || lower.contains("display") || lower.contains("gui") || lower.contains("screen") || lower.contains("clipboard")))
+                || (spec.name == "browser_use"
+                    && (lower.contains("browser") || lower.contains("dom") || lower.contains("url") || lower.contains("http") || lower.contains("web") || lower.contains("navigate") || lower.contains(".html")))
+                || (spec.name == "vision_inspect"
+                    && (lower.contains("vision") || lower.contains("image") || lower.contains("png") || lower.contains("svg") || lower.contains("jpeg") || lower.contains("jpg") || lower.contains("webp") || lower.contains("bmp")))
+                || (spec.name == "engage_swarm"
+                    && (lower.contains("swarm") || lower.contains("legion") || lower.contains("specialist") || lower.contains("parallel")))
+                || (spec.name == "spatial_interact"
+                    && (lower.contains("spatial") || lower.contains("bounding") || lower.contains("ground") || lower.contains("occlu") || lower.contains("geometry") || lower.contains("assurance")))
+                || (spec.name == "get_workspace_diff"
+                    && (lower.contains("diff") || lower.contains("patch") || lower.contains("git")))
+                || (spec.name == "batch_replace_regex"
+                    && (lower.contains("symbol") || lower.contains("rename") || lower.contains("refactor") || lower.contains("regex")))
+                || (spec.name == "move_file" && (lower.contains("move") || lower.contains("rename")))
+                || (spec.name == "directory_tree" && lower.contains("tree"))
+                || (spec.name == "file_info" && (lower.contains("metadata") || lower.contains("sha256") || lower.contains("digest")))
+                || (spec.name == "edit_file_anchored" && (lower.contains("anchor") || lower.contains("fnv")));
+            if matched {
+                unlocked.insert(spec.name);
+            }
+        }
         self.list_specs()
             .into_iter()
-            .filter(|spec| {
-                spec.is_core
-                    || lower.is_empty()
-                    || lower.contains(spec.name)
-                    || (matches!(spec.name, "list_skills" | "use_skill" | "skill_forge")
-                        && (lower.contains("skill") || lower.contains("workflow") || lower.contains("soul") || lower.contains("forge")))
-                    || (spec.name == "computer_use"
-                        && (lower.contains("computer") || lower.contains("click") || lower.contains("window") || lower.contains("display") || lower.contains("gui") || lower.contains("screen")))
-                    || (spec.name == "browser_use"
-                        && (lower.contains("browser") || lower.contains("dom") || lower.contains("url") || lower.contains("http") || lower.contains("web")))
-                    || (spec.name == "vision_inspect"
-                        && (lower.contains("vision") || lower.contains("image") || lower.contains("png") || lower.contains("svg") || lower.contains("jpeg")))
-                    || (spec.name == "engage_swarm"
-                        && (lower.contains("swarm") || lower.contains("legion") || lower.contains("specialist") || lower.contains("parallel")))
-                    || (spec.name == "spatial_interact"
-                        && (lower.contains("spatial") || lower.contains("bounding") || lower.contains("ground") || lower.contains("occlu") || lower.contains("geometry") || lower.contains("assurance")))
-                    || (matches!(spec.name, "apply_unified_diff" | "get_workspace_diff")
-                        && (lower.contains("diff") || lower.contains("patch") || lower.contains("git")))
-                    || (matches!(spec.name, "search_symbols" | "batch_replace_regex")
-                        && (lower.contains("symbol")
-                            || lower.contains("outline")
-                            || lower.contains("rename")
-                            || lower.contains("refactor")
-                            || lower.contains("struct")
-                            || lower.contains("fn")
-                            || lower.contains("class")))
-            })
+            .filter(|spec| (!forbid_swarm || spec.name != "engage_swarm") && (spec.is_core || unlocked.contains(spec.name)))
             .map(|s| s.to_openai_tool())
             .collect()
+    }
+
+    pub fn unlock_tool_by_name(&self, name: &str) {
+        if let Some(spec) = self.get_spec(name) {
+            if !spec.is_core {
+                if let Ok(mut unlocked) = self.unlocked_tools.lock() {
+                    unlocked.insert(spec.name);
+                }
+            }
+        }
     }
 
     pub fn begin_turn(&self, turn_count: u64) {
@@ -157,6 +186,9 @@ impl ToolRegistry {
         }
         if let Ok(mut g) = self.governor.lock() {
             g.clear();
+        }
+        if let Ok(mut u) = self.unlocked_tools.lock() {
+            u.clear();
         }
     }
 
@@ -281,6 +313,7 @@ impl ToolRegistry {
                 duration_ms: started.elapsed().as_millis() as u64,
             };
         };
+        self.unlock_tool_by_name(spec.name);
 
         let (prepared_args, validation) = self.parser.prepare_arguments(&call.args, &spec.parameters);
         if !validation.valid {

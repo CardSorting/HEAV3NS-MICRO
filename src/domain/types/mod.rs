@@ -19,7 +19,7 @@ pub use crate::domain::types::learned_knowledge_types::{EnvironmentalReconciliat
 pub use crate::domain::types::messages::{estimate_messages_tokens, extract_text_tool_calls, Role, SessionMessage, ToolCall, ToolCallFunction};
 pub use crate::domain::types::progress::{EngineProgressEvent, EngineProgressMetadata, EngineProgressPhase, EngineProgressStatus, ToolExecutionRecord};
 pub use crate::domain::types::runtime::{AgentConfig, CancellationToken, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel};
-pub use crate::domain::types::skill_types::{GovernedOutput, SkillManifest};
+pub use crate::domain::types::skill_types::{GovernedOutput, SkillManifest, WorkspacePromptFacts};
 pub use crate::domain::types::spatial_types::{AssuranceVerdict, SpatialActionContract, SpatialError, SpatialScene, SpatialTarget, TargetProvenance};
 pub use crate::domain::types::swarm_intelligence_types::{ConsultationRiskLevel, ISpecialistInsight, ISwarmConsultationResponse, SpecialistInsight, SwarmConsultationRequest, SwarmConsultationResponse};
 pub use crate::domain::types::tick_result::{finalize_provider_response, is_retryable_http_status, EngineTickResult, ProviderError, ProviderRequest, ProviderResponse};

@@ -18,6 +18,8 @@ pub struct SwarmAssignment {
     pub objective: String,
     #[serde(default, rename = "dependsOn")]
     pub depends_on: Vec<String>,
+    #[serde(default, rename = "assignedFiles")]
+    pub assigned_files: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -152,7 +154,7 @@ pub fn classify_task_for_legion(
             "role": title,
             "stage": stage,
             "dependsOn": deps,
-            "assignedFiles": assigned_files,
+            "assignedFiles": assigned_files.clone(),
             "objective": obj
         }));
         assignments.push(SwarmAssignment {
@@ -160,6 +162,7 @@ pub fn classify_task_for_legion(
             role: (*title).to_string(),
             objective: obj,
             depends_on: deps,
+            assigned_files,
         });
     }
 

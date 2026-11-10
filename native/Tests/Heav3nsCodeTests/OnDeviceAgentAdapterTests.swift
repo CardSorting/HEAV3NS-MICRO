@@ -15,23 +15,26 @@ private final class ScriptedClient: OnDeviceModelClient, @unchecked Sendable {
     private(set) var fillInstructions: [String] = []
 
     func choose(instructions: String, prompt: String, options: [String]) async throws -> String {
-        lock.lock(); defer { lock.unlock() }
-        choosePrompts.append(prompt)
-        if let limit = overflowUntilPromptBelow, instructions.count + prompt.count >= limit { throw OnDeviceAgentError.contextOverflow }
-        let next = choices.isEmpty ? OnDeviceAgent.answerTool : choices.removeFirst()
-        return options.contains(next) ? next : options[0]
+        try lock.withLock {
+            choosePrompts.append(prompt)
+            if let limit = overflowUntilPromptBelow, instructions.count + prompt.count >= limit { throw OnDeviceAgentError.contextOverflow }
+            let next = choices.isEmpty ? OnDeviceAgent.answerTool : choices.removeFirst()
+            return options.contains(next) ? next : options[0]
+        }
     }
 
     func fill(instructions: String, prompt: String, tool: AgentTool) async throws -> [String: Any] {
-        lock.lock(); defer { lock.unlock() }
-        fillInstructions.append(instructions)
-        return fills.isEmpty ? [:] : fills.removeFirst()
+        lock.withLock {
+            fillInstructions.append(instructions)
+            return fills.isEmpty ? [:] : fills.removeFirst()
+        }
     }
 
     func confirm(instructions: String, prompt: String) async throws -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        confirmPrompts.append(prompt)
-        return verdicts.isEmpty ? false : verdicts.removeFirst()
+        lock.withLock {
+            confirmPrompts.append(prompt)
+            return verdicts.isEmpty ? false : verdicts.removeFirst()
+        }
     }
 
     func answer(instructions: String, prompt: String) async throws -> String { "ok" }
@@ -252,5 +255,22 @@ final class OnDeviceAgentAdapterTests: XCTestCase {
             "a": ["type": "integer"], "b": ["type": "array", "items": ["type": "string"]], "c": ["type": ["string", "null"]], "d": ["type": "boolean"]], "required": ["d"]])
         XCTAssertEqual(tool.args.map(\.name), ["d", "a", "b", "c"])
         XCTAssertEqual(tool.args.map(\.kind), [.boolean, .integer, .stringArray, .string])
+    }
+
+    func testInstructionDigestStripsAvailableSkillsCatalogToPreserveMandateRules() {
+        let skillsCatalog = (0..<30).map { "  - \"skill-\($0)\": \"MUST run workflow \($0) when matched\"" }.joined(separator: "\n")
+        let prompt = """
+        You are HEAV3NS-MICRO, a sovereign local-first coding agent.
+        # Mandate & Loop
+        - MUST inspect via view_file and edit via replace_file_content.
+        <available_skills trust="untrusted-catalog">
+        \(skillsCatalog)
+        </available_skills>
+        - NEVER write files via heredoc redirection in run_command.
+        """
+        let compacted = InstructionDigest.compact(prompt, budget: 420)
+        XCTAssertTrue(compacted.contains("MUST inspect via view_file"), compacted)
+        XCTAssertTrue(compacted.contains("NEVER write files via heredoc"), compacted)
+        XCTAssertFalse(compacted.contains("skill-0"), compacted)
     }
 }

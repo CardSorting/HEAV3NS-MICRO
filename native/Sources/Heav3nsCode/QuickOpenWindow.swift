@@ -35,6 +35,7 @@ enum OmnibarItem {
     case symbol(name: String, kind: String, line: Int, index: Int)
     case checkpoint(id: String, title: String, detail: String)
     case lineNumber(line: Int, column: Int, snippet: String)
+    case modeGuide(prefix: String, title: String, detail: String)
 }
 
 struct OmnibarCheckpointItem: Equatable {
@@ -49,6 +50,7 @@ enum OmnibarMode {
     case symbols
     case checkpoints
     case line
+    case help
 }
 
 /// A modeless native picker: the conversation and Stop remain available.
@@ -89,7 +91,7 @@ final class QuickOpenWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         panel.hidesOnDeactivate = false
         super.init(window: panel)
         panel.delegate = self
-        self.search.placeholderString = "Search files (:line, >actions, @symbols, #checkpoints)"; self.search.delegate = self
+        self.search.placeholderString = "Search files (:line, >actions, @symbols, #checkpoints, ?help)"; self.search.delegate = self
         self.search.setAccessibilityLabel("Unified omnibar search")
         table.addTableColumn(NSTableColumn(identifier: .init("item")))
         table.headerView = nil; table.rowHeight = 46; table.dataSource = self; table.delegate = self; table.style = .plain
@@ -101,7 +103,7 @@ final class QuickOpenWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         scroll.setContentHuggingPriority(.init(1), for: .vertical)
         chooseButton.target = self; chooseButton.action = #selector(choose); chooseButton.bezelStyle = .rounded; chooseButton.isEnabled = false
         retry.target = self; retry.action = #selector(refresh); retry.bezelStyle = .rounded
-        let hint = JourneyStyle.label("↑ ↓ to select · Return to open · Esc to close · Type > commands, :line", size: 11, secondary: true)
+        let hint = JourneyStyle.label("↑ ↓ to select · Return to open · Esc to close · Type > commands, :line, ? help", size: 11, secondary: true)
         hint.maximumNumberOfLines = 1; hint.lineBreakMode = .byTruncatingTail
         let footer = JourneyStyle.stack([retry, NSView(), chooseButton], vertical: false, spacing: 8)
         let root = JourneyStyle.stack([scope, self.search, scroll, status, hint, footer], spacing: 10)
@@ -137,6 +139,9 @@ final class QuickOpenWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         case .line:
             search.stringValue = ":"
             filterLine(query: "")
+        case .help:
+            search.stringValue = "?"
+            filterHelp(query: "")
         }
     }
     func dismiss(restoreFocus: Bool = true) {
@@ -173,6 +178,10 @@ final class QuickOpenWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
             debounce?.cancel(); requests.invalidate()
             let query = String(text.dropFirst()).trimmingCharacters(in: .whitespaces)
             filterLine(query: query)
+        } else if text.hasPrefix("?") {
+            debounce?.cancel(); requests.invalidate()
+            let query = String(text.dropFirst()).trimmingCharacters(in: .whitespaces)
+            filterHelp(query: query)
         } else {
             scope.stringValue = "Search filenames and paths in this workspace."
             chooseButton.title = "Open Preview"
@@ -246,6 +255,28 @@ final class QuickOpenWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         table.reloadData()
         table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false); table.scrollRowToVisible(0)
         chooseButton.isEnabled = true
+    }
+    private func filterHelp(query: String) {
+        scope.stringValue = "Omnibar Modes · Select a mode to switch search scope"
+        chooseButton.title = "Switch Mode"
+        let catalog: [(prefix: String, title: String, detail: String)] = [
+            (">", "> Workspace Actions", "Run commands, switch models, inspect context, or trigger checks (⌘K)"),
+            ("@", "@ Go to Symbol in File", "Jump to functions, structs, classes, and traits in Inspect (⇧⌘O)"),
+            ("#", "# Conversation Checkpoints", "Browse and restore recorded session + VFS snapshots"),
+            (":", ": Go to Line & Column", "Jump to :line or :line:col in the current inspected file (⌘G)"),
+            ("", "Search Workspace Files", "Open files by name or path, including file.rs:42:10 or file.rs#L42 (⌘P)")
+        ]
+        let folded = query.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        let matches = catalog.filter { entry in
+            guard !folded.isEmpty else { return true }
+            let hay = "\(entry.prefix) \(entry.title) \(entry.detail)".folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            return hay.contains(folded)
+        }
+        items = matches.map { .modeGuide(prefix: $0.prefix, title: $0.title, detail: $0.detail) }
+        status.stringValue = items.isEmpty ? "No matching Omnibar modes." : "\(items.count) navigation mode\(items.count == 1 ? "" : "s")"
+        table.reloadData()
+        if !items.isEmpty { table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false); table.scrollRowToVisible(0) }
+        chooseButton.isEnabled = !items.isEmpty
     }
     static func parseFileLineCol(_ input: String) -> (path: String, line: Int?, col: Int?) {
         // 1. GitHub / Markdown anchor syntax: path#L42, path#L42C10, or path#L42-L50
@@ -330,6 +361,13 @@ final class QuickOpenWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
     @objc private func choose() {
         guard items.indices.contains(table.selectedRow), !dismissed else { return }
         let selected = items[table.selectedRow]
+        if case .modeGuide(let prefix, _, _) = selected {
+            searchProbe(prefix)
+            if let editor = search.currentEditor() {
+                editor.selectedRange = NSRange(location: (prefix as NSString).length, length: 0)
+            }
+            return
+        }
         dismiss()
         switch selected {
         case .file(let path, _):
@@ -342,6 +380,8 @@ final class QuickOpenWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
             onSelectCheckpoint?(id)
         case .lineNumber(let line, let col, _):
             onSelectLine?(line, col)
+        case .modeGuide:
+            break
         }
     }
     func tableViewSelectionDidChange(_ notification: Notification) { chooseButton.isEnabled = items.indices.contains(table.selectedRow) }
@@ -376,6 +416,11 @@ final class QuickOpenWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
             path = JourneyStyle.label(snippet.isEmpty ? "Jump to line in current inspected file" : snippet, size: 11, secondary: true)
             icon = NSImageView(image: NSImage(systemSymbolName: "arrow.down.to.line", accessibilityDescription: nil) ?? NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil)!)
             cell.toolTip = "Go to line \(line)"
+        case .modeGuide(_, let title, let detail):
+            name = JourneyStyle.label(title, size: 13, weight: .medium)
+            path = JourneyStyle.label(detail, size: 11, secondary: true)
+            icon = NSImageView(image: NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: nil) ?? NSImage(systemSymbolName: "command", accessibilityDescription: nil)!)
+            cell.toolTip = detail
         }
         for label in [name, path] { label.maximumNumberOfLines = 1; label.lineBreakMode = .byTruncatingMiddle }
         let labels = JourneyStyle.stack([name, path], spacing: 3)
@@ -396,6 +441,8 @@ final class QuickOpenWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
             filterCheckpoints(query: String(query.dropFirst()).trimmingCharacters(in: .whitespaces))
         } else if query.hasPrefix(":") {
             filterLine(query: String(query.dropFirst()).trimmingCharacters(in: .whitespaces))
+        } else if query.hasPrefix("?") {
+            filterHelp(query: String(query.dropFirst()).trimmingCharacters(in: .whitespaces))
         } else {
             performSearch()
         }

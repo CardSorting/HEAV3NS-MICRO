@@ -1,15 +1,17 @@
 // [LAYER: INFRASTRUCTURE]
-use crate::domain::interfaces::ISessionPersistence;
-use crate::domain::types::skill_types::SkillManifest;
+use crate::domain::interfaces::{ISessionPersistence, IWorkspacePromptProbe};
+use crate::domain::types::skill_types::{SkillManifest, WorkspacePromptFacts};
 use crate::domain::types::vfs_types::{VfsDiskBaseline, VfsFileOverlay};
 use crate::plumbing::hash_and_math::now_ms;
-use crate::plumbing::text_tokens::render_unified_diff;
-use crate::plumbing::vision_and_dom::decode_image_metadata;
+use crate::plumbing::secret_redactor::{DeterministicSecretRedactor, SafetyPolicy};
+use crate::plumbing::text_tokens::{render_unified_diff, truncate_text_to_token_budget};
+use crate::plumbing::vision_and_dom::{decode_image_metadata, sanitize_trojan_unicode};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 
 impl VfsDiskBaseline {
     pub fn capture(path: &Path) -> Self {
@@ -337,5 +339,142 @@ impl ISessionPersistence for FileSessionPersistence {
 
     fn load_jsonl(&self, path: &Path) -> Result<String, String> {
         fs::read_to_string(path).map_err(|e| e.to_string())
+    }
+}
+
+/// Fast, memoized workspace manifest, Joyzoning topology, and governance rule probe implementing [`IWorkspacePromptProbe`].
+#[derive(Debug, Clone, Default)]
+pub struct WorkspacePromptProbe;
+
+impl WorkspacePromptProbe {
+    pub fn probe_cached(workspace_root: &Path) -> WorkspacePromptFacts {
+        static CACHE: OnceLock<Mutex<BTreeMap<String, (u64, WorkspacePromptFacts)>>> = OnceLock::new();
+        let stamp = Self::metadata_stamp(workspace_root);
+        let key = workspace_root.to_string_lossy().into_owned();
+        let cache = CACHE.get_or_init(|| Mutex::new(BTreeMap::new()));
+        if let Ok(guard) = cache.lock() {
+            if let Some((cached_stamp, facts)) = guard.get(&key) {
+                if *cached_stamp == stamp {
+                    return facts.clone();
+                }
+            }
+        }
+        let fresh = Self.probe_workspace(workspace_root);
+        if let Ok(mut guard) = cache.lock() {
+            if guard.len() >= 64 {
+                guard.clear();
+            }
+            guard.insert(key, (stamp, fresh.clone()));
+        }
+        fresh
+    }
+
+    fn metadata_stamp(workspace_root: &Path) -> u64 {
+        let watched = [
+            "Cargo.toml",
+            "package.json",
+            "pyproject.toml",
+            "Package.swift",
+            "native/Package.swift",
+            "go.mod",
+            "tsconfig.json",
+            "Makefile",
+            "joyzoning.json",
+            "stability.config.json",
+            "SOUL.md",
+            ".cursorrules",
+            "CLAUDE.md",
+            ".clinerules",
+            ".windsurfrules",
+        ];
+        let mut acc = 1469598103934665603u64;
+        for rel in &watched {
+            acc = acc.wrapping_mul(1099511628211);
+            if let Ok(meta) = fs::metadata(workspace_root.join(rel)) {
+                acc ^= meta.len().wrapping_add(1);
+                if let Ok(modified) = meta.modified() {
+                    if let Ok(dur) = modified.duration_since(std::time::UNIX_EPOCH) {
+                        acc ^= dur.as_nanos() as u64;
+                    }
+                }
+            }
+        }
+        acc
+    }
+
+    fn read_sanitized_governance(workspace_root: &Path) -> (Option<String>, Vec<String>, Vec<String>) {
+        let candidates = ["SOUL.md", ".cursorrules", "CLAUDE.md", ".clinerules", ".windsurfrules"];
+        let mut collected = Vec::new();
+        let mut sources = Vec::new();
+        let mut warnings = Vec::new();
+        for name in &candidates {
+            let p = workspace_root.join(name);
+            let Ok(raw) = fs::read_to_string(&p) else { continue };
+            let clean = sanitize_trojan_unicode(&raw);
+            let threats = SafetyPolicy::scan_for_threats(&clean, "context");
+            if !threats.is_empty() {
+                warnings.push(format!("{name} (quarantined: {})", threats.join(", ")));
+                continue;
+            }
+            let redacted = DeterministicSecretRedactor::redact(&clean);
+            let filtered: Vec<&str> = redacted
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with("<!--"))
+                .take(18)
+                .collect();
+            if !filtered.is_empty() {
+                sources.push((*name).to_string());
+                collected.push(format!("[{name}]\n{}", filtered.join("\n")));
+            }
+        }
+        let digest = if collected.is_empty() {
+            None
+        } else {
+            Some(truncate_text_to_token_budget(&collected.join("\n"), 240))
+        };
+        (digest, sources, warnings)
+    }
+}
+
+impl IWorkspacePromptProbe for WorkspacePromptProbe {
+    fn probe_workspace(&self, workspace_root: &Path) -> WorkspacePromptFacts {
+        let manifest_candidates = [
+            "Cargo.toml",
+            "Package.swift",
+            "native/Package.swift",
+            "package.json",
+            "pyproject.toml",
+            "go.mod",
+            "tsconfig.json",
+            "Makefile",
+        ];
+        let manifests: Vec<String> = manifest_candidates
+            .iter()
+            .filter(|rel| workspace_root.join(rel).is_file())
+            .map(|rel| (*rel).to_string())
+            .collect();
+
+        let joyzoning_detected = workspace_root.join("joyzoning.json").is_file()
+            || workspace_root.join("stability.config.json").is_file()
+            || (workspace_root.join("src/domain").is_dir() && workspace_root.join("src/core").is_dir());
+
+        let shell = std::env::var("SHELL")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "/bin/sh".to_string());
+
+        let (governance_digest, governance_sources, governance_warnings) =
+            Self::read_sanitized_governance(workspace_root);
+
+        WorkspacePromptFacts {
+            manifests,
+            joyzoning_detected,
+            os: std::env::consts::OS.to_string(),
+            shell,
+            governance_digest,
+            governance_sources,
+            governance_warnings,
+        }
     }
 }

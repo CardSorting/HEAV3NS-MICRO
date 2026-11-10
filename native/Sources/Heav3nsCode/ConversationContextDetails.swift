@@ -18,7 +18,7 @@ enum ContextHistoryPage {
 
 /// Bounded facts about retained conversation state, not a token/quality estimate.
 struct ConversationContextDetails {
-    static let headings = ["History available to LUMI", "Saved memory", "Current work", "About this snapshot", "Review and manage"]
+    static let headings = ["History available to LUMI", "Saved memory", "Current work", "Prompt & tool routing", "About this snapshot", "Review and manage"]
     let text: String
     let observed: String
     init?(_ data: [String: Any], conversation: String) {
@@ -37,11 +37,33 @@ struct ConversationContextDetails {
         let summary = summaries == 0 ? "No rolling summary in this history." : "\(summaries.formatted()) rolling summar\(summaries == 1 ? "y covers" : "ies cover") older messages. Summaries are abbreviated records."
         let memory = memories == 0 ? "No saved facts or preferences. Open Conversation Memory to add something LUMI should remember." : "\(memories.formatted()) saved memor\(memories == 1 ? "y" : "ies") available to future instructions in this conversation."
         let work = working ? "LUMI is working. Context may change as the instruction proceeds." : "No instruction is running."
-        text = ["History available to LUMI\n" + history + "\n" + summary,
-                "Saved memory\n" + memory,
-                "Current work\n" + work + (queued > 0 ? " \(queued) instruction\(queued == 1 ? " is" : "s are") queued." : " No queued instructions."),
-                "About this snapshot\nRetained history and memory for this conversation. Other instructions, skills, files and tools are included as LUMI prepares a request.",
-                "Review and manage\nUse Open… for retained history, memory, saved state, recorded runs and checkpoints. Reload updates this snapshot."].joined(separator: "\n\n")
+
+        var sections = [
+            "History available to LUMI\n" + history + "\n" + summary,
+            "Saved memory\n" + memory,
+            "Current work\n" + work + (queued > 0 ? " \(queued) instruction\(queued == 1 ? " is" : "s are") queued." : " No queued instructions.")
+        ]
+
+        if let profile = data["promptProfile"] as? String, ["standard", "compact", "swarm_specialist", "side_question"].contains(profile),
+           let activeTools = count("activeTools"), let totalTools = count("totalTools"), activeTools <= totalTools {
+            let deferred = totalTools - activeTools
+            let prefixNote = (data["cachePrefixHash"] as? String).flatMap { $0.isEmpty ? nil : " · prefix fnv1a:\($0)" } ?? ""
+            var routingLines = [
+                "Profile: \(profile)\(prefixNote).",
+                "\(activeTools) of \(totalTools) tools active\(deferred > 0 ? " (\(deferred) specialist tool\(deferred == 1 ? "" : "s") loaded on demand)" : "")."
+            ]
+            if let sources = data["governanceSources"] as? [String], !sources.isEmpty {
+                routingLines.append("Governance rules: \(sources.prefix(6).joined(separator: ", ")).")
+            }
+            if let warnings = data["governanceWarnings"] as? [String], !warnings.isEmpty {
+                routingLines.append("Quarantined rules: \(warnings.prefix(4).joined(separator: "; ")).")
+            }
+            sections.append("Prompt & tool routing\n" + routingLines.joined(separator: "\n"))
+        }
+
+        sections.append("About this snapshot\nRetained history and memory for this conversation. Other instructions, skills, files and tools are included as LUMI prepares a request.")
+        sections.append("Review and manage\nUse Open… for retained history, memory, saved state, recorded runs and checkpoints. Reload updates this snapshot.")
+        text = sections.joined(separator: "\n\n")
     }
 }
 

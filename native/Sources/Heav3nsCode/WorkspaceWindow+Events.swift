@@ -250,7 +250,7 @@ extension WorkspaceWindow {
         if client.capabilities.contains("project-run-v1") { actions.insert(WorkspaceAction(title: "Run Project", shortcut: "⌘R") { [weak self] in self?.showProjectRun() }, at: 1) }
         if client.capabilities.contains("checkpoints-v1") { actions.insert(WorkspaceAction(title: "Checkpoints", shortcut: "⌘7") { [weak self] in self?.showCheckpoints() }, at: 1) }
         if canShowMemory { actions.insert(WorkspaceAction(title: "Conversation Memory…", shortcut: "⌘8", keywords: ["remember", "context", "facts", "preferences", "notes"]) { [weak self] in self?.showMemory() }, at: 1) }
-        if canShowContext { actions.insert(WorkspaceAction(title: "Conversation Context", shortcut: "⌘9", keywords: ["history", "summary", "retained", "memory", "inspect"]) { [weak self] in self?.showContext() }, at: 1) }
+        if canShowContext { actions.insert(WorkspaceAction(title: "Conversation Context", shortcut: "⌘9", keywords: ["history", "summary", "retained", "memory", "inspect", "prompt", "tokens", "budget", "tools", "routing"]) { [weak self] in self?.showContext() }, at: 1) }
         if canCheckCode { actions.insert(WorkspaceAction(title: "Check Code", shortcut: "", keywords: ["spider", "syntax", "imports", "cycles", "diagnostics"]) { [weak self] in self?.showCodeCheck() }, at: 1) }
         if canShowSavedState { actions.insert(WorkspaceAction(title: "Saved State", shortcut: "", keywords: ["history", "storage", "integrity", "recovery", "runtime"]) { [weak self] in self?.showSavedState() }, at: 1) }
         if canSwitchConversation { actions.insert(WorkspaceAction(title: "New Conversation", shortcut: "⌘N") { [weak self] in self?.newConversation() }, at: 1) }
