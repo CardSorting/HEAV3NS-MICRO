@@ -139,15 +139,33 @@ impl HttpProvider {
                 obj
             })
             .collect();
+        let model_lower = req.model.to_ascii_lowercase();
+        let is_reasoning_or_modern = model_lower.starts_with("o1")
+            || model_lower.starts_with("o3")
+            || model_lower.starts_with("gpt-5")
+            || model_lower.contains("terra")
+            || model_lower.contains("reasoning");
+
         let mut payload = json!({
             "model": req.model,
             "messages": messages,
-            "max_tokens": req.max_tokens,
-            "temperature": req.temperature,
         });
+
+        if is_reasoning_or_modern {
+            payload["max_completion_tokens"] = json!(req.max_tokens);
+            if !model_lower.starts_with("o1") && !model_lower.starts_with("o3") {
+                payload["temperature"] = json!(req.temperature);
+            }
+        } else {
+            payload["max_tokens"] = json!(req.max_tokens);
+            payload["temperature"] = json!(req.temperature);
+        }
         if !req.tools.is_empty() {
             payload["tools"] = Value::Array(req.tools.clone());
             payload["tool_choice"] = Value::String("auto".to_string());
+            if model_lower.contains("terra") || model_lower.starts_with("gpt-5") {
+                payload["reasoning_effort"] = Value::String("none".to_string());
+            }
         }
         payload
     }
@@ -429,6 +447,47 @@ impl ILlmProvider for HttpProvider {
                 let status = resp.status().as_u16();
                 let text = resp.text().await.map_err(|e| ProviderError::Transport(e.to_string()))?;
                 if !(200..300).contains(&status) {
+                    let mut needs_retry = false;
+                    let mut healed_payload = payload.clone();
+
+                    if status == 400 && text.contains("max_completion_tokens") && healed_payload.get("max_tokens").is_some() {
+                        if let Some(tokens) = healed_payload.as_object_mut().and_then(|o| o.remove("max_tokens")) {
+                            healed_payload["max_completion_tokens"] = tokens;
+                            needs_retry = true;
+                        }
+                    }
+
+                    if status == 400 && text.contains("reasoning_effort") && text.contains("set reasoning_effort to 'none'") {
+                        healed_payload["reasoning_effort"] = Value::String("none".to_string());
+                        needs_retry = true;
+                    }
+
+                    if status == 400 && text.contains("Unsupported parameter: 'temperature'") {
+                        if let Some(obj) = healed_payload.as_object_mut() {
+                            obj.remove("temperature");
+                            needs_retry = true;
+                        }
+                    }
+
+                    if needs_retry {
+                        let mut retry_builder = self.client.post(&url).header("content-type", "application/json");
+                        if let Some(ref key) = self.api_key {
+                            retry_builder = retry_builder.bearer_auth(key);
+                        }
+                        if let Ok(retry_resp) = retry_builder.json(&healed_payload).send().await {
+                            let retry_status = retry_resp.status().as_u16();
+                            let retry_text = retry_resp.text().await.map_err(|e| ProviderError::Transport(e.to_string()))?;
+                            if (200..300).contains(&retry_status) {
+                                if retry_text.trim_start().starts_with("data:") {
+                                    return parse_sse_stream(&retry_text, &self.name);
+                                }
+                                let json_body: Value = serde_json::from_str(&retry_text)
+                                    .map_err(|e| ProviderError::Transport(format!("Invalid JSON from provider: {e}")))?;
+                                return Self::parse_openai_response(&json_body);
+                            }
+                        }
+                    }
+
                     return Err(ProviderError::HttpStatus {
                         status,
                         body: text,
@@ -462,6 +521,81 @@ impl ILlmProvider for HttpProvider {
                     .unwrap_or(Err(ProviderError::Timeout))
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_openai_payload_modern_and_reasoning_models_use_max_completion_tokens() {
+        let provider = HttpProvider::new("openai", "https://api.openai.com/v1", None, 30_000);
+        let req = ProviderRequest {
+            model: "gpt-5.6-terra".to_string(),
+            messages: vec![crate::domain::types::messages::SessionMessage::new(
+                Role::User,
+                "Hello",
+            )],
+            tools: Vec::new(),
+            max_tokens: 4096,
+            temperature: 0.0,
+        };
+        let payload = provider.build_openai_payload(&req);
+        assert_eq!(payload["max_completion_tokens"], 4096);
+        assert!(payload.get("max_tokens").is_none());
+        assert_eq!(payload["temperature"], 0.0);
+
+        let req_with_tools = ProviderRequest {
+            model: "gpt-5.6-terra".to_string(),
+            messages: vec![crate::domain::types::messages::SessionMessage::new(
+                Role::User,
+                "List files",
+            )],
+            tools: vec![serde_json::json!({
+                "type": "function",
+                "function": { "name": "list_files", "parameters": {} }
+            })],
+            max_tokens: 4096,
+            temperature: 0.0,
+        };
+        let payload_tools = provider.build_openai_payload(&req_with_tools);
+        assert_eq!(payload_tools["reasoning_effort"], "none");
+
+        let req_o1 = ProviderRequest {
+            model: "o1-mini".to_string(),
+            messages: vec![crate::domain::types::messages::SessionMessage::new(
+                Role::User,
+                "Hello",
+            )],
+            tools: Vec::new(),
+            max_tokens: 2048,
+            temperature: 1.0,
+        };
+        let payload_o1 = provider.build_openai_payload(&req_o1);
+        assert_eq!(payload_o1["max_completion_tokens"], 2048);
+        assert!(payload_o1.get("max_tokens").is_none());
+        // o1 models do not include temperature
+        assert!(payload_o1.get("temperature").is_none());
+    }
+
+    #[test]
+    fn test_build_openai_payload_legacy_models_use_max_tokens() {
+        let provider = HttpProvider::new("openai", "https://api.openai.com/v1", None, 30_000);
+        let req = ProviderRequest {
+            model: "gpt-3.5-turbo".to_string(),
+            messages: vec![crate::domain::types::messages::SessionMessage::new(
+                Role::User,
+                "Hello",
+            )],
+            tools: Vec::new(),
+            max_tokens: 1024,
+            temperature: 0.0,
+        };
+        let payload = provider.build_openai_payload(&req);
+        assert_eq!(payload["max_tokens"], 1024);
+        assert!(payload.get("max_completion_tokens").is_none());
+        assert_eq!(payload["temperature"], 0.0);
     }
 }
 

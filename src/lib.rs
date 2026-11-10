@@ -21,6 +21,7 @@ pub mod engine {
 
 /// Backward-compatible public module facade for the Agent Flight Test suite and micro-benchmarks.
 pub mod flight {
+    pub use crate::core::benchmark_runner::{run_full_benchmark_suite, run_stress_benchmarks, run_workspace_benchmarks};
     pub use crate::core::flight_runner::{format_flight_test_report, run_agent_flight_test, run_micro_benchmarks, FlightTestCheck, FlightTestReport, FlightTestScenarioResult, FlightTestSummary};
 }
 
@@ -93,4 +94,10 @@ pub mod computer_use {
     pub use crate::domain::types::swarm_intelligence_types::{ConsultationRiskLevel, ISpecialistInsight, ISwarmConsultationResponse, SpecialistInsight, SwarmConsultationRequest, SwarmConsultationResponse};
     pub use crate::infrastructure::behavioral_store::BehavioralKnowledgeStore;
     pub use crate::plumbing::environmental_diff::{analyze_spider_structural_relationships, calibrate_confidence_score, classify_element_affordance, compute_element_deltas, detect_modal_or_dialog, diagnose_failure_cause};
+}
+
+/// Backward-compatible public module facade for CLI onboarding, diagnostics, and presentation.
+pub mod onboarding {
+    pub use crate::ui::cli_presenter::{Heav3nsUserConfig, RunMode};
+    pub use crate::ui::onboarding::{create_cli_progress_listener, format_auth_error_card, format_turn_summary, print_onboarding_notice, print_tool_catalog, print_welcome_banner, render_color_diff, run_doctor_cli, run_guided_demo, run_init_wizard};
 }

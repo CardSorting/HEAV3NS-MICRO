@@ -178,6 +178,9 @@ impl AgentEngine {
                 "  /diff               - Render unified diff of staged VFS or workspace changes",
                 "  /commit             - Commit staged VFS mutations to disk",
                 "  /discard            - Discard staged VFS mutations",
+                "  /tools              - List registered built-in tools across 7 Sovereign Pillars",
+                "  /guide              - Display quickstart setup and onboarding guide",
+                "  /demo               - Information on running the offline interactive tour",
                 "  /memory [query]     - List or search persistent LUMI-MEMORY/1 facts",
                 "  /skills             - List discovered workspace SKILL.md & DAG capabilities",
                 "  /soul               - Inspect active Soul persona, axioms, and competencies",
@@ -252,6 +255,40 @@ impl AgentEngine {
                 self.vfs().lock().unwrap().clear();
                 "Discarded all staged VFS changes.".to_string()
             }
+            "/tools" => {
+                let specs = crate::core::tool_specs::builtin_tool_specs();
+                let mut lines = vec![format!("Registered Built-in Tools ({} available):", specs.len())];
+                for s in specs {
+                    lines.push(format!("  {:26} - {}", s.name, s.description));
+                }
+                lines.join("\n")
+            }
+            "/guide" | "/quickstart" => [
+                "HEAV3NS-MICRO Quickstart Guide:",
+                "  1. Configure AI Provider:",
+                "     - Set OpenAI key:    export OPENAI_API_KEY=\"sk-...\"",
+                "     - Or use Gemini:      export GEMINI_API_KEY=\"...\"",
+                "     - Or use free Ollama: heav3ns-micro --provider ollama -m llama3.2",
+                "  2. Core Safety & VFS Commands:",
+                "     /stats    - View session memory, 16-MiB arena slab, token usage",
+                "     /vfs      - Inspect staged sandboxed file modifications",
+                "     /diff     - View unified diff before committing changes to disk",
+                "     /commit   - Safely write staged VFS files to disk",
+                "     /discard  - Discard staged changes safely",
+                "     /memory   - Search long-term persistent knowledge store",
+                "     /doctor   - Inspect SLA health, Skill Tree DAG, and display status",
+                "     /tools    - List all registered built-in tools",
+                "     /demo     - Walkthrough the 5 sovereign pillars",
+            ]
+            .join("\n"),
+            "/demo" => [
+                "HEAV3NS-MICRO Zero-Key Guided Tour:",
+                "  To run the full interactive guided tour in your terminal, run:",
+                "    heav3ns-micro demo",
+                "  This executes the 5 sovereign pillars (Arena Slab, VFS Sandbox, Diff Review,",
+                "  LUMI-MEMORY persistence, and Flight Suite validation) completely offline.",
+            ]
+            .join("\n"),
             "/memory" => {
                 let mem = self.memory().lock().unwrap();
                 if arg.is_empty() {

@@ -6,6 +6,7 @@
   <a href="../../doc.md">Foundational Charter (doc.md)</a> ·
   <a href="ascendant-intelligence.md">Ascendant Intelligence</a> ·
   <a href="companion-brief.md">Companion Brief</a> ·
+  <a href="empirical-benchmarking.md">Empirical Benchmarking</a> ·
   <a href="philosophy.md">Philosophy</a> ·
   <a href="whitepaper.md">Whitepaper</a> ·
   <a href="../wiki/README.md">Wiki</a>
@@ -21,6 +22,7 @@ This section contains the theoretical, mathematical, and empirical foundations o
 | :--- | :--- | :--- |
 | **[The Ascendant Computational Intelligence](ascendant-intelligence.md)** | Foundational Doctrine & Cybernetic Theory | The Seven Sovereign Pillars (`HEAV3NS-MICRO`, `SPIDER`, `REWIND`, `BROCCOLI`, `SYNTHETIC SWARM`, `COMPUTER USE`, `THE HARNESS`), emergent intelligence formalism, and the 5 Grand Challenges. |
 | **[Companion Brief](companion-brief.md)** | Executive & SRE Overview | Live workspace-verified metrics (`64` Rust modules, `39` `I<Name>` traits, `29` tools, `49` Rust tests, `311` AppKit tests, `E_S = 0.0038`), benchmark throughput, and operational comparison. |
+| **[Empirical Benchmarking](empirical-benchmarking.md)** | Empirical Evaluation & Stress Dynamics | Live micro-benchmarks ($260\text{k}$ allocs/sec, $6.3\text{k}$ parser repairs/sec, $17\text{k}$ spatial groundings/sec) and real-world workspace task verification across 4 testbeds in `/Users/bozoegg/Desktop/tests`. |
 | **[Philosophy](philosophy.md)** | Engineering Values & Ethics | Spatial sovereignty, embodied agency beyond passive token prediction, bounded memory, and reversible reality parity. |
 | **[Technical Whitepaper](whitepaper.md)** | Formal Substrate & Spatial Specification | Arena bump allocation, self-healing streaming parsing, two-phase VFS, Double-Wrapped Spatial Action Mediation (`Wrapper A` + `Wrapper B`), 9-stage Closed-Loop Computer Use, and AppKit JSON-RPC IPC. |
 
@@ -30,8 +32,9 @@ This section contains the theoretical, mathematical, and empirical foundations o
 
 1. **Visionaries & System Leaders**: Begin with [`doc.md`](../../doc.md) and **[The Ascendant Computational Intelligence](ascendant-intelligence.md)** to understand the seven cooperating pillars of the HEAV3NS computational civilization.
 2. **New Visitors & Executives**: Read the **[Companion Brief](companion-brief.md)** for a concise, workspace-verified summary of metrics, capabilities, and architectural guarantees.
-3. **Software Architects**: Read **[Philosophy](philosophy.md)** to understand why Joyzoning spatial sovereignty, embodied agency, and zero-allocation memory models matter for autonomous systems.
-4. **Core Substrate Engineers**: Study the **[Technical Whitepaper](whitepaper.md)** for mathematical models, formal algorithms, and empirical verification data.
+3. **Performance Engineers & SREs**: Read **[Empirical Benchmarking](empirical-benchmarking.md)** for quantitative throughput profiling, stress dynamics, and real-world multi-language workspace evaluation.
+4. **Software Architects**: Read **[Philosophy](philosophy.md)** to understand why Joyzoning spatial sovereignty, embodied agency, and zero-allocation memory models matter for autonomous systems.
+5. **Core Substrate Engineers**: Study the **[Technical Whitepaper](whitepaper.md)** for mathematical models, formal algorithms, and empirical verification data.
 
 ---
 

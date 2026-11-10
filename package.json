@@ -4,6 +4,7 @@
   "description": "Hyper-Compressed Rust Micro Agent Runtime with Joyzoning spatial sovereignty and Diátaxis documentation governance",
   "type": "module",
   "scripts": {
+    "bench": "node bin/bench-suite.mjs",
     "docs:check": "node bin/docs-check.mjs",
     "joy-check": "node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --theme strict",
     "test": "cargo test",

@@ -21,6 +21,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+/// Computes the content-addressed deterministic revision of a workspace tree.
+pub fn compute_workspace_revision(root: &Path) -> String {
+    crate::infrastructure::vfs_store::workspace_revision(root)
+}
+
 /// Core Agent Engine orchestrating turns, tool waves, topological swarms, and deterministic state snapshots.
 pub struct AgentEngine {
     workspace_root: PathBuf,
@@ -629,13 +634,26 @@ impl AgentEngine {
                 })
                 .collect();
 
+            let tool_desc: Vec<String> = scheduled_calls
+                .iter()
+                .map(|c| {
+                    let target = c.args.get("path")
+                        .or_else(|| c.args.get("CommandLine"))
+                        .or_else(|| c.args.get("command"))
+                        .or_else(|| c.args.get("query"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if target.is_empty() { c.name.clone() } else { format!("{}: {}", c.name, target) }
+                })
+                .collect();
+
             let batch_id = format!("tools-r{round}");
             self.emit_progress(
                 &input.on_progress,
                 &batch_id,
                 EngineProgressPhase::Tool,
                 EngineProgressStatus::Started,
-                format!("Executing {} tool call(s)", scheduled_calls.len()),
+                tool_desc.join("; "),
                 None,
                 started_ms,
                 Some(EngineProgressMetadata {
@@ -698,12 +716,22 @@ impl AgentEngine {
                 }
             }
 
+            let completed_desc: Vec<String> = all_tool_results
+                .iter()
+                .rev()
+                .take(resp.tool_calls.len())
+                .map(|r| {
+                    let status = if r.success { "ok" } else { "err" };
+                    format!("{} ({}, {}ms)", r.name, status, r.duration_ms)
+                })
+                .collect();
+
             self.emit_progress(
                 &input.on_progress,
                 &batch_id,
                 EngineProgressPhase::Tool,
                 EngineProgressStatus::Completed,
-                format!("Completed {} tool call(s)", resp.tool_calls.len()),
+                completed_desc.join("; "),
                 None,
                 started_ms,
                 Some(EngineProgressMetadata {
@@ -727,6 +755,20 @@ impl AgentEngine {
             started_ms,
             None,
         );
+
+        if final_response.trim().is_empty() {
+            final_response = if !all_tool_results.is_empty() {
+                let success_count = all_tool_results.iter().filter(|r| r.success).count();
+                let tool_names: Vec<String> = all_tool_results.iter().map(|r| r.name.clone()).collect();
+                format!(
+                    "Completed {} tool action(s) successfully: {}.",
+                    success_count,
+                    tool_names.join(", ")
+                )
+            } else {
+                "Turn completed with no text response from model.".to_string()
+            };
+        }
 
         EngineTickResult {
             frame_index,
