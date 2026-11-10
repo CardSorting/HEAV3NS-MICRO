@@ -66,3 +66,4 @@ cargo test core::zenith_tests::tests::test_adr_0016_compound_wrappers_stderr_and
 # 2. Verify all substrate and security tests
 cargo test core::substrate_tests::tests::test_secret_redactor_and_sensitive_path_guard
 ```
+

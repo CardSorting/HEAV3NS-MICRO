@@ -68,3 +68,4 @@ cargo test core::substrate_tests::tests::test_sticky_dynamic_tool_schema_routing
 # 3. Verify visual context HUD and RPC telemetry
 cargo run -- context
 ```
+
