@@ -16,6 +16,27 @@
   <a href="native/PRODUCT.md">Native Product Spec</a>
 </p>
 
+<p align="center">
+  <a href="docs/i18n/README.zh-CN.md">简体中文</a> ·
+  <a href="docs/i18n/README.ja-JP.md">日本語</a> ·
+  <a href="docs/i18n/README.vi.md">Tiếng Việt</a> ·
+  <a href="docs/i18n/README.id.md">Bahasa Indonesia</a> ·
+  <a href="docs/i18n/README.ko-KR.md">한국어</a> ·
+  <a href="docs/i18n/README.es-419.md">Español</a> ·
+  <a href="docs/i18n/README.pt-BR.md">Português</a> ·
+  <a href="docs/i18n/README.ru.md">Русский</a> ·
+  <a href="docs/i18n/README.uk.md">Українська</a> ·
+  <a href="docs/i18n/README.fr.md">Français</a> ·
+  <a href="docs/i18n/README.de.md">Deutsch</a> ·
+  <a href="docs/i18n/README.zh-TW.md">繁體中文</a> ·
+  <a href="docs/i18n/README.hi.md">हिन्दी</a> ·
+  <a href="docs/i18n/README.tr.md">Türkçe</a> ·
+  <a href="docs/i18n/README.it.md">Italiano</a> ·
+  <a href="docs/i18n/README.pl.md">Polski</a> ·
+  <a href="docs/i18n/README.ar.md">العربية</a> ·
+  <a href="docs/i18n/README.ca.md">Català</a>
+</p>
+
 ---
 
 ## The Seven Sovereign Pillars (`HEAV3NS`)
