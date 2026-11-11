@@ -164,6 +164,14 @@ impl AgentEngine {
         self.prefix_tracker.lock().unwrap().declare_repin("model_switch");
     }
 
+    pub fn set_reasoning_effort(&self, effort: Option<String>) {
+        self.config.lock().unwrap().reasoning_effort = effort.filter(|s| !s.trim().is_empty());
+    }
+
+    pub fn set_fallback_providers(&self, fallbacks: Vec<String>) {
+        self.config.lock().unwrap().fallback_providers = fallbacks;
+    }
+
     pub fn snapshots_list(&self) -> Vec<GameStateSnapshot> {
         self.snapshots.lock().unwrap().clone()
     }
@@ -369,6 +377,7 @@ impl AgentEngine {
         let auto_decision = Self::route_turn_model(&cfg.provider, &cfg.model_name, &input.prompt);
         let mut active_model = auto_decision.selected_model;
         let mut is_fallback_model = false;
+        let mut turn_route: Option<(Arc<dyn ILlmProvider>, String, String)> = None;
         let mut all_tool_results: Vec<ToolExecutionRecord> = Vec::new();
         let mut tools_admitted = false;
         let mut last_composed_summary = String::new();
@@ -405,8 +414,9 @@ impl AgentEngine {
                 }
                 self.emit_progress_internal(&input.on_progress, &turn_activity_id, EngineProgressPhase::Cancelled, EngineProgressStatus::Cancelled, &msg, None, started_ms, None);
                 let dur = now_ms().saturating_sub(started_ms);
+                let (r_prov, r_ep) = turn_route.as_ref().map(|(_, p, e)| (p.as_str(), e.as_str())).unwrap_or((&cfg.provider, &cfg.api_endpoint));
                 let receipt = self.build_and_persist_turn_receipt(
-                    turn_num, frame_index, &cfg.provider, &cfg.api_endpoint, &active_model, effective_posture,
+                    turn_num, frame_index, r_prov, r_ep, &active_model, effective_posture,
                     EngineTickOutcome::Cancelled, dur, accumulated_usage, last_prefix_hash, last_prefix_status, snap_before, &all_tool_results,
                 );
                 return EngineTickResult {
@@ -432,8 +442,9 @@ impl AgentEngine {
                 }
                 self.emit_progress_internal(&input.on_progress, &turn_activity_id, EngineProgressPhase::Deferred, EngineProgressStatus::Deferred, &msg, None, started_ms, None);
                 let dur = now_ms().saturating_sub(started_ms);
+                let (r_prov, r_ep) = turn_route.as_ref().map(|(_, p, e)| (p.as_str(), e.as_str())).unwrap_or((&cfg.provider, &cfg.api_endpoint));
                 let receipt = self.build_and_persist_turn_receipt(
-                    turn_num, frame_index, &cfg.provider, &cfg.api_endpoint, &active_model, effective_posture,
+                    turn_num, frame_index, r_prov, r_ep, &active_model, effective_posture,
                     EngineTickOutcome::Deferred, dur, accumulated_usage, last_prefix_hash, last_prefix_status, snap_before, &all_tool_results,
                 );
                 return EngineTickResult {
@@ -501,6 +512,7 @@ impl AgentEngine {
                     tools_admitted,
                     &mut active_model,
                     &mut is_fallback_model,
+                    &mut turn_route,
                     &messages_for_provider,
                     &openai_tools,
                     &input.cancel_token,
@@ -518,8 +530,9 @@ impl AgentEngine {
                     }
                     self.emit_progress_internal(&input.on_progress, &turn_activity_id, EngineProgressPhase::Cancelled, EngineProgressStatus::Cancelled, &msg, None, started_ms, None);
                     let dur = now_ms().saturating_sub(started_ms);
+                    let (r_prov, r_ep) = turn_route.as_ref().map(|(_, p, e)| (p.as_str(), e.as_str())).unwrap_or((&cfg.provider, &cfg.api_endpoint));
                     let receipt = self.build_and_persist_turn_receipt(
-                        turn_num, frame_index, &cfg.provider, &cfg.api_endpoint, &active_model, effective_posture,
+                        turn_num, frame_index, r_prov, r_ep, &active_model, effective_posture,
                         EngineTickOutcome::Cancelled, dur, accumulated_usage, last_prefix_hash, last_prefix_status, snap_before, &all_tool_results,
                     );
                     return EngineTickResult {
@@ -556,8 +569,9 @@ impl AgentEngine {
                     };
                     self.emit_progress_internal(&input.on_progress, &turn_activity_id, EngineProgressPhase::Failed, EngineProgressStatus::Failed, &err_str, None, started_ms, None);
                     let dur = now_ms().saturating_sub(started_ms);
+                    let (r_prov, r_ep) = turn_route.as_ref().map(|(_, p, e)| (p.as_str(), e.as_str())).unwrap_or((&cfg.provider, &cfg.api_endpoint));
                     let receipt = self.build_and_persist_turn_receipt(
-                        turn_num, frame_index, &cfg.provider, &cfg.api_endpoint, &active_model, effective_posture,
+                        turn_num, frame_index, r_prov, r_ep, &active_model, effective_posture,
                         EngineTickOutcome::Failed, dur, accumulated_usage, last_prefix_hash, last_prefix_status, snap_before, &all_tool_results,
                     );
                     return EngineTickResult {
@@ -582,6 +596,7 @@ impl AgentEngine {
                 tools: openai_tools,
                 max_tokens: cfg.max_output_tokens,
                 temperature: cfg.temperature,
+                reasoning_effort: cfg.reasoning_effort.clone(),
             };
             Self::accumulate_usage(&mut accumulated_usage, &req_for_usage, &resp);
 
@@ -746,8 +761,9 @@ impl AgentEngine {
 
         self.emit_progress_internal(&input.on_progress, &turn_activity_id, EngineProgressPhase::Completed, EngineProgressStatus::Completed, "Turn completed", None, started_ms, None);
         let dur = now_ms().saturating_sub(started_ms);
+        let (r_prov, r_ep) = turn_route.as_ref().map(|(_, p, e)| (p.as_str(), e.as_str())).unwrap_or((&cfg.provider, &cfg.api_endpoint));
         let receipt = self.build_and_persist_turn_receipt(
-            turn_num, frame_index, &cfg.provider, &cfg.api_endpoint, &active_model, effective_posture,
+            turn_num, frame_index, r_prov, r_ep, &active_model, effective_posture,
             EngineTickOutcome::Completed, dur, accumulated_usage, last_prefix_hash, last_prefix_status, snap_before, &all_tool_results,
         );
 

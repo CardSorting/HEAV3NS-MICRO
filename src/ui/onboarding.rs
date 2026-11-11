@@ -3,12 +3,15 @@ use crate::core::compute_workspace_revision;
 use crate::core::engine::AgentEngine;
 use crate::core::tool_specs::builtin_tool_specs;
 use crate::domain::types::progress::{EngineProgressEvent, EngineProgressPhase, EngineProgressStatus};
+use crate::domain::types::provider_registry::{lookup_provider_descriptor, retired_provider_remediation, suggest_provider_slug, PROVIDER_DESCRIPTORS};
 use crate::plumbing::hash_and_math::{levenshtein, now_ms};
 use crate::plumbing::text_tokens::mask_secret_preview;
 use crate::ui::cli_presenter::Heav3nsUserConfig;
 use std::env;
 use std::io::{self, Write};
+use std::net::{SocketAddr, TcpStream};
 use std::path::Path;
+use std::time::Duration;
 
 /// Check whether ANSI styling should be active based on environment.
 pub fn is_color_enabled() -> bool {
@@ -56,10 +59,18 @@ pub fn dim(text: &str) -> String {
     style(text, "2")
 }
 
+/// Returns `true` when `provider` is a zero-key local inference route (`ollama`, `vllm`, `sglang`, `lmstudio`, `apple-playground`, `custom`, `scripted`).
+pub fn is_zero_key_local_provider(provider: &str) -> bool {
+    provider.eq_ignore_ascii_case("scripted")
+        || lookup_provider_descriptor(provider).is_some_and(|d| !d.requires_api_key && !d.retired)
+}
+
 /// Prints a welcome banner and runtime status pill.
 pub fn print_welcome_banner(cwd: &Path, provider: &str, model: &str, has_key: bool) {
-    let key_status = if provider.eq_ignore_ascii_case("ollama") {
-        green("[LOCAL OLLAMA — ZERO KEY NEEDED]")
+    let key_status = if retired_provider_remediation(provider).is_some() {
+        red("[RETIRED PROVIDER — SWITCH TO GEMINI]")
+    } else if is_zero_key_local_provider(provider) {
+        green("[LOCAL AI — ZERO KEY NEEDED]")
     } else if has_key {
         green("[AUTHENTICATED]")
     } else {
@@ -78,6 +89,10 @@ pub fn print_welcome_banner(cwd: &Path, provider: &str, model: &str, has_key: bo
 
 /// Displays an onboarding quickstart notice for users without API keys configured.
 pub fn print_onboarding_notice(provider: &str, model: &str) {
+    let desc = lookup_provider_descriptor(provider).filter(|d| !d.retired);
+    let primary_env = desc.and_then(|d| d.env_vars.first().copied()).unwrap_or("OPENAI_API_KEY");
+    let slot = desc.map(|d| d.secret_slot).unwrap_or(provider);
+    let portal = desc.map(|d| d.credential_url).unwrap_or("https://platform.openai.com/api-keys");
     println!();
     println!("{}", yellow("┌──────────────────────────────────────────────────────────────────────────────┐"));
     println!("{}  {}  {}", yellow("│"), bold("QUICKSTART & ONBOARDING GUIDE"), yellow("│"));
@@ -85,51 +100,66 @@ pub fn print_onboarding_notice(provider: &str, model: &str) {
     println!("{}  No API key is configured for provider '{}' (model '{}').", yellow("│"), cyan(provider), dim(model));
     println!("{}  Here are your fastest options to get started immediately:", yellow("│"));
     println!("{}", yellow("│"));
-    println!("{}  {} {}", yellow("│"), bold("1. Instant Offline Demo (Zero Setup / Zero Keys):"), yellow("│"));
+    println!("{}  {} {}", yellow("│"), bold("1. Configure Active Provider Credential:"), yellow("│"));
+    println!("{}     Export: {}export {primary_env}=\"<YOUR_KEY>\"", yellow("│"), dim(""));
+    println!("{}     Vault:  {}", yellow("│"), cyan(&format!("heav3ns-micro config set key.{slot} \"<YOUR_KEY>\"")));
+    println!("{}     Portal: {}", yellow("│"), dim(portal));
+    println!("{}", yellow("│"));
+    println!("{}  {} {}", yellow("│"), bold("2. Instant Offline Demo (Zero Setup / Zero Keys):"), yellow("│"));
     println!("{}     Run {} or type {} inside this session.", yellow("│"), cyan("heav3ns-micro demo"), cyan("/demo"));
-    println!("{}     Experience tool calling, VFS sandboxing, and memory without network.", yellow("│"));
     println!("{}", yellow("│"));
-    println!("{}  {} {}", yellow("│"), bold("2. Free Local AI via Ollama:"), yellow("│"));
-    println!("{}     Run: {}", yellow("│"), cyan("heav3ns-micro --provider ollama -m llama3.2"));
-    println!("{}     Connects to local models with no API keys or telemetry.", yellow("│"));
+    println!("{}  {} {}", yellow("│"), bold("3. Free Local AI (Ollama / vLLM / SGLang / LM Studio):"), yellow("│"));
+    println!("{}     Run: {}", yellow("│"), cyan("heav3ns-micro --provider ollama -m qwen2.5-coder:14b"));
     println!("{}", yellow("│"));
-    println!("{}  {} {}", yellow("│"), bold("3. Interactive Setup Wizard:"), yellow("│"));
-    println!("{}     Run: {}", yellow("│"), cyan("heav3ns-micro init"));
-    println!("{}     Guides you through provider, model, and persistent credentials.", yellow("│"));
-    println!("{}", yellow("│"));
-    println!("{}  {} {}", yellow("│"), bold("4. Set Environment Variables:"), yellow("│"));
-    println!("{}     OpenAI:    {}export OPENAI_API_KEY=\"sk-...\"", yellow("│"), dim(""));
-    println!("{}     Gemini:    {}export GEMINI_API_KEY=\"AIza...\"", yellow("│"), dim(""));
-    println!("{}     Anthropic: {}export ANTHROPIC_API_KEY=\"sk-ant-...\"", yellow("│"), dim(""));
-    println!("{}", yellow("│"));
+    println!("{}  {} {}", yellow("│"), bold("4. Interactive Setup Wizard (65 Providers):"), yellow("│"));
+    println!("{}     Run: {}  (or switch live via {})", yellow("│"), cyan("heav3ns-micro init"), cyan("/provider list"));
     println!("{}  {} Type {} to diagnose or {} for all commands.", yellow("│"), bold("Tip:"), cyan("/doctor"), cyan("/help"));
     println!("{}", yellow("└──────────────────────────────────────────────────────────────────────────────┘"));
     println!();
 }
 
-/// Formats a clean authentication error card when an LLM provider returns a 401/403.
+/// Formats a provider-aware authentication & remediation card when an LLM provider rejects credentials.
 pub fn format_auth_error_card(raw_err: &str, provider: &str, model: &str) -> String {
     let mut out = String::new();
     out.push('\n');
     out.push_str(&yellow("┌──────────────────────────────────────────────────────────────────────────────┐\n"));
+    if let Some(retired_msg) = retired_provider_remediation(provider) {
+        out.push_str(&format!("{}  {}  {}\n", yellow("│"), bold("RETIRED PROVIDER SELECTOR — ACTION REQUIRED"), yellow("│")));
+        out.push_str(&yellow("├──────────────────────────────────────────────────────────────────────────────┤\n"));
+        out.push_str(&format!("{}  {}\n", yellow("│"), red(retired_msg)));
+        out.push_str(&format!("{}    1. Switch in session: {}\n", yellow("│"), cyan("/provider gemini")));
+        out.push_str(&format!("{}    2. Export Gemini key: {}\n", yellow("│"), cyan("export GEMINI_API_KEY=\"AIza...\"")));
+        out.push_str(&yellow("└──────────────────────────────────────────────────────────────────────────────┘\n"));
+        return out;
+    }
+
+    let desc = lookup_provider_descriptor(provider);
+    let disp = desc.map(|d| d.display_name).unwrap_or(provider);
+    let env_list = desc
+        .filter(|d| !d.env_vars.is_empty())
+        .map(|d| d.env_vars.join(" / "))
+        .unwrap_or_else(|| "CUSTOM_LLM_API_KEY".to_string());
+    let primary_env = desc.and_then(|d| d.env_vars.first().copied()).unwrap_or("CUSTOM_LLM_API_KEY");
+    let slot = desc.map(|d| d.secret_slot).unwrap_or(provider);
+    let portal = desc.map(|d| d.credential_url).unwrap_or("https://openrouter.ai/keys");
+
     out.push_str(&format!("{}  {}  {}\n", yellow("│"), bold("AUTHENTICATION REQUIRED — LLM PROVIDER ERROR"), yellow("│")));
     out.push_str(&yellow("├──────────────────────────────────────────────────────────────────────────────┤\n"));
-    out.push_str(&format!("{}  Provider '{}' with model '{}' rejected the request.\n", yellow("│"), cyan(provider), dim(model)));
-    
+    out.push_str(&format!("{}  Provider '{}' ({}) with model '{}' rejected the request.\n", yellow("│"), cyan(provider), dim(disp), dim(model)));
     let summary = if raw_err.contains("401") || raw_err.contains("API key") || raw_err.contains("Authorization") {
         "Missing or invalid API key."
     } else {
         "Request failed to authenticate with the provider."
     };
-    out.push_str(&format!("{}  Reason: {}\n", yellow("│"), red(summary)));
+    out.push_str(&format!("{}  Reason: {} (expected env: {})\n", yellow("│"), red(summary), cyan(&env_list)));
+    out.push_str(&format!("{}  Credential portal: {}\n", yellow("│"), dim(portal)));
     out.push_str(&yellow("│\n"));
     out.push_str(&format!("{}  {} Choose one of the following solutions:\n", yellow("│"), bold("HOW TO RESOLVE:")));
-    out.push_str(&yellow("│\n"));
-    out.push_str(&format!("{}    1. Run interactive setup wizard: {}\n", yellow("│"), cyan("heav3ns-micro init")));
-    out.push_str(&format!("{}    2. Set environment key:          {}\n", yellow("│"), cyan("export OPENAI_API_KEY=\"sk-...\"")));
-    out.push_str(&format!("{}    3. Use Google Gemini:            {}\n", yellow("│"), cyan("export GEMINI_API_KEY=\"...\" && heav3ns-micro -m gemini-2.0-flash --provider gemini")));
-    out.push_str(&format!("{}    4. Use free local Ollama:        {}\n", yellow("│"), cyan("heav3ns-micro --provider ollama -m llama3.2")));
-    out.push_str(&format!("{}    5. Test runtime offline:         {}\n", yellow("│"), cyan("heav3ns-micro demo")));
+    out.push_str(&format!("{}    1. Export provider key:    {}\n", yellow("│"), cyan(&format!("export {primary_env}=\"<YOUR_KEY>\""))));
+    out.push_str(&format!("{}    2. Save to local vault:    {}\n", yellow("│"), cyan(&format!("heav3ns-micro config set key.{slot} \"<YOUR_KEY>\""))));
+    out.push_str(&format!("{}    3. Switch live in session: {}\n", yellow("│"), cyan("/provider list  (or /provider ollama)")));
+    out.push_str(&format!("{}    4. Run setup wizard:       {}\n", yellow("│"), cyan("heav3ns-micro init")));
+    out.push_str(&format!("{}    5. Test runtime offline:   {}\n", yellow("│"), cyan("heav3ns-micro demo")));
     out.push_str(&yellow("└──────────────────────────────────────────────────────────────────────────────┘\n"));
     out
 }
@@ -163,66 +193,87 @@ pub fn run_doctor_cli(cwd: &Path, opts_provider: Option<&str>, opts_model: Optio
         println!("  {} Active model specified: {}", green("✔"), cyan(m));
     }
 
-    let openai_key = env::var("OPENAI_API_KEY").ok().filter(|s| !s.is_empty());
-    let gemini_key = env::var("GEMINI_API_KEY").or_else(|_| env::var("GOOGLE_API_KEY")).ok().filter(|s| !s.is_empty());
-    let anthropic_key = env::var("ANTHROPIC_API_KEY").ok().filter(|s| !s.is_empty());
-    let alt_key = env::var("OPENROUTER_API_KEY")
-        .or_else(|_| env::var("DEEPSEEK_API_KEY"))
-        .or_else(|_| env::var("GROQ_API_KEY"))
-        .or_else(|_| env::var("XAI_API_KEY"))
-        .ok()
-        .filter(|s| !s.is_empty());
-
-    let mut keys_found = 0;
-    if let Some(k) = openai_key {
-        let masked = mask_secret_preview(&k);
-        println!("  {} OPENAI_API_KEY is active ({})", green("✔"), dim(&masked));
-        keys_found += 1;
-    } else {
-        println!("  {} OPENAI_API_KEY is not set", yellow("⚠"));
+    let dotenv = Heav3nsUserConfig::read_dotenv_map(cwd);
+    let vault_keys = user_cfg.as_ref().map(|c| c.effective_provider_keys()).unwrap_or_default();
+    let active_descriptor_count = PROVIDER_DESCRIPTORS.iter().filter(|d| !d.retired).count();
+    let mut keys_found = 0usize;
+    let mut seen_slots = std::collections::BTreeSet::new();
+    for desc in PROVIDER_DESCRIPTORS {
+        if desc.retired || !desc.requires_api_key || !seen_slots.insert(desc.secret_slot) {
+            continue;
+        }
+        let env_hit = desc
+            .env_vars
+            .iter()
+            .find_map(|ev| Heav3nsUserConfig::resolve_env_or_dotenv(ev, &dotenv).map(|v| (*ev, v)));
+        if let Some((ev_name, secret)) = env_hit {
+            println!(
+                "  {} {:16} active via {} ({}, wire: {})",
+                green("✔"),
+                cyan(desc.id),
+                ev_name,
+                dim(&mask_secret_preview(&secret)),
+                dim(desc.wire_dialect.as_str())
+            );
+            keys_found += 1;
+        } else if let Some(saved) = vault_keys.get(desc.secret_slot) {
+            println!(
+                "  {} {:16} active via ~/.heav3ns/config.json ({}, wire: {})",
+                green("✔"),
+                cyan(desc.id),
+                dim(&mask_secret_preview(saved)),
+                dim(desc.wire_dialect.as_str())
+            );
+            keys_found += 1;
+        }
     }
-
-    if let Some(k) = gemini_key {
-        let masked = mask_secret_preview(&k);
-        println!("  {} GEMINI_API_KEY is active ({})", green("✔"), dim(&masked));
-        keys_found += 1;
+    if keys_found == 0 {
+        println!(
+            "  {} No cloud API keys detected across {active_descriptor_count} active provider descriptors",
+            yellow("⚠"),
+        );
     } else {
-        println!("  {} GEMINI_API_KEY is not set", dim("ℹ"));
-    }
-
-    if let Some(k) = anthropic_key {
-        let masked = mask_secret_preview(&k);
-        println!("  {} ANTHROPIC_API_KEY is active ({})", green("✔"), dim(&masked));
-        keys_found += 1;
-    } else {
-        println!("  {} ANTHROPIC_API_KEY is not set", dim("ℹ"));
-    }
-
-    if let Some(k) = alt_key {
-        let masked = mask_secret_preview(&k);
-        println!("  {} Gateway API key (OpenRouter/DeepSeek/Groq/xAI) is active ({})", green("✔"), dim(&masked));
-        keys_found += 1;
+        println!(
+            "  {} {keys_found} credential slot(s) ready across {active_descriptor_count} sovereign provider routes",
+            green("✔"),
+        );
     }
 
     let effective_provider = opts_provider
         .map(String::from)
         .or_else(|| user_cfg.as_ref().and_then(|c| c.provider.clone()))
         .unwrap_or_else(|| "openai".to_string());
+    if let Some(retired_msg) = retired_provider_remediation(&effective_provider) {
+        score -= 40;
+        warnings.push(retired_msg);
+    }
+    let keyless_local = is_zero_key_local_provider(&effective_provider);
 
-    if keys_found == 0 && !effective_provider.eq_ignore_ascii_case("ollama") {
+    if keys_found == 0 && !keyless_local {
         score -= 25;
-        warnings.push("No cloud API keys found. Run 'heav3ns-micro init' or set OPENAI_API_KEY/GEMINI_API_KEY.");
+        warnings.push("No cloud API keys found. Run 'heav3ns-micro init' or 'heav3ns-micro providers' to inspect env vars.");
     }
 
     println!();
 
-    // 2. Local AI & Ollama Readiness
-    println!("{}", bold("2. Local AI & Ollama Readiness"));
-    let ollama_running = std::net::TcpStream::connect("127.0.0.1:11434").is_ok();
-    if ollama_running {
-        println!("  {} Ollama service detected on 127.0.0.1:11434 (offline AI ready)", green("✔"));
-    } else {
-        println!("  {} Ollama service not detected on localhost:11434", dim("ℹ"));
+    // 2. Local AI & Loopback Gateway Readiness (bounded 120ms TCP probes)
+    println!("{}", bold("2. Local AI & Loopback Gateway Readiness"));
+    let local_gateways: &[(&str, u16)] = &[
+        ("Ollama", 11434),
+        ("vLLM", 8000),
+        ("SGLang", 30000),
+        ("LM Studio", 1234),
+    ];
+    let mut any_local = false;
+    for &(label, port) in local_gateways {
+        let addr = SocketAddr::from(([127, 0, 0, 1], port));
+        if TcpStream::connect_timeout(&addr, Duration::from_millis(120)).is_ok() {
+            println!("  {} {label} service detected on 127.0.0.1:{port} (zero-key local AI ready)", green("✔"));
+            any_local = true;
+        }
+    }
+    if !any_local {
+        println!("  {} No local inference servers detected on ports 11434/8000/30000/1234", dim("ℹ"));
     }
     println!();
 
@@ -297,27 +348,56 @@ pub fn run_init_wizard(cwd: &Path) -> io::Result<()> {
     println!("{}", cyan("╚══════════════════════════════════════════════════════════════════════════════╝"));
     println!();
 
-    println!("{}", bold("Select your primary AI provider:"));
-    println!("  1. OpenAI (Default: gpt-5.6-terra, gpt-6.1-terra, gpt-6-luna)");
-    println!("  2. Google Gemini (Default: gemini-4-carbon, gemini-3.8-flash)");
-    println!("  3. Anthropic Claude (Default: claude-sonnet-5.5, claude-fable-5.2)");
-    println!("  4. Ollama (Local AI / Zero API key needed / qwen2.5-coder:14b)");
-    println!("  5. Custom OpenAI-compatible endpoint (Groq, vLLM, LM Studio, OpenRouter)");
+    println!("{}", bold("Select your primary AI provider (or enter any of the 65 provider IDs):"));
+    println!("  1. OpenAI API          (openai · gpt-5.6-terra)");
+    println!("  2. Anthropic Claude    (anthropic · claude-sonnet-5.5)");
+    println!("  3. Google Gemini       (gemini · gemini-4-carbon)");
+    println!("  4. DeepSeek            (deepseek · deepseek-v4-pro)");
+    println!("  5. OpenRouter          (openrouter · 460+ live models)");
+    println!("  6. xAI / Groq / Codewhale / OrcaRouter / Qwen / ModelStudio (enter slug directly)");
+    println!("  7. Ollama (Local)      (ollama · zero API key needed)");
+    println!("  8. OpenAI Codex        (openai-codex · /v1/responses wire)");
     println!();
 
-    print!("Enter choice [1-5] (default: 1): ");
+    print!("Enter choice [1-8] or provider slug (default: 1): ");
     io::stdout().flush()?;
     let mut choice = String::new();
     io::stdin().read_line(&mut choice)?;
     let choice = choice.trim();
 
-    let (provider, default_model, default_endpoint) = match choice {
-        "2" => ("gemini", "gemini-4-carbon", "https://generativelanguage.googleapis.com/v1beta"),
-        "3" => ("anthropic", "claude-sonnet-5.5", "https://api.anthropic.com/v1"),
-        "4" => ("ollama", "qwen2.5-coder:14b", "http://localhost:11434/v1"),
-        "5" => ("openai", "custom-model", "http://localhost:8000/v1"),
-        _ => ("openai", "gpt-5.6-terra", "https://api.openai.com/v1"),
+    let picked_slug = match choice {
+        "" | "1" => "openai",
+        "2" => "anthropic",
+        "3" => "gemini",
+        "4" => "deepseek",
+        "5" => "openrouter",
+        "6" => "xai",
+        "7" => "ollama",
+        "8" => "openai-codex",
+        other => other,
     };
+    if let Some(retired_msg) = retired_provider_remediation(picked_slug) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, retired_msg));
+    }
+    let desc = match lookup_provider_descriptor(picked_slug) {
+        Some(d) => Some(d),
+        None if picked_slug.eq_ignore_ascii_case("custom") => lookup_provider_descriptor("custom"),
+        None => {
+            if let Some(suggested) = suggest_provider_slug(picked_slug) {
+                println!("  {} Unrecognized slug '{}'; auto-correcting to '{}'.", yellow("ℹ"), picked_slug, cyan(suggested));
+                lookup_provider_descriptor(suggested)
+            } else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("Unknown provider '{picked_slug}'. Run `heav3ns-micro providers` to list all 65 supported providers, or enter `custom`."),
+                ));
+            }
+        }
+    };
+    let provider = desc.map(|d| d.id).unwrap_or("custom");
+    let default_model = desc.map(|d| d.default_model).unwrap_or("gpt-5.4");
+    let default_endpoint = desc.map(|d| d.default_endpoint).unwrap_or("http://127.0.0.1:4000/v1");
+    let requires_key = desc.map(|d| d.requires_api_key).unwrap_or(true);
 
     println!();
     print!("Model name (default: {}): ", default_model);
@@ -327,12 +407,12 @@ pub fn run_init_wizard(cwd: &Path) -> io::Result<()> {
     let model = if model_in.trim().is_empty() { default_model.to_string() } else { model_in.trim().to_string() };
 
     let mut api_key: Option<String> = None;
-    if !provider.eq_ignore_ascii_case("ollama") {
-        let env_key = match provider {
-            "gemini" => env::var("GEMINI_API_KEY").or_else(|_| env::var("GOOGLE_API_KEY")).ok(),
-            "anthropic" => env::var("ANTHROPIC_API_KEY").ok(),
-            _ => env::var("OPENAI_API_KEY").ok(),
-        };
+    if requires_key {
+        let env_key = desc.and_then(|d| {
+            d.env_vars
+                .iter()
+                .find_map(|ev| env::var(ev).ok().filter(|v| !v.trim().is_empty()))
+        });
 
         if let Some(existing) = env_key {
             let masked = mask_secret_preview(&existing);
@@ -352,6 +432,9 @@ pub fn run_init_wizard(cwd: &Path) -> io::Result<()> {
                 api_key = Some(existing);
             }
         } else {
+            if let Some(d) = desc {
+                println!("  Credential portal: {}", dim(d.credential_url));
+            }
             print!("Enter API key (or press Enter to configure later): ");
             io::stdout().flush()?;
             let mut key_in = String::new();
@@ -369,13 +452,19 @@ pub fn run_init_wizard(cwd: &Path) -> io::Result<()> {
     io::stdin().read_line(&mut ep_in)?;
     let endpoint = if ep_in.trim().is_empty() { default_endpoint.to_string() } else { ep_in.trim().to_string() };
 
-    let new_cfg = Heav3nsUserConfig {
-        provider: Some(provider.to_string()),
-        model: Some(model.clone()),
-        endpoint: Some(endpoint.clone()),
-        api_key,
-        workspace_root: Some(cwd.display().to_string()),
-    };
+    let mut new_cfg = Heav3nsUserConfig::load().unwrap_or_default();
+    new_cfg.provider = Some(provider.to_string());
+    new_cfg.model = Some(model.clone());
+    new_cfg.endpoint = Some(endpoint.clone());
+    new_cfg.api_key = api_key.clone();
+    new_cfg.workspace_root = Some(cwd.display().to_string());
+    if let Some(ref k) = api_key {
+        new_cfg.set_provider_key(provider, k.clone());
+    }
+    if endpoint != default_endpoint {
+        let slot = desc.map(|d| d.secret_slot).unwrap_or(provider);
+        new_cfg.provider_endpoints.insert(slot.to_string(), endpoint.clone());
+    }
 
     new_cfg.save()?;
 

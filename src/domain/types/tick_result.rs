@@ -39,6 +39,8 @@ pub struct ProviderRequest {
     pub tools: Vec<Value>,
     pub max_tokens: usize,
     pub temperature: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

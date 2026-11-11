@@ -1,4 +1,5 @@
 // [LAYER: UI]
+use crate::domain::types::provider_registry::lookup_provider_descriptor;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::env;
@@ -13,6 +14,18 @@ pub struct Heav3nsUserConfig {
     pub endpoint: Option<String>,
     pub api_key: Option<String>,
     pub workspace_root: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub provider_keys: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub provider_endpoints: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wire_dialect: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fallback_providers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_models: Vec<String>,
 }
 
 impl Heav3nsUserConfig {
@@ -84,6 +97,63 @@ impl Heav3nsUserConfig {
             .filter(|s| !s.is_empty())
             .or_else(|| dotenv.get(key).cloned().filter(|s| !s.is_empty()))
     }
+
+    /// Returns a merged `secret_slot -> key` map combining `provider_keys` and legacy `api_key` (scoped to `provider`).
+    pub fn effective_provider_keys(&self) -> BTreeMap<String, String> {
+        let mut keys = self.provider_keys.clone();
+        if let (Some(prov), Some(k)) = (self.provider.as_deref(), self.api_key.as_deref()) {
+            let trimmed = k.trim();
+            if !trimmed.is_empty() {
+                let slot = lookup_provider_descriptor(prov)
+                    .map(|d| d.secret_slot.to_string())
+                    .unwrap_or_else(|| prov.trim().to_ascii_lowercase());
+                keys.entry(slot).or_insert_with(|| trimmed.to_string());
+            }
+        }
+        keys
+    }
+
+    pub fn set_provider_key(&mut self, provider_or_slot: &str, key: String) {
+        let slot = lookup_provider_descriptor(provider_or_slot)
+            .map(|d| d.secret_slot.to_string())
+            .unwrap_or_else(|| provider_or_slot.trim().to_ascii_lowercase());
+        let trimmed = key.trim();
+        if trimmed.is_empty() {
+            self.provider_keys.remove(&slot);
+        } else {
+            self.provider_keys.insert(slot, trimmed.to_string());
+        }
+    }
+
+    pub fn record_recent_selection(&mut self, provider: &str, model: &str, reasoning: &str) {
+        let p = provider.trim();
+        let m = model.trim();
+        if p.is_empty() || m.is_empty() {
+            return;
+        }
+        let r = if reasoning.trim().is_empty() { "default" } else { reasoning.trim() };
+        let prefix = format!("{p}|{m}|");
+        self.recent_models.retain(|entry| !entry.starts_with(&prefix));
+        self.recent_models.insert(0, format!("{p}|{m}|{r}"));
+        self.recent_models.truncate(8);
+    }
+
+    pub fn parsed_recent_selections(&self) -> Vec<(String, String, String)> {
+        self.recent_models
+            .iter()
+            .filter_map(|raw| {
+                let mut it = raw.splitn(3, '|');
+                let p = it.next()?.trim();
+                let m = it.next()?.trim();
+                let r = it.next().unwrap_or("default").trim();
+                if p.is_empty() || m.is_empty() {
+                    None
+                } else {
+                    Some((p.to_string(), m.to_string(), if r.is_empty() { "default".to_string() } else { r.to_string() }))
+                }
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +165,8 @@ pub struct CliOptions {
     pub model: Option<String>,
     pub provider: Option<String>,
     pub endpoint: Option<String>,
+    pub reasoning_effort: Option<String>,
+    pub wire_dialect: Option<String>,
     pub prompt: Option<String>,
     pub stress: bool,
     pub last_only: bool,
@@ -114,6 +186,7 @@ pub enum RunMode {
     Receipts,
     PreviewRequest,
     Models { refresh: bool },
+    Providers,
     Init,
     Demo,
     Tools,
@@ -136,6 +209,8 @@ pub fn parse_args_from(args: Vec<String>) -> CliOptions {
         model: None,
         provider: None,
         endpoint: None,
+        reasoning_effort: None,
+        wire_dialect: None,
         prompt: None,
         stress: false,
         last_only: false,
@@ -164,6 +239,9 @@ pub fn parse_args_from(args: Vec<String>) -> CliOptions {
             "models" | "--models" => {
                 let refresh = args.iter().any(|a| a == "--refresh" || a == "refresh");
                 opts.mode = RunMode::Models { refresh };
+            }
+            "providers" | "--providers" => {
+                opts.mode = RunMode::Providers;
             }
             "--refresh" => {
                 if let RunMode::Models { ref mut refresh } = opts.mode {
@@ -250,6 +328,18 @@ pub fn parse_args_from(args: Vec<String>) -> CliOptions {
                     i += 1;
                 }
             }
+            "--reasoning" | "--effort" => {
+                if let Some(v) = args.get(i + 1) {
+                    opts.reasoning_effort = Some(v.clone());
+                    i += 1;
+                }
+            }
+            "--wire" => {
+                if let Some(v) = args.get(i + 1) {
+                    opts.wire_dialect = Some(v.clone());
+                    i += 1;
+                }
+            }
             "run" => {
                 if let Some(v) = args.get(i + 1) {
                     opts.prompt = Some(v.clone());
@@ -290,6 +380,8 @@ START HERE:
   heav3ns-micro doctor           Audit environment credentials, local AI, and runtime SLA
   heav3ns-micro context          Inspect token budget HUD, KV-cache prefix, and tool routing
   heav3ns-micro preview-request  Zero-side-effect outbound wire manifest & byte accounting
+  heav3ns-micro providers        Audit all 43+ supported sovereign providers & wire dialects
+  heav3ns-micro models           Inspect frontier model catalog (--refresh for live OpenRouter sync)
   heav3ns-micro receipts         Inspect prose-free CAS turn receipts (--last, --json)
   heav3ns-micro tools            Explore 31 built-in tools across all 7 Sovereign Pillars
 
@@ -303,8 +395,10 @@ CORE COMMANDS:
   stdio                          Run multiplexed async JSONL stdio worker protocol
 
 OPTIONS:
-  -m, --model <NAME>             Model name (e.g. gpt-5.6-terra, gemini-2.0-flash, llama3.2)
-  --provider <NAME>              Provider: openai, gemini, anthropic, openrouter, deepseek, groq, xai, ollama
+  -m, --model <NAME>             Model name (e.g. gpt-5.6-terra, claude-sonnet-5.5, deepseek-v4-pro)
+  --provider <NAME>              Any of 43+ providers (openai, openai-codex, anthropic, gemini, deepseek, xai, groq, mistral, qwen, moonshot, zai, nvidia-nim, together, openrouter, ollama, ...)
+  --reasoning <LEVEL>            Reasoning effort dial: low, medium, high, xhigh, off
+  --wire <DIALECT>               Explicit wire override: chat_completions, openai_responses, anthropic_messages, google_gemini
   --endpoint <URL>               Custom API endpoint URL (default depends on provider)
   --cwd <DIR>                    Workspace root directory (default: current directory)
   -p, --prompt <TEXT>            Execute single agent prompt and exit
@@ -349,8 +443,6 @@ EXAMPLES:
 "
     );
 }
-
-pub use crate::ui::stdio_worker::run_stdio_worker;
 
 #[cfg(test)]
 mod tests {
@@ -400,5 +492,24 @@ mod tests {
 
         let opt_prev = parse_args_from(vec!["preview-request".into(), "--json".into()]);
         assert_eq!(opt_prev.mode, RunMode::PreviewRequest);
+
+        let opt_prov = parse_args_from(vec![
+            "providers".into(),
+            "--reasoning".into(),
+            "high".into(),
+            "--wire".into(),
+            "openai-responses".into(),
+        ]);
+        assert_eq!(opt_prov.mode, RunMode::Providers);
+        assert_eq!(opt_prov.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(opt_prov.wire_dialect.as_deref(), Some("openai-responses"));
+
+        let mut ucfg = Heav3nsUserConfig::default();
+        ucfg.set_provider_key("openai", "sk-openai-slot".into());
+        ucfg.set_provider_key("deepseek-anthropic", "sk-ds-slot".into());
+        let vault = ucfg.effective_provider_keys();
+        assert_eq!(vault.get("openai").map(String::as_str), Some("sk-openai-slot"));
+        assert_eq!(vault.get("deepseek").map(String::as_str), Some("sk-ds-slot"));
+        assert_eq!(vault.get("anthropic"), None);
     }
 }

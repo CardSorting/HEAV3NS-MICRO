@@ -6,6 +6,7 @@ use crate::domain::pricing_and_taxonomy::BillingMetering;
 use crate::plumbing::hash_and_math::now_ms;
 use crate::plumbing::secret_redactor::SafetyPolicy;
 use crate::plumbing::text_tokens::{encode_base64, render_unified_diff, safe_utf8_prefix};
+use crate::ui::worker_handlers::{build_sovereign_model_catalog, build_sovereign_model_discovery};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -84,104 +85,40 @@ pub fn build_hello_response(ws_id: &str, sess_id: &str, workspace_root: &Path) -
             "prompt-inspect-v1",
             "posture-dial-v1",
             "turn-receipts-v1",
-            "request-preview-v1"
+            "request-preview-v1",
+            "multi-provider-parity-v1",
+            "openai-responses-wire-v1"
         ]
     })
 }
 
 pub fn build_model_selection(provider: &str, model: &str, reasoning: &str, revision: i64) -> Value {
+    let norm_reasoning = match reasoning.trim().to_ascii_lowercase().as_str() {
+        "" | "default" => "default",
+        "none" | "off" | "disabled" => "none",
+        "low" | "minimal" => "low",
+        "medium" | "med" => "medium",
+        "high" => "high",
+        "xhigh" | "max" => "xhigh",
+        _ => "default",
+    };
     json!({
         "provider": provider,
         "model": model,
         "revision": revision,
-        "reasoningEffort": reasoning,
-        "reasoningOptions": ["low", "medium", "high", "xhigh"],
+        "reasoningEffort": norm_reasoning,
+        "reasoningOptions": ["none", "low", "medium", "high", "xhigh"],
         "busy": false,
         "blocked": null
     })
 }
 
-fn catalog_slugs(provider: &str, keep_vendor: bool, limit: usize) -> Vec<String> {
-    AgentEngine::model_catalog_snapshot()
-        .newest_models_for_provider(provider, limit)
-        .into_iter()
-        .map(|e| {
-            if keep_vendor {
-                e.id.clone()
-            } else {
-                e.id.split_once('/').map(|(_, s)| s.to_string()).unwrap_or_else(|| e.id.clone())
-            }
-        })
-        .collect()
-}
-
 pub fn build_model_catalog(provider: &str, model: &str, reasoning: &str, revision: i64) -> Value {
-    let openai_models = catalog_slugs("openai", false, 6);
-    let claude_models = catalog_slugs("anthropic", false, 6);
-    let openrouter_models = catalog_slugs("openrouter", true, 8);
-    let gemini_models = catalog_slugs("gemini", false, 6);
-    json!({
-        "provider": provider,
-        "model": model,
-        "revision": revision,
-        "reasoningEffort": reasoning,
-        "reasoningOptions": ["low", "medium", "high", "xhigh"],
-        "busy": false,
-        "blocked": null,
-        "providers": [
-            { "id": "openai-codex", "label": "OpenAI Codex", "detail": "Primary reasoning and multi-wave tool execution engine", "models": openai_models },
-            { "id": "claude-subscription-directsdk-experimental", "label": "Claude Code", "detail": "Anthropic architectural synthesis and code editing", "models": claude_models },
-            { "id": "openrouter", "label": "OpenRouter", "detail": "Live auto-refreshed multi-provider model gateway", "models": openrouter_models },
-            { "id": "gemini", "label": "Google Gemini", "detail": "High-context multimodal and rapid code synthesis", "models": gemini_models },
-            { "id": "ollama", "label": "Local Ollama (Zero-Key)", "detail": "100% local private inference on localhost:11434", "models": ["qwen2.5-coder:14b", "deepseek-r1:14b", "llama3.2"] },
-            { "id": "apple-playground", "label": "On this Mac (Playground)", "detail": "Local Apple Foundation Models on-device inference", "models": ["apple-on-device-default"] }
-        ],
-        "recent": []
-    })
+    build_sovereign_model_catalog(provider, model, reasoning, revision, &[])
 }
 
 pub fn build_model_discovery(provider: &str) -> Value {
-    let valid_provider = match provider {
-        "openai-codex" | "claude-subscription-directsdk-experimental" | "gemini" | "deepseek" | "ollama" | "openrouter" | "cline-pass" | "nous" | "opencode" | "apple-playground" => provider,
-        _ => "openai-codex",
-    };
-    let cat = AgentEngine::model_catalog_snapshot();
-    let models = match valid_provider {
-        "ollama" => vec![
-            json!({ "id": "qwen2.5-coder:14b", "label": "Qwen 2.5 Coder 14B", "detail": "Local code specialist" }),
-            json!({ "id": "llama3.2", "label": "Llama 3.2 (Local)", "detail": "Zero-key local Ollama inference" }),
-        ],
-        "apple-playground" => vec![
-            json!({ "id": "apple-on-device-default", "label": "Apple On-Device Model", "detail": "Local macOS Foundation Models adapter" }),
-        ],
-        _ => {
-            let keep_vendor = valid_provider == "openrouter";
-            cat.newest_models_for_provider(valid_provider, 8)
-                .into_iter()
-                .map(|e| {
-                    let id = if keep_vendor {
-                        e.id.clone()
-                    } else {
-                        e.id.split_once('/').map(|(_, s)| s.to_string()).unwrap_or_else(|| e.id.clone())
-                    };
-                    json!({
-                        "id": id,
-                        "label": e.display_name,
-                        "detail": format!("{}k ctx · ${:.2}/${:.2} per MTok", e.context_length / 1000, e.input_per_million, e.output_per_million)
-                    })
-                })
-                .collect()
-        }
-    };
-    json!({
-        "provider": valid_provider,
-        "state": "ready",
-        "source": format!("HEAV3NS-MICRO Catalog ({})", cat.source),
-        "message": "Available reasoning and code orchestration models verified.",
-        "checkedAt": now_ms() as f64,
-        "limited": false,
-        "models": models
-    })
+    build_sovereign_model_discovery(provider, &[])
 }
 
 pub fn build_spider_check_response(workspace_root: &Path, file: &str) -> Value {
@@ -751,6 +688,87 @@ fn collect_search_files(root: &Path, dir: &Path, query: &str, out: &mut Vec<(i32
                 };
                 out.push((score, rel_str.clone(), json!({ "path": rel_str, "name": name, "type": "file" })));
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::flight_runner::TempWorkspace;
+    use crate::domain::interfaces::{BoxFuture, ILlmProvider};
+    use crate::domain::types::runtime::{AgentConfig, CancellationToken};
+    use crate::domain::types::tick_result::{ProviderError, ProviderRequest, ProviderResponse};
+    use crate::ui::worker_handlers::{handle_provider_credential_rpc, WorkerSharedState};
+    use std::collections::BTreeSet;
+    use std::sync::Arc;
+
+    struct DummyUiProvider;
+    impl ILlmProvider for DummyUiProvider {
+        fn provider_name(&self) -> &str { "dummy" }
+        fn complete<'a>(&'a self, _req: ProviderRequest, _cancel: Option<CancellationToken>) -> BoxFuture<'a, Result<ProviderResponse, ProviderError>> {
+            Box::pin(async { Err(ProviderError::Cancelled) })
+        }
+    }
+
+    #[test]
+    fn test_sovereign_model_catalog_discovery_and_credential_rpc_parity() {
+        let catalog = build_model_catalog("gemini", "gemini-2.5-pro", "high", 3);
+        assert_eq!(catalog["provider"], "gemini");
+        assert_eq!(catalog["model"], "gemini-2.5-pro");
+        assert_eq!(catalog["reasoningEffort"], "high");
+        let providers = catalog["providers"].as_array().unwrap();
+        assert!(providers.len() >= 19, "Expected >= 19 curated AppKit providers");
+        let mut ids = BTreeSet::new();
+        for p in providers {
+            let id = p["id"].as_str().unwrap();
+            assert!(ids.insert(id), "Duplicate provider id in models.list: {id}");
+            assert!(!p["models"].as_array().unwrap().is_empty());
+        }
+        for expected in ["openai-codex", "anthropic", "gemini", "deepseek", "xai", "groq", "mistral", "qwen", "ollama", "apple-playground"] {
+            assert!(ids.contains(expected), "Missing {expected} in models.list");
+        }
+
+        // Dynamic fallback inclusion for non-default canonical providers (e.g. cerebras)
+        let dyn_cat = build_model_catalog("cerebras", "gpt-oss-120b", "medium", 4);
+        assert!(dyn_cat["providers"].as_array().unwrap().iter().any(|p| p["id"] == "cerebras"));
+
+        // Discovery deduplicates models cleanly
+        let disc = build_sovereign_model_discovery("ollama", &["llama3.2".into(), "llama3.2".into(), "phi4:latest".into()]);
+        assert_eq!(disc["state"], "ready");
+        let disc_models = disc["models"].as_array().unwrap();
+        let mut model_ids = BTreeSet::new();
+        for m in disc_models {
+            assert!(model_ids.insert(m["id"].as_str().unwrap()));
+        }
+
+        // Universal credential RPC normalizes camelCase prefixes (nvidiaNim -> nvidia-nim, clinePass -> cline-pass)
+        // and supports clearing saved keys when `apiKey: ""` is submitted by AppKit `Remove Key`
+        let ws = TempWorkspace::new("ui-rpc-parity");
+        let cfg = AgentConfig::default();
+        let engine = AgentEngine::new(&ws.path, cfg.clone(), Arc::new(DummyUiProvider));
+        let mut state = WorkerSharedState::from_engine_config(&cfg);
+
+        let ap = state.active_provider.clone();
+        let am = state.active_model.clone();
+        let saved_nim = handle_provider_credential_rpc("nvidiaNim.saveKey", &json!({"apiKey": "nvapi-test-1234"}), &mut state.provider_keys, &ap, &am, &engine);
+        assert_eq!(saved_nim["provider"], "nvidiaNim");
+        assert_eq!(saved_nim["canonicalProvider"], "nvidia-nim");
+        assert_eq!(saved_nim["saved"], true);
+
+        let cleared_nim = handle_provider_credential_rpc("nvidiaNim.saveKey", &json!({"apiKey": ""}), &mut state.provider_keys, &ap, &am, &engine);
+        assert_eq!(cleared_nim["saved"], false);
+
+        let status_cline = handle_provider_credential_rpc("clinePass.status", &json!({}), &mut state.provider_keys, &ap, &am, &engine);
+        assert_eq!(status_cline["provider"], "clinePass");
+        assert_eq!(status_cline["canonicalProvider"], "cline-pass");
+
+        // Saving and then clearing the ACTIVE provider's key must immediately purge `engine.config_snapshot().api_key`
+        let _ = handle_provider_credential_rpc("openai.saveKey", &json!({"apiKey": "sk-live-openai-temp"}), &mut state.provider_keys, &ap, &am, &engine);
+        assert_eq!(engine.config_snapshot().api_key.as_deref(), Some("sk-live-openai-temp"));
+        let _ = handle_provider_credential_rpc("openai.saveKey", &json!({"apiKey": ""}), &mut state.provider_keys, &ap, &am, &engine);
+        if std::env::var("OPENAI_API_KEY").ok().filter(|s| !s.trim().is_empty()).is_none() {
+            assert!(engine.config_snapshot().api_key.is_none());
         }
     }
 }

@@ -4,6 +4,7 @@ pub mod environmental_diff;
 pub mod fuzzy_patch;
 pub mod hash_and_math;
 pub mod json_repair;
+pub mod schema_and_sse;
 pub mod seatbelt_profile;
 pub mod secret_redactor;
 pub mod shell_guard;
@@ -16,6 +17,7 @@ pub use crate::plumbing::environmental_diff::{analyze_spider_structural_relation
 pub use crate::plumbing::fuzzy_patch::{heal_fuzzy_patch, DeterministicPatchEngine, PatchHunkLine, PatchOperation};
 pub use crate::plumbing::hash_and_math::{fnv1a_32, levenshtein, now_ms};
 pub use crate::plumbing::json_repair::{accumulate_streaming_tool_name, compute_streaming_arguments_delta, extract_json_roots, normalize_completed_tool_call_arguments, repair_json_string};
+pub use crate::plumbing::schema_and_sse::{parse_sse_events, redact_endpoint_for_display, sanitize_tool_schema, sanitize_tool_schema_for_responses, SseEventFrame, MAX_SSE_EVENT_DATA_BYTES};
 pub use crate::plumbing::seatbelt_profile::{build_macos_seatbelt_invocation, inspect_command_security, CommandSecurityVerdict, SeatbeltInvocation, SeatbeltSandboxMode};
 pub use crate::plumbing::secret_redactor::{CredentialDenyScope, DeterministicSecretRedactor, SafetyPolicy};
 pub use crate::plumbing::shell_guard::{split_top_level_statements, ShellCommandGuard};

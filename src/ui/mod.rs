@@ -1,6 +1,7 @@
 // [LAYER: UI]
 pub mod cli_presenter;
 pub mod onboarding;
+pub mod provider_rpc;
 pub mod rpc_dispatch;
 pub mod stdio_worker;
 pub mod worker_handlers;

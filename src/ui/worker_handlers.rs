@@ -3,9 +3,11 @@ use crate::core::engine::AgentEngine;
 use crate::domain::pricing_and_taxonomy::CREDENTIAL_REJECTED_UNSENT_CODE;
 use crate::domain::types::messages::{Role, SessionMessage};
 use crate::domain::types::progress::{EngineProgressEvent, EngineProgressPhase, EngineProgressStatus};
-use crate::domain::types::runtime::{CancellationToken, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel, ExecutionPosture, UserApprovalChoice};
+use crate::domain::types::provider_registry::canonicalize_provider_id;
+use crate::domain::types::runtime::{AgentConfig, CancellationToken, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel, ExecutionPosture, UserApprovalChoice};
 use crate::plumbing::hash_and_math::now_ms;
-use crate::plumbing::text_tokens::mask_secret_preview;
+use crate::ui::cli_presenter::Heav3nsUserConfig;
+pub use crate::ui::provider_rpc::{build_sovereign_model_catalog, build_sovereign_model_catalog_with_recent, build_sovereign_model_discovery, handle_provider_credential_rpc};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Write};
@@ -27,6 +29,7 @@ pub struct WorkerSharedState {
     pub active_reasoning: String,
     pub model_revision: i64,
     pub provider_keys: BTreeMap<String, String>,
+    pub recent_selections: Vec<(String, String, String)>,
     pub flagged_checkpoints: BTreeSet<String>,
     pub saved_formations: Vec<Value>,
     pub account_signed_in: bool,
@@ -45,9 +48,10 @@ impl WorkerSharedState {
             conversation_messages: BTreeMap::new(),
             active_provider: "openai-codex".to_string(),
             active_model: initial_model,
-            active_reasoning: "medium".to_string(),
+            active_reasoning: "default".to_string(),
             model_revision: 1,
             provider_keys: BTreeMap::new(),
+            recent_selections: Vec::new(),
             flagged_checkpoints: BTreeSet::new(),
             saved_formations: Vec::new(),
             account_signed_in: true,
@@ -55,6 +59,44 @@ impl WorkerSharedState {
             account_label: "HEAV3NS Local Runtime".to_string(),
             pending_approvals: BTreeMap::new(),
         }
+    }
+
+    pub fn from_engine_config(cfg: &AgentConfig) -> Self {
+        let mut st = Self::with_initial_model(cfg.model_name.clone());
+        let canon = canonicalize_provider_id(&cfg.provider);
+        st.active_provider = if canon.is_empty() || canon == "scripted" {
+            "openai-codex".to_string()
+        } else {
+            canon
+        };
+        if let Some(ref eff) = cfg.reasoning_effort {
+            let low = eff.trim().to_ascii_lowercase();
+            if matches!(low.as_str(), "none" | "off" | "disabled") {
+                st.active_reasoning = "none".to_string();
+            } else if matches!(low.as_str(), "low" | "medium" | "high" | "xhigh") {
+                st.active_reasoning = low;
+            }
+        }
+        st.provider_keys = cfg.provider_keys.clone();
+        if let Some(ucfg) = Heav3nsUserConfig::load() {
+            for (k, v) in ucfg.effective_provider_keys() {
+                st.provider_keys.insert(k, v);
+            }
+            st.recent_selections = ucfg.parsed_recent_selections();
+        }
+        st
+    }
+
+    pub fn record_recent(&mut self, provider: &str, model: &str, reasoning: &str) {
+        let canon = canonicalize_provider_id(provider);
+        let m = model.trim();
+        if canon.is_empty() || canon == "scripted" || m.is_empty() {
+            return;
+        }
+        let r = if reasoning.trim().is_empty() { "default" } else { reasoning.trim() };
+        self.recent_selections.retain(|(p, em, _)| !(p == &canon && em == m));
+        self.recent_selections.insert(0, (canon, m.to_string(), r.to_string()));
+        self.recent_selections.truncate(8);
     }
 }
 
@@ -144,41 +186,6 @@ pub fn discover_project_targets(workspace_root: &Path) -> Value {
         }));
     }
     json!({ "targets": targets })
-}
-
-/// Handles `{openrouter,clinePass,nous,opencode}.{status,saveKey,clearKey}` RPCs cleanly.
-pub fn handle_provider_credential_rpc(
-    method: &str,
-    params: &Value,
-    state: &mut WorkerSharedState,
-    engine: &AgentEngine,
-) -> Value {
-    let prefix = method.split('.').next().unwrap_or("openrouter");
-    let action = method.split('.').nth(1).unwrap_or("status");
-    match action {
-        "saveKey" => {
-            if let Some(k) = params.get("key").or_else(|| params.get("apiKey")).and_then(Value::as_str).filter(|s| !s.trim().is_empty()) {
-                let clean = k.trim().to_string();
-                state.provider_keys.insert(prefix.to_string(), clean.clone());
-                if state.active_provider.contains(prefix) || (prefix == "clinePass" && state.active_provider == "cline-pass") {
-                    let model = state.active_model.clone();
-                    engine.switch_http_provider(prefix, &model, None, Some(clean));
-                }
-            }
-        }
-        "clearKey" => {
-            state.provider_keys.remove(prefix);
-        }
-        _ => {}
-    }
-    let configured = state.provider_keys.get(prefix).cloned();
-    json!({
-        "provider": prefix,
-        "configured": configured.is_some(),
-        "saved": configured.is_some(),
-        "maskedKey": configured.as_deref().map(mask_secret_preview),
-        "updatedAt": now_ms() as f64
-    })
 }
 
 /// Handles `posture.{get,set,step}`, `receipts.list`, `turn.undo`, and `request.preview` RPCs.
@@ -507,9 +514,38 @@ pub async fn execute_multiplexed_submit(
         run_obj["error"] = json!(e);
     }
 
-    {
+    let changed_catalog = {
         let mut guard = state.lock().unwrap();
         guard.active_cancel = None;
+        let mut cat_ev = None;
+        if result.is_slash_command {
+            let snap = engine.config_snapshot();
+            let next_prov = canonicalize_provider_id(&snap.provider);
+            let next_reas = snap.reasoning_effort.unwrap_or_else(|| "default".to_string());
+            if (!next_prov.is_empty() && next_prov != "scripted" && next_prov != guard.active_provider)
+                || snap.model_name != guard.active_model
+                || next_reas != guard.active_reasoning
+            {
+                if !next_prov.is_empty() && next_prov != "scripted" {
+                    guard.active_provider = next_prov;
+                }
+                guard.active_model = snap.model_name;
+                guard.active_reasoning = next_reas;
+                let p_copy = guard.active_provider.clone();
+                let m_copy = guard.active_model.clone();
+                let r_copy = guard.active_reasoning.clone();
+                guard.record_recent(&p_copy, &m_copy, &r_copy);
+                guard.model_revision += 1;
+                cat_ev = Some(build_sovereign_model_catalog_with_recent(
+                    &guard.active_provider,
+                    &guard.active_model,
+                    &guard.active_reasoning,
+                    guard.model_revision,
+                    &[],
+                    &guard.recent_selections,
+                ));
+            }
+        }
         if let Some(existing) = guard.session_runs.iter_mut().find(|r| r.get("id").and_then(|v| v.as_str()) == Some(&run_id)) {
             *existing = run_obj.clone();
         } else {
@@ -518,9 +554,14 @@ pub async fn execute_multiplexed_submit(
         while guard.session_runs.len() > 64 {
             guard.session_runs.remove(0);
         }
-    }
+        cat_ev
+    };
 
     if is_rpc {
+        if let Some(cat_payload) = changed_catalog {
+            let s_cat = event_seq.fetch_add(1, Ordering::SeqCst) + 1;
+            emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id, "runtime": "heav3ns-micro", "seq": s_cat, "type": "models.changed", "payload": cat_payload }));
+        }
         let s_end = event_seq.fetch_add(1, Ordering::SeqCst) + 1;
         emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id, "runtime": "heav3ns-micro", "seq": s_end, "type": "run.state", "payload": run_obj }));
     } else {

@@ -8,8 +8,10 @@ use crate::domain::prefix_and_manifest::{PrefixFingerprint, RequestManifest};
 use crate::domain::pricing_and_taxonomy::{select_auto_routed_model, BillingMetering, ProviderTokenUsage};
 use crate::domain::prompt_spec::{ModelPromptFamily, PromptProfile, SystemPromptSpec};
 use crate::domain::types::messages::{estimate_messages_tokens, Role, SessionMessage};
+use crate::domain::types::provider_registry::{infer_wire_dialect_from_endpoint, lookup_provider_descriptor, resolve_model_aware_wire_and_model, retired_provider_remediation, suggest_provider_slug, ProviderBillingClass, ReasoningEffortLevel, WireDialect, PROVIDER_DESCRIPTORS};
 use crate::domain::types::runtime::ExecutionAuthorityLevel;
 use crate::infrastructure::vfs_store::WorkspacePromptProbe;
+use crate::plumbing::schema_and_sse::redact_endpoint_for_display;
 use crate::plumbing::text_tokens::estimate_text_tokens;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -216,8 +218,19 @@ impl AgentEngine {
             msgs.push(SessionMessage::new(Role::User, sample_prompt.trim()));
         }
 
+        let base_wire = lookup_provider_descriptor(&cfg.provider)
+            .map(|d| d.wire_dialect)
+            .unwrap_or_else(|| infer_wire_dialect_from_endpoint(&cfg.api_endpoint));
+        let (model_wire, wire_model) =
+            resolve_model_aware_wire_and_model(&cfg.provider, &cfg.model_name, &cfg.api_endpoint, base_wire);
+        let active_wire = cfg
+            .wire_dialect
+            .as_deref()
+            .and_then(WireDialect::parse_override)
+            .unwrap_or(model_wire);
         let status = self.last_prefix_status.lock().unwrap().clone();
-        RequestManifest::build(&cfg.model_name, posture, &msgs, &tools_wire, cfg.context_window_tokens, &status)
+        RequestManifest::build(&wire_model, posture, &msgs, &tools_wire, cfg.context_window_tokens, &status)
+            .with_route_metadata(&cfg.provider, active_wire.as_str(), &cfg.api_endpoint, cfg.reasoning_effort.as_deref())
     }
 
     pub fn render_request_manifest(&self, arg: &str) -> String {
@@ -402,6 +415,28 @@ impl AgentEngine {
                 "Enabled `/model auto` same-provider routing on '{}' (strong tier -> {}, fast tier -> fast model).",
                 cfg.provider, sample.selected_model
             )
+        } else if let Some((prov_part, model_part)) = trimmed.split_once(':') {
+            if let Some(retired_msg) = retired_provider_remediation(prov_part) {
+                return retired_msg.to_string();
+            }
+            if lookup_provider_descriptor(prov_part).is_some() && !model_part.trim().is_empty() {
+                self.switch_http_provider(prov_part.trim(), model_part.trim(), None, None);
+                let cfg = self.config_snapshot();
+                return format!(
+                    "Switched active provider & model to: {} / {} (endpoint: {}, KV-prefix repin declared)",
+                    cfg.provider,
+                    cfg.model_name,
+                    redact_endpoint_for_display(&cfg.api_endpoint)
+                );
+            }
+            self.set_active_model_name(trimmed);
+            let cfg = self.config_snapshot();
+            format!(
+                "Switched active model to: {} (family: {}, profile: {}, KV-prefix repin declared)",
+                cfg.model_name,
+                ModelPromptFamily::classify(&cfg).as_str(),
+                PromptProfile::select(&cfg).as_str()
+            )
         } else {
             self.set_active_model_name(trimmed);
             let cfg = self.config_snapshot();
@@ -411,6 +446,161 @@ impl AgentEngine {
                 ModelPromptFamily::classify(&cfg).as_str(),
                 PromptProfile::select(&cfg).as_str()
             )
+        }
+    }
+
+    pub fn inspect_or_switch_provider(&self, arg: &str) -> String {
+        let trimmed = arg.trim();
+        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("status") {
+            let cfg = self.config_snapshot();
+            let desc = lookup_provider_descriptor(&cfg.provider);
+            let base_wire = desc
+                .map(|d| d.wire_dialect)
+                .unwrap_or_else(|| infer_wire_dialect_from_endpoint(&cfg.api_endpoint));
+            let (model_wire, _) =
+                resolve_model_aware_wire_and_model(&cfg.provider, &cfg.model_name, &cfg.api_endpoint, base_wire);
+            let wire = cfg
+                .wire_dialect
+                .as_deref()
+                .and_then(WireDialect::parse_override)
+                .unwrap_or(model_wire);
+            let key_ready = if cfg.api_key.as_ref().is_some_and(|k| !k.trim().is_empty()) {
+                "configured"
+            } else if desc.is_some_and(|d| !d.requires_api_key) {
+                "local (no key required)"
+            } else {
+                "missing"
+            };
+            let fb_str = if cfg.fallback_providers.is_empty() {
+                "none".to_string()
+            } else {
+                cfg.fallback_providers.join(" -> ")
+            };
+            return format!(
+                "Active provider: {} ({})\n  Model      : {}\n  Wire       : {}\n  Endpoint   : {}\n  Reasoning  : {}\n  Fallbacks  : {}\n  Credential : {}",
+                cfg.provider,
+                desc.map(|d| d.display_name).unwrap_or("Custom/Scripted"),
+                cfg.model_name,
+                wire.as_str(),
+                redact_endpoint_for_display(&cfg.api_endpoint),
+                cfg.reasoning_effort.as_deref().unwrap_or("default"),
+                fb_str,
+                key_ready
+            );
+        }
+        if trimmed.eq_ignore_ascii_case("list") || trimmed.eq_ignore_ascii_case("all") {
+            let cfg = self.config_snapshot();
+            let active = cfg.provider.as_str();
+            let active_count = PROVIDER_DESCRIPTORS.iter().filter(|d| !d.retired).count();
+            let mut lines = vec![format!(
+                "Supported Sovereign Providers ({active_count} canonical routes):"
+            )];
+            for d in PROVIDER_DESCRIPTORS {
+                if d.retired {
+                    continue;
+                }
+                let marker = if d.id == active { "▸" } else { " " };
+                let vault_ready = cfg.provider_keys.get(d.secret_slot).is_some_and(|v| !v.trim().is_empty())
+                    || (d.id == active && cfg.api_key.as_ref().is_some_and(|v| !v.trim().is_empty()));
+                let ready = if d.billing_class == ProviderBillingClass::LocalNoBill || !d.requires_api_key {
+                    "LOCAL"
+                } else if vault_ready || d.env_vars.iter().any(|ev| std::env::var(ev).ok().is_some_and(|v| !v.trim().is_empty())) {
+                    "READY"
+                } else {
+                    "  -- "
+                };
+                let env_hint = d.env_vars.first().copied().unwrap_or("(none)");
+                lines.push(format!(
+                    " {marker} [{ready}] {:20} {:18} model={:26} env={}",
+                    d.id,
+                    d.wire_dialect.as_str(),
+                    d.default_model,
+                    env_hint
+                ));
+            }
+            return lines.join("\n");
+        }
+        if let Some(rest) = trimmed.strip_prefix("fallback").or_else(|| trimmed.strip_prefix("fallbacks")) {
+            let arg_fb = rest.trim();
+            if arg_fb.is_empty() {
+                let fbs = self.config_snapshot().fallback_providers;
+                return if fbs.is_empty() {
+                    "Fallback provider chain: none (set via `/provider fallback anthropic,deepseek` or `clear`).".to_string()
+                } else {
+                    format!("Fallback provider chain: {}", fbs.join(" -> "))
+                };
+            }
+            if matches!(arg_fb.to_ascii_lowercase().as_str(), "clear" | "off" | "none") {
+                self.set_fallback_providers(Vec::new());
+                return "Cleared fallback provider chain.".to_string();
+            }
+            let parsed: Vec<String> = arg_fb
+                .split(|c: char| c == ',' || c.is_whitespace())
+                .map(str::trim)
+                .filter(|s| !s.is_empty() && retired_provider_remediation(s.split(':').next().unwrap_or(s)).is_none())
+                .map(String::from)
+                .collect();
+            self.set_fallback_providers(parsed.clone());
+            return format!("Updated fallback provider chain -> {}", parsed.join(" -> "));
+        }
+
+        let mut parts = trimmed.split_whitespace();
+        let target_prov = parts.next().unwrap_or("");
+        let target_model = parts.next().unwrap_or("");
+        if let Some(retired_msg) = retired_provider_remediation(target_prov) {
+            return retired_msg.to_string();
+        }
+        if lookup_provider_descriptor(target_prov).is_none() && !target_prov.eq_ignore_ascii_case("custom") {
+            let active_count = PROVIDER_DESCRIPTORS.iter().filter(|d| !d.retired).count();
+            if let Some(suggested) = suggest_provider_slug(target_prov) {
+                return format!(
+                    "Unknown provider '{target_prov}'. Did you mean '{suggested}'? Run `/provider {suggested}` or `/provider list` ({active_count} supported providers)."
+                );
+            }
+            return format!(
+                "Unknown provider '{target_prov}'. Run `/provider list` to inspect all {active_count} supported providers."
+            );
+        }
+        self.switch_http_provider(target_prov, target_model, None, None);
+        let cfg = self.config_snapshot();
+        let base_wire = lookup_provider_descriptor(&cfg.provider)
+            .map(|d| d.wire_dialect)
+            .unwrap_or_else(|| infer_wire_dialect_from_endpoint(&cfg.api_endpoint));
+        let (wire, _) =
+            resolve_model_aware_wire_and_model(&cfg.provider, &cfg.model_name, &cfg.api_endpoint, base_wire);
+        format!(
+            "Switched provider -> {} (model: {}, wire: {}, endpoint: {}, key: {})",
+            cfg.provider,
+            cfg.model_name,
+            wire.as_str(),
+            redact_endpoint_for_display(&cfg.api_endpoint),
+            if cfg.api_key.is_some() { "configured" } else { "unset" }
+        )
+    }
+
+    pub fn inspect_or_switch_reasoning(&self, arg: &str) -> String {
+        let trimmed = arg.trim();
+        if trimmed.is_empty() {
+            let cfg = self.config_snapshot();
+            return format!(
+                "Active reasoning effort: {} (options: default | none/off | low | medium | high | xhigh)",
+                cfg.reasoning_effort.as_deref().unwrap_or("default")
+            );
+        }
+        match ReasoningEffortLevel::parse_flexible(trimmed) {
+            Ok(Some(ReasoningEffortLevel::None)) => {
+                self.set_reasoning_effort(Some("none".to_string()));
+                "Reasoning effort set to 'none' (thinking disabled) for subsequent turns.".to_string()
+            }
+            Ok(Some(level)) => {
+                self.set_reasoning_effort(Some(level.as_str().to_string()));
+                format!("Reasoning effort set to '{}' for subsequent turns.", level.as_str())
+            }
+            Ok(None) => {
+                self.set_reasoning_effort(None);
+                "Reasoning effort cleared (using model/provider default).".to_string()
+            }
+            Err(msg) => msg,
         }
     }
 

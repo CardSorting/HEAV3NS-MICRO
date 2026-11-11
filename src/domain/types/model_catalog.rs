@@ -152,7 +152,21 @@ impl ModelPricingCatalog {
             ("moonshotai/kimi-k3.1-pro", "Kimi K3.1 Pro", 1_048_576, 2.00, 10.00, 0.20, 1_792_778_188),
             ("moonshotai/kimi-k2.7-code", "Kimi K2.7 Code", 262_144, 0.60, 3.50, 0.16, 1_788_200_000),
             ("z-ai/glm-5.3-flashx-legal", "GLM 5.3 FlashX", 1_048_576, 0.37, 1.25, 0.075, 1_793_626_154),
+            ("z-ai/glm-5.1", "GLM 5.1", 200_000, 1.00, 4.00, 0.25, 1_788_000_000),
             ("meta/muse-spark-open", "Meta Muse Spark", 1_048_576, 1.25, 4.25, 0.15, 1_792_087_069),
+            // Mistral / Groq / Cerebras / MiniMax / NVIDIA / Nous / Xiaomi / Cohere / Perplexity
+            ("mistralai/mistral-large-latest", "Mistral Large", 262_144, 2.00, 6.00, 0.50, 1_789_000_000),
+            ("mistralai/codestral-latest", "Codestral", 256_000, 0.30, 0.90, 0.10, 1_788_500_000),
+            ("groq/llama-3.3-70b-versatile", "Llama 3.3 70B (Groq)", 131_072, 0.59, 0.79, 0.59, 1_785_000_000),
+            ("groq/llama-3.1-8b-instant", "Llama 3.1 8B Instant (Groq)", 131_072, 0.05, 0.08, 0.05, 1_780_000_000),
+            ("cerebras/llama-3.3-70b", "Llama 3.3 70B (Cerebras)", 131_072, 0.85, 1.20, 0.85, 1_785_100_000),
+            ("minimax/minimax-m2.5", "MiniMax M2.5", 1_000_000, 0.30, 1.20, 0.06, 1_790_000_000),
+            ("nvidia/llama-3.3-nemotron-super-49b-v1", "Nemotron Super 49B", 131_072, 0.65, 2.20, 0.65, 1_786_000_000),
+            ("nousresearch/hermes-4-70b", "Hermes 4 70B", 131_072, 0.60, 1.80, 0.30, 1_789_500_000),
+            ("nousresearch/hermes-4-405b", "Hermes 4 405B", 131_072, 2.00, 6.00, 0.50, 1_789_600_000),
+            ("xiaomi/mimo-v2-flash", "Xiaomi MiMo V2 Flash", 262_144, 0.15, 0.60, 0.03, 1_790_500_000),
+            ("cohere/command-a-03-2025", "Cohere Command A", 256_000, 2.50, 10.00, 2.50, 1_774_000_000),
+            ("perplexity/sonar-reasoning-pro", "Perplexity Sonar Reasoning Pro", 128_000, 2.00, 8.00, 2.00, 1_782_000_000),
         ];
 
         for &(id, display_name, ctx, inp, outp, cache, created) in seeds {
@@ -266,19 +280,44 @@ impl ModelPricingCatalog {
     }
 
     pub fn canonical_vendor_prefix(provider: &str) -> &'static str {
+        if let Some(desc) = crate::domain::types::provider_registry::lookup_provider_descriptor(provider) {
+            if desc.catalog_vendor != "openrouter" && desc.catalog_vendor != "local" && desc.catalog_vendor != "custom" {
+                return desc.catalog_vendor;
+            }
+        }
         let p = provider.trim().to_ascii_lowercase();
         if p.contains("anthropic") || p.contains("claude") {
             "anthropic"
         } else if p.contains("gemini") || p == "google" {
             "google"
-        } else if p == "deepseek" {
+        } else if p.contains("deepseek") {
             "deepseek"
         } else if p == "xai" || p == "x-ai" || p.contains("grok") {
             "x-ai"
-        } else if p == "qwen" {
+        } else if p == "qwen" || p == "dashscope" {
             "qwen"
-        } else if p == "moonshot" || p == "moonshotai" || p == "kimi" {
+        } else if p == "moonshot" || p == "moonshotai" || p.contains("kimi") {
             "moonshotai"
+        } else if p == "zai" || p == "z-ai" || p == "zhipu" {
+            "z-ai"
+        } else if p.contains("mistral") {
+            "mistralai"
+        } else if p.contains("groq") {
+            "groq"
+        } else if p.contains("cerebras") {
+            "cerebras"
+        } else if p.contains("minimax") {
+            "minimax"
+        } else if p.contains("nvidia") || p == "nim" {
+            "nvidia"
+        } else if p.contains("nous") {
+            "nousresearch"
+        } else if p.contains("xiaomi") || p.contains("mimo") {
+            "xiaomi"
+        } else if p.contains("cohere") {
+            "cohere"
+        } else if p.contains("perplexity") {
+            "perplexity"
         } else {
             "openai"
         }
@@ -371,6 +410,16 @@ impl ModelPricingCatalog {
             "x-ai" => ("grok-build-0.1", "grok-4.7"),
             "qwen" => ("qwen3.8-flash", "qwen3.8-max-prime"),
             "moonshotai" => ("kimi-k2.7-code", "kimi-k3.1-pro"),
+            "z-ai" => ("glm-5.3-flashx-legal", "glm-5.1"),
+            "mistralai" => ("codestral-latest", "mistral-large-latest"),
+            "groq" => ("llama-3.1-8b-instant", "llama-3.3-70b-versatile"),
+            "cerebras" => ("llama-3.3-70b", "llama-3.3-70b"),
+            "minimax" => ("MiniMax-M2.5", "MiniMax-M2.5"),
+            "nvidia" => ("nvidia/llama-3.3-nemotron-super-49b-v1", "nvidia/llama-3.3-nemotron-super-49b-v1"),
+            "nousresearch" => ("Hermes-4-70B", "Hermes-4-405B"),
+            "xiaomi" => ("mimo-v2-flash", "mimo-v2-flash"),
+            "cohere" => ("command-a-03-2025", "command-a-03-2025"),
+            "perplexity" => ("sonar-reasoning-pro", "sonar-reasoning-pro"),
             _ => ("gpt-6-luna", "gpt-6.1-terra"),
         };
 

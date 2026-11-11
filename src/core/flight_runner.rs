@@ -123,6 +123,10 @@ pub(crate) fn test_config() -> AgentConfig {
         provider_timeout_ms: 5_000,
         api_endpoint: "http://127.0.0.1:0".to_string(),
         api_key: None,
+        reasoning_effort: None,
+        wire_dialect: None,
+        fallback_providers: Vec::new(),
+        ..AgentConfig::default()
     }
 }
 

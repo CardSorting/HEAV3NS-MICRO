@@ -1,5 +1,6 @@
 // [LAYER: DOMAIN]
 use crate::domain::types::model_catalog::ModelPricingCatalog;
+use crate::domain::types::provider_registry::{lookup_provider_descriptor, ProviderBillingClass};
 use crate::plumbing::hash_and_math::fnv1a_32;
 use serde::{Deserialize, Serialize};
 
@@ -70,6 +71,13 @@ impl BillingMetering {
         let m = model.trim().to_ascii_lowercase();
         let ep = endpoint.trim().to_ascii_lowercase();
 
+        if let Some(desc) = lookup_provider_descriptor(&p) {
+            match desc.billing_class {
+                ProviderBillingClass::LocalNoBill => return Self::LocalNoBill,
+                ProviderBillingClass::Subscription => return Self::Subscription,
+                ProviderBillingClass::Metered => {}
+            }
+        }
         if p == "ollama"
             || p.contains("apple")
             || m.starts_with("apple-")

@@ -14,15 +14,84 @@ struct WorkspaceModelSelection: Equatable {
     var providerLabel: String {
         switch provider {
         case "openrouter": return "OpenRouter"
+        case "orcarouter": return "OrcaRouter"
+        case "codewhale": return "Codewhale"
         case "cline-pass": return "Cline Pass"
         case "nous": return "Nous Research"
         case "opencode": return "OpenCode"
+        case "opencode-go": return "OpenCode Go"
         case "apple-playground": return "On this Mac (Playground)"
         case "openai-codex": return "OpenAI Codex"
+        case "openai": return "OpenAI API"
+        case "anthropic": return "Anthropic"
+        case "gemini": return "Google Gemini"
+        case "deepseek", "deepseek-anthropic": return "DeepSeek"
+        case "xai": return "xAI Grok"
+        case "groq": return "Groq"
+        case "mistral": return "Mistral AI"
+        case "qwen", "qwen-anthropic": return "Qwen (Alibaba)"
+        case "modelstudio-token-plan", "modelstudio-token-plan-anthropic": return "Alibaba Model Studio"
+        case "modelstudio-coding-plan", "modelstudio-coding-plan-anthropic": return "Model Studio (Coding)"
+        case "moonshot", "kimi-code": return "Moonshot Kimi"
+        case "zai", "zai-anthropic": return "Z.ai GLM"
+        case "minimax", "minimax-anthropic": return "MiniMax"
+        case "volcengine": return "Volcengine Ark"
+        case "wanjie-ark": return "Wanjie Ark"
+        case "nvidia-nim": return "NVIDIA NIM"
+        case "together": return "Together AI"
+        case "fireworks": return "Fireworks AI"
+        case "deepinfra": return "DeepInfra"
+        case "atlascloud": return "AtlasCloud"
+        case "siliconflow": return "SiliconFlow"
+        case "siliconflow-CN": return "SiliconFlow (CN)"
+        case "cerebras": return "Cerebras"
+        case "baseten": return "Baseten"
+        case "novita": return "Novita AI"
+        case "arcee": return "Arcee AI"
+        case "xiaomi-mimo": return "Xiaomi MiMo"
+        case "stepfun": return "StepFun"
+        case "huggingface": return "Hugging Face"
+        case "modelscope": return "ModelScope"
+        case "qianfan": return "Baidu Qianfan"
+        case "openmodel": return "OpenModel"
+        case "sakana": return "Sakana AI (Fugu)"
+        case "longcat": return "Meituan LongCat"
+        case "meta": return "Meta Model API"
+        case "telecomjs": return "TelecomJS TokenHub"
+        case "edenai": return "Eden AI"
+        case "zenmux": return "ZenMux"
+        case "csdn": return "CSDN Starmap"
+        case "perplexity": return "Perplexity"
+        case "cohere": return "Cohere"
+        case "concentrate": return "Concentrate AI"
+        case "ollama-cloud": return "Ollama Cloud"
+        case "ollama": return "Ollama (Local)"
+        case "vllm": return "vLLM (Local)"
+        case "sglang": return "SGLang (Local)"
+        case "lmstudio": return "LM Studio (Local)"
+        case "custom": return "Custom Endpoint"
         default: return "Claude Code"
         }
     }
-    static let providers: Set<String> = ["openai-codex", "claude-subscription-directsdk-experimental", "openrouter", "cline-pass", "nous", "opencode", "apple-playground"]
+    static func providerCategory(for id: String) -> String {
+        if ["ollama", "vllm", "sglang", "lmstudio", "apple-playground"].contains(id) { return "local zero-key offline" }
+        if ["openai", "openai-codex", "anthropic", "claude-subscription-directsdk-experimental", "gemini", "deepseek", "deepseek-anthropic", "xai", "mistral", "qwen", "qwen-anthropic", "moonshot", "kimi-code", "zai", "zai-anthropic", "minimax", "minimax-anthropic", "meta"].contains(id) {
+            return "frontier direct"
+        }
+        return "router gateway cloud"
+    }
+    static let providers: Set<String> = [
+        "openai", "openai-codex", "claude-subscription-directsdk-experimental", "anthropic",
+        "gemini", "deepseek", "deepseek-anthropic", "openrouter", "orcarouter", "xai", "groq", "mistral",
+        "qwen", "qwen-anthropic", "modelstudio-token-plan", "modelstudio-token-plan-anthropic",
+        "modelstudio-coding-plan", "modelstudio-coding-plan-anthropic", "moonshot", "kimi-code",
+        "zai", "zai-anthropic", "minimax", "minimax-anthropic", "volcengine", "wanjie-ark",
+        "nvidia-nim", "together", "fireworks", "deepinfra", "atlascloud", "siliconflow", "siliconflow-CN",
+        "cerebras", "baseten", "novita", "arcee", "xiaomi-mimo", "stepfun", "huggingface", "modelscope",
+        "qianfan", "openmodel", "sakana", "longcat", "meta", "telecomjs", "edenai", "zenmux", "csdn",
+        "perplexity", "cohere", "concentrate", "codewhale", "opencode", "opencode-go", "cline-pass",
+        "nous", "ollama-cloud", "ollama", "vllm", "sglang", "lmstudio", "apple-playground", "custom"
+    ]
     static func validModel(_ value: String) -> Bool {
         value.utf8.count <= 200 && value.range(of: "^~?[A-Za-z0-9][A-Za-z0-9._:/\\[\\]-]*\\z", options: .regularExpression) != nil
     }
@@ -60,7 +129,7 @@ struct WorkspaceModelCatalog {
     let blocked: String?
     init?(_ data: [String: Any]) {
         guard let selection = WorkspaceModelSelection(data), let raw = data["providers"] as? [[String: Any]],
-              !raw.isEmpty, raw.count <= 16 else { return nil }
+              !raw.isEmpty, raw.count <= 128 else { return nil }
         var providers = [Provider](), ids = Set<String>()
         for item in raw {
             guard let id = item["id"] as? String, WorkspaceModelSelection.providers.contains(id), ids.insert(id).inserted,

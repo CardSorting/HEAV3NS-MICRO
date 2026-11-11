@@ -14,6 +14,8 @@ pub mod codewhale_zenith_tests;
 #[cfg(test)]
 pub mod computer_use_tests;
 #[cfg(test)]
+pub mod provider_parity_tests;
+#[cfg(test)]
 pub mod spatial_tests;
 #[cfg(test)]
 pub mod substrate_tests;

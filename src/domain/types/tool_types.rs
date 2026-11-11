@@ -82,10 +82,24 @@ impl ToolSpec {
         let mut props = Map::new();
         let mut required = Vec::new();
         for &(pname, ref pschema) in &self.parameters {
-            props.insert(
-                pname.to_string(),
-                json!({ "type": pschema.r#type.as_str(), "description": pschema.description }),
-            );
+            let prop_val = match pschema.r#type {
+                ParamType::Array => {
+                    let desc_low = pschema.description.to_ascii_lowercase();
+                    let items = if desc_low.contains('{') || desc_low.contains("object") {
+                        json!({ "type": "object", "properties": {} })
+                    } else if desc_low.contains("[x, y]") || desc_low.contains("coordinate") || desc_low.contains("number") {
+                        json!({ "type": "number" })
+                    } else {
+                        json!({ "type": "string" })
+                    };
+                    json!({ "type": "array", "description": pschema.description, "items": items })
+                }
+                ParamType::Object => {
+                    json!({ "type": "object", "description": pschema.description, "properties": {} })
+                }
+                _ => json!({ "type": pschema.r#type.as_str(), "description": pschema.description }),
+            };
+            props.insert(pname.to_string(), prop_val);
             if pschema.required {
                 required.push(Value::String(pname.to_string()));
             }

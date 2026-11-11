@@ -144,7 +144,7 @@ extension WorkspaceWindow {
             })
         }
         if reasoningPicker.isEnabled { actions.insert(WorkspaceAction(title: "Change Reasoning Level…", shortcut: "", keywords: ["effort", "thinking", "speed", "depth"]) { [weak self] in self?.reasoningPicker.performClick(nil) }, at: 1) }
-        if client.capabilities.contains("model-selection-v1") { actions.insert(WorkspaceAction(title: "Choose Model & Provider…", shortcut: "F3 / ⇧⌘M", keywords: ["switch", "change", "AI", "ollama", "anthropic", "openai", "f3"]) { [weak self] in self?.showModels() }, at: 1) }
+        if client.capabilities.contains("model-selection-v1") { actions.insert(WorkspaceAction(title: "Choose Model & Provider…", shortcut: "F3 / ⇧⌘M", keywords: ["switch", "change", "AI", "provider", "ollama", "anthropic", "claude", "openai", "codex", "gemini", "deepseek", "grok", "xai", "groq", "mistral", "qwen", "kimi", "moonshot", "glm", "zai", "openrouter", "nous", "f3"]) { [weak self] in self?.showModels() }, at: 1) }
         if !client.isReady, client.process?.isRunning != true, !closing { actions.insert(WorkspaceAction(title: "Reconnect Workspace", shortcut: "", keywords: ["connection", "retry", "recover"]) { [weak self] in self?.reconnect() }, at: 0) }
         if client.isReady, uncertainSubmission != nil, !checkingSubmission { actions.insert(WorkspaceAction(title: "Check Instruction Status", shortcut: "", keywords: ["retry", "submission", "recover"]) { [weak self] in self?.reconcileSubmission() }, at: 0) }
         actions.append(WorkspaceAction(title: "Project Library…", shortcut: "", keywords: ["projects", "open recent"]) { [weak self] in self?.onProjects?() })

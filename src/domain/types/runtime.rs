@@ -2,6 +2,7 @@
 use crate::domain::types::progress::EngineProgressEvent;
 use crate::plumbing::seatbelt_profile::SeatbeltSandboxMode;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::watch;
 
@@ -225,6 +226,16 @@ pub struct AgentConfig {
     pub provider_timeout_ms: u64,
     pub api_endpoint: String,
     pub api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wire_dialect: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fallback_providers: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub provider_keys: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub provider_endpoints: BTreeMap<String, String>,
 }
 
 pub const DEFAULT_SYSTEM_PROMPT: &str = "You are HEAV3NS-MICRO, a sovereign local-first software engineering agent. Own the requested outcome from inspection through verified completion.";
@@ -244,6 +255,11 @@ impl Default for AgentConfig {
             provider_timeout_ms: 120_000,
             api_endpoint: "https://api.openai.com/v1".to_string(),
             api_key: std::env::var("OPENAI_API_KEY").ok().filter(|s| !s.is_empty()),
+            reasoning_effort: None,
+            wire_dialect: None,
+            fallback_providers: Vec::new(),
+            provider_keys: BTreeMap::new(),
+            provider_endpoints: BTreeMap::new(),
         }
     }
 }

@@ -37,6 +37,7 @@ flowchart TD
   ADR13["ADR-0013: Shell Command Guard & Pipeline Anti-Starvation Defenses"]
   ADR14["ADR-0014: Codewhale Distillation — Posture, CAS, Seatbelt & Receipts"]
   ADR15["ADR-0015: Auto-Refreshing 2026 Model Catalog & Billing Integrity"]
+  ADR16["ADR-0016: Codewhale Provider Parity & 4-Dialect Wire Engine"]
 
   ADR1 --> ADR7
   ADR1 --> ADR2
@@ -60,6 +61,8 @@ flowchart TD
   ADR12 --> ADR14
   ADR13 --> ADR14
   ADR14 --> ADR15
+  ADR14 --> ADR16
+  ADR15 --> ADR16
 ```
 
 ---
@@ -84,6 +87,7 @@ flowchart TD
 | [ADR-0013](0013-shell-command-defenses-and-pipeline-sanitization.md) | Shell Command Guard, Heredoc File-Write Interdiction & Terminal File-Read Anti-Starvation | **Accepted** | Runtime Defenses (`THE HARNESS`) | `test_adr_0015_compound_multiline_and_closing_heredoc_defenses` |
 | [ADR-0014](0014-codewhale-distillation-posture-cas-and-receipts.md) | Codewhale Zenith Distillation — 5-Stop Execution Posture, Pure-Rust Workspace CAS, Seatbelt Sandboxing, KV-Cache Pinning & Turn Receipts | **Accepted** | Safety, Ergonomics & Desktop UX (`THE HARNESS`) | `cargo test core::codewhale_zenith_tests` & `swift test` |
 | [ADR-0015](0015-auto-refreshing-frontier-model-catalog.md) | Auto-Refreshing 2026 Frontier Model Catalog, Dynamic Capability Taxonomy & Zero-Cost Billing Integrity | **Accepted** | Model Intelligence & Billing (`HEAV3NS-MICRO`) | `cargo run -- models --refresh` & `cargo test` |
+| [ADR-0016](0016-codewhale-provider-parity-and-multi-dialect-wire.md) | Codewhale Provider Parity, 4-Dialect Wire Engine, Secret-Slot Isolation & Full-Stack AppKit/CLI Synchronization | **Accepted** | Multi-Provider Routing & Wire (`HEAV3NS-MICRO`) | `cargo test core::provider_parity_tests` & `swift test` |
 
 ---
 

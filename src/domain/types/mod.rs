@@ -6,6 +6,8 @@ pub mod messages;
 pub mod model_catalog;
 pub mod posture_types;
 pub mod progress;
+pub mod provider_catalog_data;
+pub mod provider_registry;
 pub mod runtime;
 pub mod skill_types;
 pub mod spatial_types;
@@ -22,6 +24,7 @@ pub use crate::domain::types::messages::{estimate_messages_tokens, extract_text_
 pub use crate::domain::types::model_catalog::{IModelCatalog, IModelTierRecommender, ModelCatalogEntry, ModelPricingCatalog};
 pub use crate::domain::types::posture_types::{evaluate_tool_posture, AuthorizationVerdict, ExecutionPosture, PostureEvaluation, RepoConstitution, RepoConstitutionRule, UserApprovalChoice};
 pub use crate::domain::types::progress::{EngineProgressEvent, EngineProgressMetadata, EngineProgressPhase, EngineProgressStatus, ToolExecutionRecord};
+pub use crate::domain::types::provider_registry::{canonicalize_provider_id, infer_wire_dialect_from_endpoint, is_retired_provider, lookup_provider_descriptor, opencode_go_model_id, resolve_effective_wire_override, resolve_model_aware_wire_and_model, resolve_provider_route, retired_provider_remediation, suggest_provider_slug, IProviderRouteResolver, ProviderBillingClass, ProviderChain, ProviderDescriptor, ReasoningEffortLevel, ResolvedProviderRoute, WireDialect, LEGACY_ANTIGRAVITY_TOMBSTONE_MESSAGE, PROVIDER_DESCRIPTORS};
 pub use crate::domain::types::runtime::{AgentConfig, ApprovalGateCallback, CancellationToken, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel};
 pub use crate::domain::types::skill_types::{GovernedOutput, SkillManifest, WorkspacePromptFacts};
 pub use crate::domain::types::spatial_types::{AssuranceVerdict, SpatialActionContract, SpatialError, SpatialScene, SpatialTarget, TargetProvenance};

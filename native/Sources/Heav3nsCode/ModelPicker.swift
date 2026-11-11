@@ -2,12 +2,14 @@
 import AppKit
 
 /// Modeless so the conversation and Stop remain available while browsing routes.
-final class ModelPicker: NSWindowController, NSWindowDelegate, NSTextFieldDelegate {
+final class ModelPicker: NSWindowController, NSWindowDelegate, NSTextFieldDelegate, NSSearchFieldDelegate {
     private let request: (String, [String: Any], @escaping (Result<[String: Any], Error>) -> Void) -> Void
     private let connected: () -> Bool
     private let supportsDiscovery: () -> Bool
     private let canApply: () -> Bool
     private let onSelection: (WorkspaceModelSelection) -> Void
+    private let providerFilter = NSSearchField()
+    private let recentRow = NSStackView()
     private let provider = NSPopUpButton()
     private let apiKey = NSSecureTextField()
     private let keyStatus = JourneyStyle.label("", size: 11, secondary: true)
@@ -35,6 +37,7 @@ final class ModelPicker: NSWindowController, NSWindowDelegate, NSTextFieldDelega
     private let apply = NSButton(title: "Switch Model", target: nil, action: nil)
     private let reload = NSButton(title: "Refresh", target: nil, action: nil)
     private var providers = [WorkspaceModelCatalog.Provider]()
+    private var visibleProviders = [WorkspaceModelCatalog.Provider]()
     private var recentSelections = [WorkspaceModelSelection]()
     private let availability = JourneyStyle.label("", size: 11, secondary: true)
     private var failure: String?
@@ -55,8 +58,72 @@ final class ModelPicker: NSWindowController, NSWindowDelegate, NSTextFieldDelega
     private var discoveries = [String: WorkspaceModelDiscovery]()
     private var discoveryRequests = [String: UUID]()
 
+    private struct CredentialSpec {
+        let rpcPrefix: String
+        let placeholder: String
+        let envVar: String
+        let keyPortal: String
+    }
+
+    private static func credentialSpec(for providerID: String) -> CredentialSpec? {
+        switch providerID {
+        case "openrouter": return CredentialSpec(rpcPrefix: "openrouter", placeholder: "OpenRouter API key", envVar: "OPENROUTER_API_KEY", keyPortal: "openrouter.ai/keys")
+        case "orcarouter": return CredentialSpec(rpcPrefix: "orcarouter", placeholder: "OrcaRouter API key", envVar: "ORCAROUTER_API_KEY", keyPortal: "orcarouter.ai")
+        case "codewhale": return CredentialSpec(rpcPrefix: "codewhale", placeholder: "Codewhale API key", envVar: "CODEWHALE_API_KEY", keyPortal: "codewhale.net")
+        case "cline-pass": return CredentialSpec(rpcPrefix: "clinePass", placeholder: "Cline Pass API key", envVar: "CLINE_API_KEY", keyPortal: "app.cline.bot")
+        case "nous": return CredentialSpec(rpcPrefix: "nous", placeholder: "Nous Research API key", envVar: "NOUS_API_KEY", keyPortal: "portal.nousresearch.com/keys")
+        case "opencode": return CredentialSpec(rpcPrefix: "opencode", placeholder: "OpenCode API key or Access Token", envVar: "OPENCODE_API_KEY", keyPortal: "opencode.ai/zen")
+        case "opencode-go": return CredentialSpec(rpcPrefix: "opencodeGo", placeholder: "OpenCode Go API key", envVar: "OPENCODE_GO_API_KEY", keyPortal: "opencode.ai/auth")
+        case "openai": return CredentialSpec(rpcPrefix: "openai", placeholder: "OpenAI API key", envVar: "OPENAI_API_KEY", keyPortal: "platform.openai.com/api-keys")
+        case "anthropic": return CredentialSpec(rpcPrefix: "anthropic", placeholder: "Anthropic API key", envVar: "ANTHROPIC_API_KEY", keyPortal: "console.anthropic.com/settings/keys")
+        case "gemini": return CredentialSpec(rpcPrefix: "gemini", placeholder: "Google Gemini API key", envVar: "GEMINI_API_KEY", keyPortal: "aistudio.google.com/apikey")
+        case "deepseek", "deepseek-anthropic": return CredentialSpec(rpcPrefix: "deepseek", placeholder: "DeepSeek API key", envVar: "DEEPSEEK_API_KEY", keyPortal: "platform.deepseek.com/api_keys")
+        case "xai": return CredentialSpec(rpcPrefix: "xai", placeholder: "xAI API key", envVar: "XAI_API_KEY", keyPortal: "console.x.ai")
+        case "groq": return CredentialSpec(rpcPrefix: "groq", placeholder: "Groq API key", envVar: "GROQ_API_KEY", keyPortal: "console.groq.com/keys")
+        case "mistral": return CredentialSpec(rpcPrefix: "mistral", placeholder: "Mistral API key", envVar: "MISTRAL_API_KEY", keyPortal: "console.mistral.ai/api-keys")
+        case "qwen", "qwen-anthropic": return CredentialSpec(rpcPrefix: "qwen", placeholder: "DashScope / Qwen API key", envVar: "DASHSCOPE_API_KEY", keyPortal: "dashscope.console.aliyun.com/apiKey")
+        case "modelstudio-token-plan", "modelstudio-token-plan-anthropic", "modelstudio-coding-plan", "modelstudio-coding-plan-anthropic":
+            return CredentialSpec(rpcPrefix: "modelstudioTokenPlan", placeholder: "Alibaba Model Studio API key", envVar: "MODELSTUDIO_API_KEY", keyPortal: "modelstudio.console.alibabacloud.com")
+        case "moonshot", "kimi-code": return CredentialSpec(rpcPrefix: "moonshot", placeholder: "Moonshot / Kimi API key", envVar: "MOONSHOT_API_KEY", keyPortal: "platform.moonshot.ai/console/api-keys")
+        case "zai", "zai-anthropic": return CredentialSpec(rpcPrefix: "zai", placeholder: "Z.ai / GLM API key", envVar: "ZAI_API_KEY", keyPortal: "z.ai/manage-apikey/apikey-list")
+        case "minimax", "minimax-anthropic": return CredentialSpec(rpcPrefix: "minimax", placeholder: "MiniMax API key", envVar: "MINIMAX_API_KEY", keyPortal: "platform.minimax.io")
+        case "volcengine": return CredentialSpec(rpcPrefix: "volcengine", placeholder: "Volcengine Ark API key", envVar: "ARK_API_KEY", keyPortal: "console.volcengine.com/ark")
+        case "wanjie-ark": return CredentialSpec(rpcPrefix: "wanjieArk", placeholder: "Wanjie Ark API key", envVar: "WANJIE_ARK_API_KEY", keyPortal: "wanjiedata.com")
+        case "nvidia-nim": return CredentialSpec(rpcPrefix: "nvidiaNim", placeholder: "NVIDIA NIM API key", envVar: "NVIDIA_API_KEY", keyPortal: "build.nvidia.com")
+        case "together": return CredentialSpec(rpcPrefix: "together", placeholder: "Together AI API key", envVar: "TOGETHER_API_KEY", keyPortal: "api.together.ai/settings/api-keys")
+        case "fireworks": return CredentialSpec(rpcPrefix: "fireworks", placeholder: "Fireworks AI API key", envVar: "FIREWORKS_API_KEY", keyPortal: "fireworks.ai/account/api-keys")
+        case "deepinfra": return CredentialSpec(rpcPrefix: "deepinfra", placeholder: "DeepInfra API key", envVar: "DEEPINFRA_API_KEY", keyPortal: "deepinfra.com/dash/api_keys")
+        case "atlascloud": return CredentialSpec(rpcPrefix: "atlascloud", placeholder: "AtlasCloud API key", envVar: "ATLASCLOUD_API_KEY", keyPortal: "atlascloud.ai/console/api-keys")
+        case "siliconflow": return CredentialSpec(rpcPrefix: "siliconflow", placeholder: "SiliconFlow API key", envVar: "SILICONFLOW_API_KEY", keyPortal: "cloud.siliconflow.com/account/ak")
+        case "siliconflow-CN": return CredentialSpec(rpcPrefix: "siliconflowCN", placeholder: "SiliconFlow (CN) API key", envVar: "SILICONFLOW_API_KEY", keyPortal: "cloud.siliconflow.cn/account/ak")
+        case "cerebras": return CredentialSpec(rpcPrefix: "cerebras", placeholder: "Cerebras API key", envVar: "CEREBRAS_API_KEY", keyPortal: "cloud.cerebras.ai")
+        case "baseten": return CredentialSpec(rpcPrefix: "baseten", placeholder: "Baseten API key", envVar: "BASETEN_API_KEY", keyPortal: "app.baseten.co/settings/api_keys")
+        case "novita": return CredentialSpec(rpcPrefix: "novita", placeholder: "Novita AI API key", envVar: "NOVITA_API_KEY", keyPortal: "novita.ai/settings/key-management")
+        case "arcee": return CredentialSpec(rpcPrefix: "arcee", placeholder: "Arcee AI API key", envVar: "ARCEE_API_KEY", keyPortal: "chat.arcee.ai/account/api-keys")
+        case "xiaomi-mimo": return CredentialSpec(rpcPrefix: "xiaomiMimo", placeholder: "Xiaomi MiMo API key", envVar: "MIMO_API_KEY", keyPortal: "platform.xiaomimimo.com")
+        case "stepfun": return CredentialSpec(rpcPrefix: "stepfun", placeholder: "StepFun API key", envVar: "STEPFUN_API_KEY", keyPortal: "platform.stepfun.com")
+        case "huggingface": return CredentialSpec(rpcPrefix: "huggingface", placeholder: "Hugging Face Token", envVar: "HF_TOKEN", keyPortal: "huggingface.co/settings/tokens")
+        case "modelscope": return CredentialSpec(rpcPrefix: "modelscope", placeholder: "ModelScope API key", envVar: "MODELSCOPE_API_KEY", keyPortal: "modelscope.cn/my/myaccesstoken")
+        case "qianfan": return CredentialSpec(rpcPrefix: "qianfan", placeholder: "Baidu Qianfan API key", envVar: "QIANFAN_API_KEY", keyPortal: "console.bce.baidu.com/iam")
+        case "openmodel": return CredentialSpec(rpcPrefix: "openmodel", placeholder: "OpenModel API key", envVar: "OPENMODEL_API_KEY", keyPortal: "console.openmodel.ai/api-keys")
+        case "sakana": return CredentialSpec(rpcPrefix: "sakana", placeholder: "Sakana AI (Fugu) API key", envVar: "FUGU_API_KEY", keyPortal: "console.sakana.ai")
+        case "longcat": return CredentialSpec(rpcPrefix: "longcat", placeholder: "Meituan LongCat API key", envVar: "LONGCAT_API_KEY", keyPortal: "longcat.chat/platform/api_keys")
+        case "meta": return CredentialSpec(rpcPrefix: "meta", placeholder: "Meta Model API key", envVar: "META_MODEL_API_KEY", keyPortal: "developers.facebook.com")
+        case "telecomjs": return CredentialSpec(rpcPrefix: "telecomjs", placeholder: "TelecomJS TokenHub API key", envVar: "TELECOMJS_API_KEY", keyPortal: "aigw.telecomjs.com")
+        case "edenai": return CredentialSpec(rpcPrefix: "edenai", placeholder: "Eden AI API key", envVar: "EDENAI_API_KEY", keyPortal: "app.edenai.run")
+        case "zenmux": return CredentialSpec(rpcPrefix: "zenmux", placeholder: "ZenMux API key", envVar: "ZENMUX_API_KEY", keyPortal: "zenmux.ai/settings/keys")
+        case "csdn": return CredentialSpec(rpcPrefix: "csdn", placeholder: "CSDN Starmap API key", envVar: "CSDN_API_KEY", keyPortal: "ai.csdn.net")
+        case "perplexity": return CredentialSpec(rpcPrefix: "perplexity", placeholder: "Perplexity API key", envVar: "PERPLEXITY_API_KEY", keyPortal: "perplexity.ai/settings/api")
+        case "cohere": return CredentialSpec(rpcPrefix: "cohere", placeholder: "Cohere API key", envVar: "COHERE_API_KEY", keyPortal: "dashboard.cohere.com/api-keys")
+        case "concentrate": return CredentialSpec(rpcPrefix: "concentrate", placeholder: "Concentrate AI API key", envVar: "CONCENTRATE_API_KEY", keyPortal: "concentrate.ai")
+        case "ollama-cloud": return CredentialSpec(rpcPrefix: "ollamaCloud", placeholder: "Ollama Cloud API key", envVar: "OLLAMA_CLOUD_API_KEY", keyPortal: "ollama.com/settings/keys")
+        case "custom": return CredentialSpec(rpcPrefix: "custom", placeholder: "Custom Endpoint API key", envVar: "CUSTOM_API_KEY", keyPortal: "your custom endpoint")
+        default: return nil
+        }
+    }
+
     convenience init(client: RuntimeClient, canApply: @escaping () -> Bool, onSelection: @escaping (WorkspaceModelSelection) -> Void) {
-        self.init(request: { method, params, completion in client.request(method, params: params, completion: completion) }, connected: { client.isReady }, supportsDiscovery: { client.capabilities.contains("model-discovery-v1") }, supportsCredentials: { client.capabilities.contains("openrouter-credentials-v1") }, canApply: canApply, onSelection: onSelection)
+        self.init(request: { method, params, completion in client.request(method, params: params, completion: completion) }, connected: { client.isReady }, supportsDiscovery: { client.capabilities.contains("model-discovery-v1") }, supportsCredentials: { client.capabilities.contains("openrouter-credentials-v1") || client.capabilities.contains("multi-provider-parity-v1") }, canApply: canApply, onSelection: onSelection)
     }
     init(request: @escaping (String, [String: Any], @escaping (Result<[String: Any], Error>) -> Void) -> Void, connected: @escaping () -> Bool, supportsDiscovery: @escaping () -> Bool = { false }, supportsCredentials: @escaping () -> Bool = { false }, canApply: @escaping () -> Bool, onSelection: @escaping (WorkspaceModelSelection) -> Void) {
         self.supportsCredentials = supportsCredentials
@@ -93,6 +160,10 @@ final class ModelPicker: NSWindowController, NSWindowDelegate, NSTextFieldDelega
             guard let self, self.window?.isVisible == true else { return }
             self.load()
         }
+        providerFilter.placeholderString = "Filter 65 providers (e.g. local, anthropic, codewhale, qwen)…"
+        providerFilter.setAccessibilityLabel("Filter providers")
+        providerFilter.delegate = self; providerFilter.sendsSearchStringImmediately = true
+        recentRow.orientation = .horizontal; recentRow.alignment = .centerY; recentRow.spacing = 6; recentRow.isHidden = true
         provider.target = self; provider.action = #selector(changeProvider); provider.setAccessibilityLabel("Provider")
         model.delegate = self; model.setAccessibilityLabel("Custom model ID")
         model.placeholderString = "Exact model ID"; model.target = self; model.action = #selector(save)
@@ -117,7 +188,7 @@ final class ModelPicker: NSWindowController, NSWindowDelegate, NSTextFieldDelega
         let root = JourneyStyle.stack([
             JourneyStyle.label("Choose Model", size: 20, weight: .semibold),
             JourneyStyle.label("Choose a model to switch immediately in this workspace.", size: 12, secondary: true),
-            status, JourneyStyle.rule(), JourneyStyle.label("Provider", size: 12, weight: .semibold), provider, detail,
+            status, recentRow, JourneyStyle.rule(), JourneyStyle.label("Provider", size: 12, weight: .semibold), providerFilter, provider, detail,
             credentialsRow, appleIntelligenceRow, chatGPTAccountsRow, modelChoice, customRow, modelInformation,
             availability, footer
         ], spacing: 10)
@@ -156,7 +227,7 @@ final class ModelPicker: NSWindowController, NSWindowDelegate, NSTextFieldDelega
     private var validation: String? {
         if displayedProvider == "openrouter" && !draftModel.contains("/") { return "Enter an OpenRouter model ID, such as anthropic/claude-sonnet-4.5." }
         guard WorkspaceModelSelection.validModel(draftModel) else { return "Enter a model ID of up to 200 characters, without spaces." }
-        if (displayedProvider == "openai-codex" || displayedProvider == "cline-pass" || displayedProvider == "nous" || displayedProvider == "opencode" || displayedProvider == "apple-playground") && draftModel.lowercased().hasPrefix("claude-") { return "Choose Claude Code for a native Claude model, or enter a compatible model ID." }
+        if (displayedProvider == "openai-codex" || displayedProvider == "nous" || displayedProvider == "apple-playground") && draftModel.lowercased().hasPrefix("claude-") { return "Choose Claude Code for a native Claude model, or enter a compatible model ID." }
         return nil
     }
     @objc private func showChatGPTAccounts() { ChatGPTAccountsWindow.shared.present() }
@@ -166,7 +237,7 @@ final class ModelPicker: NSWindowController, NSWindowDelegate, NSTextFieldDelega
     func refreshAvailability() {
         syncPresentation()
         let editable = !dismissed && !pending && !keyPending && selection != nil
-        let hasCredentials = ["openrouter", "cline-pass", "nous", "opencode"].contains(displayedProvider ?? "")
+        let hasCredentials = Self.credentialSpec(for: displayedProvider ?? "") != nil
         credentialsRow.isHidden = !hasCredentials || !supportsCredentials()
         let isApplePlayground = displayedProvider == "apple-playground"
         appleIntelligenceRow.isHidden = !isApplePlayground
@@ -179,7 +250,8 @@ final class ModelPicker: NSWindowController, NSWindowDelegate, NSTextFieldDelega
         apiKey.isEnabled = connected() && editable && canApply()
         saveKey.isEnabled = apiKey.isEnabled && !apiKey.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         removeKey.isEnabled = apiKey.isEnabled && keySaved
-        provider.isEnabled = editable; model.isEnabled = editable
+        providerFilter.isEnabled = editable
+        provider.isEnabled = editable && !visibleProviders.isEmpty; model.isEnabled = editable
         modelChoice.setAvailability(browse: editable, canSwitch: editable && connected() && reconciled && blocked == nil && canApply(), customVisible: customMode)
         customRow.isHidden = !customMode
         reload.isEnabled = connected() && !pending && !keyPending && discoveryRequests[displayedProvider ?? ""] == nil
@@ -221,33 +293,63 @@ final class ModelPicker: NSWindowController, NSWindowDelegate, NSTextFieldDelega
         selection = catalog.selection; providers = catalog.providers; recentSelections = catalog.recent; reconciled = true; resetRevision = false; failure = nil
         for item in catalog.recent where remembered[item.provider] == nil { remembered[item.provider] = item.model }
         if !preserve { remembered[catalog.selection.provider] = catalog.selection.model }
-        provider.removeAllItems()
-        providers.forEach { provider.addItem(withTitle: $0.label) }
+        rebuildRecentRow()
         let target = draftProvider ?? catalog.selection.provider
-        provider.selectItem(at: providers.firstIndex { $0.id == target } ?? providers.firstIndex { $0.id == catalog.selection.provider }!)
+        rebuildProviderPopup(preferring: target)
         displayedProvider = nil; changeProvider(); onSelection(catalog.selection)
+    }
+    private func rebuildRecentRow() {
+        recentRow.arrangedSubviews.forEach { recentRow.removeArrangedSubview($0); $0.removeFromSuperview() }
+        let quick = recentSelections.filter { $0.provider != selection?.provider || $0.model != selection?.model }.prefix(3)
+        guard !quick.isEmpty else { recentRow.isHidden = true; return }
+        recentRow.addArrangedSubview(JourneyStyle.label("Recent:", size: 11, secondary: true))
+        for (idx, item) in quick.enumerated() {
+            let btn = NSButton(title: "\(item.providerLabel) · \(item.model)", target: self, action: #selector(selectRecentChip(_:)))
+            btn.bezelStyle = .inline; btn.tag = idx; btn.font = .systemFont(ofSize: 11)
+            btn.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            recentRow.addArrangedSubview(btn)
+        }
+        recentRow.addArrangedSubview(NSView())
+        recentRow.isHidden = false
+    }
+    @objc private func selectRecentChip(_ sender: NSButton) {
+        let quick = Array(recentSelections.filter { $0.provider != selection?.provider || $0.model != selection?.model }.prefix(3))
+        guard quick.indices.contains(sender.tag), connected(), reconciled, blocked == nil, canApply() else { return }
+        let chosen = quick[sender.tag]
+        providerFilter.stringValue = ""
+        rebuildProviderPopup(preferring: chosen.provider)
+        changeProvider()
+        model.stringValue = chosen.model
+        if validation == nil && dirty { save() }
+    }
+    private func rebuildProviderPopup(preferring targetID: String?) {
+        let terms = providerFilter.stringValue.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current).split(whereSeparator: \.isWhitespace)
+        if terms.isEmpty {
+            visibleProviders = providers
+        } else {
+            visibleProviders = providers.filter { item in
+                let hay = "\(item.id) \(item.label) \(item.detail) \(WorkspaceModelSelection.providerCategory(for: item.id))"
+                    .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                return terms.allSatisfy { hay.contains($0) }
+            }
+        }
+        provider.removeAllItems()
+        visibleProviders.forEach { provider.addItem(withTitle: $0.label) }
+        guard !visibleProviders.isEmpty else { return }
+        let idx = targetID.flatMap { id in visibleProviders.firstIndex { $0.id == id } }
+            ?? selection.flatMap { sel in visibleProviders.firstIndex { $0.id == sel.provider } }
+            ?? 0
+        provider.selectItem(at: idx)
     }
     @objc private func changeProvider() {
         if let displayedProvider { remembered[displayedProvider] = model.stringValue }
-        guard providers.indices.contains(provider.indexOfSelectedItem) else { return }
-        let item = providers[provider.indexOfSelectedItem]
+        guard visibleProviders.indices.contains(provider.indexOfSelectedItem) else { return }
+        let item = visibleProviders[provider.indexOfSelectedItem]
         if displayedProvider != item.id { apiKey.stringValue = "" }
         displayedProvider = item.id
-        if item.id == "cline-pass" {
-            apiKey.placeholderString = "Cline Pass API key"
-            apiKey.setAccessibilityLabel("Cline Pass API key")
-            loadKeyStatus()
-        } else if item.id == "nous" {
-            apiKey.placeholderString = "Nous Research API key"
-            apiKey.setAccessibilityLabel("Nous Research API key")
-            loadKeyStatus()
-        } else if item.id == "opencode" {
-            apiKey.placeholderString = "OpenCode API key or Access Token"
-            apiKey.setAccessibilityLabel("OpenCode API key")
-            loadKeyStatus()
-        } else if item.id == "openrouter" {
-            apiKey.placeholderString = "OpenRouter API key"
-            apiKey.setAccessibilityLabel("OpenRouter API key")
+        if let spec = Self.credentialSpec(for: item.id) {
+            apiKey.placeholderString = spec.placeholder
+            apiKey.setAccessibilityLabel(item.id == "opencode" ? "OpenCode API key" : spec.placeholder)
             loadKeyStatus()
         }
         model.stringValue = remembered[item.id] ?? ""
@@ -313,6 +415,19 @@ final class ModelPicker: NSWindowController, NSWindowDelegate, NSTextFieldDelega
         case "nemotron-3.5-lightning-free": return ("Nemotron 3.5 Lightning (Free)", "128k context · Free tier")
         case "nemotron-3.5-super-vl-free": return ("Nemotron 3.5 Super VL (Free)", "128k context · Free tier vision")
         case "space-bunny-free": return ("Space Bunny (Free)", "128k context · Free tier")
+        case "claude-sonnet-4-6": return ("Claude Sonnet 4.6", "200k context · Anthropic Messages + adaptive thinking")
+        case "claude-opus-4-6": return ("Claude Opus 4.6", "200k context · Anthropic flagship intelligence")
+        case "gemini-2.5-pro": return ("Gemini 2.5 Pro", "1M context · Google frontier reasoning")
+        case "gemini-2.5-flash": return ("Gemini 2.5 Flash", "1M context · High-speed multimodal")
+        case "deepseek-chat": return ("DeepSeek V3.2 Chat", "128k context · High-efficiency coding")
+        case "deepseek-reasoner": return ("DeepSeek R1 Reasoner", "128k context · Chain-of-thought reasoning")
+        case "grok-4-fast": return ("Grok 4 Fast", "256k context · Low-latency xAI coding")
+        case "llama-3.3-70b-versatile": return ("Llama 3.3 70B", "128k context · Groq LPU ultra-low latency")
+        case "mistral-large-latest": return ("Mistral Large", "128k context · Mistral flagship")
+        case "codestral-latest": return ("Codestral", "256k context · Mistral code specialist")
+        case "qwen3-coder-plus": return ("Qwen3 Coder Plus", "1M context · Alibaba agentic coding")
+        case "llama3.2": return ("Llama 3.2 (Local)", "128k context · Free local Ollama inference")
+        case "qwen2.5-coder:7b": return ("Qwen 2.5 Coder 7B (Local)", "32k context · Free local coding specialist")
         default: return nil
         }
     }
@@ -387,11 +502,10 @@ final class ModelPicker: NSWindowController, NSWindowDelegate, NSTextFieldDelega
         }
     }
     private func loadKeyStatus() {
-        guard supportsCredentials(), connected(), !keyPending, let id = displayedProvider else { return }
+        guard supportsCredentials(), connected(), !keyPending, let id = displayedProvider, let spec = Self.credentialSpec(for: id) else { return }
         keyStatus.stringValue = "Checking saved key…"
         let token = loadID
-        let method = id == "cline-pass" ? "clinePass.status" : id == "nous" ? "nous.status" : id == "opencode" ? "opencode.status" : "openrouter.status"
-        request(method, [:]) { [weak self] result in
+        request("\(spec.rpcPrefix).status", [:]) { [weak self] result in
             guard let self, self.loadID == token, !self.dismissed else { return }
             self.installKeyStatus(result)
         }
@@ -400,14 +514,10 @@ final class ModelPicker: NSWindowController, NSWindowDelegate, NSTextFieldDelega
         switch result {
         case .success(let data):
             keySaved = data["saved"] as? Bool == true
-            if displayedProvider == "cline-pass" {
-                keyStatus.stringValue = keySaved ? "API key saved. Access is checked when you send." : data["configured"] as? Bool == true ? "Using CLINE_API_KEY from the environment." : "Add your key from app.cline.bot to send instructions."
-            } else if displayedProvider == "nous" {
-                keyStatus.stringValue = keySaved ? "API key saved. Access is checked when you send." : data["configured"] as? Bool == true ? "Using NOUS_API_KEY from the environment." : "Add your key from portal.nousresearch.com/keys to send instructions."
-            } else if displayedProvider == "opencode" {
+            if displayedProvider == "opencode" {
                 keyStatus.stringValue = keySaved ? "API key saved. Access is checked when you send." : data["configured"] as? Bool == true ? "Using OPENCODE_API_KEY or OpenCode session." : "Add your OpenCode API key or access token to send instructions."
-            } else {
-                keyStatus.stringValue = keySaved ? "API key saved. Access is checked when you send." : data["configured"] as? Bool == true ? "Using OPENROUTER_API_KEY from the environment." : "Add your key from openrouter.ai/keys to send instructions."
+            } else if let spec = Self.credentialSpec(for: displayedProvider ?? "") {
+                keyStatus.stringValue = keySaved ? "API key saved. Access is checked when you send." : data["configured"] as? Bool == true ? "Using \(spec.envVar) from the environment." : "Add your key from \(spec.keyPortal) to send instructions."
             }
         case .failure(let error): keyStatus.stringValue = error.localizedDescription
         }
@@ -419,11 +529,10 @@ final class ModelPicker: NSWindowController, NSWindowDelegate, NSTextFieldDelega
     }
     @objc private func clearKey() { updateKey("") }
     private func updateKey(_ value: String) {
-        guard supportsCredentials(), connected(), canApply(), !pending, !keyPending, !dismissed, let id = displayedProvider else { return }
+        guard supportsCredentials(), connected(), canApply(), !pending, !keyPending, !dismissed, let id = displayedProvider, let spec = Self.credentialSpec(for: id) else { return }
         keyPending = true; keyStatus.stringValue = "Saving key…"; refreshAvailability()
         let token = loadID
-        let method = id == "cline-pass" ? "clinePass.saveKey" : id == "nous" ? "nous.saveKey" : id == "opencode" ? "opencode.saveKey" : "openrouter.saveKey"
-        request(method, ["apiKey": value]) { [weak self] result in
+        request("\(spec.rpcPrefix).saveKey", ["apiKey": value]) { [weak self] result in
             guard let self, self.loadID == token, !self.dismissed else { return }
             self.keyPending = false
             if case .success = result { self.apiKey.stringValue = "" }
@@ -433,6 +542,17 @@ final class ModelPicker: NSWindowController, NSWindowDelegate, NSTextFieldDelega
     }
     func keyProbe(_ value: String) { apiKey.stringValue = value; storeKey() }
     func controlTextDidChange(_ obj: Notification) {
+        if let field = obj.object as? NSTextField, field === providerFilter {
+            let prev = displayedProvider
+            rebuildProviderPopup(preferring: prev)
+            if visibleProviders.indices.contains(provider.indexOfSelectedItem),
+               visibleProviders[provider.indexOfSelectedItem].id != prev {
+                changeProvider()
+            } else {
+                refreshAvailability()
+            }
+            return
+        }
         if let field = obj.object as? NSTextField, field === apiKey { refreshAvailability(); return }
         if let displayedProvider { customProviders.insert(displayedProvider) }
         customMode = true; refreshAvailability()
@@ -486,8 +606,16 @@ final class ModelPicker: NSWindowController, NSWindowDelegate, NSTextFieldDelega
         model.stringValue = value; controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: model))
     }
     func providerProbe(_ id: String) {
-        guard let index = providers.firstIndex(where: { $0.id == id }) else { return }
+        if !providerFilter.stringValue.isEmpty, !visibleProviders.contains(where: { $0.id == id }) {
+            providerFilter.stringValue = ""
+            rebuildProviderPopup(preferring: id)
+        }
+        guard let index = visibleProviders.firstIndex(where: { $0.id == id }) else { return }
         provider.selectItem(at: index); changeProvider()
+    }
+    func providerFilterProbe(_ value: String) {
+        providerFilter.stringValue = value
+        controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: providerFilter))
     }
     func refreshProbe() { refreshProviderModels() }
     func selectProbe(_ id: String) { modelChoice.selectProbe(id) }
@@ -500,5 +628,11 @@ final class ModelPicker: NSWindowController, NSWindowDelegate, NSTextFieldDelega
          "applyEnabled": apply.isEnabled, "status": status.stringValue, "availability": availability.stringValue,
          "catalogStatus": catalogStatus.stringValue, "modelInformation": modelInformation.stringValue, "modelSuggestions": suggestions, "customVisible": !customRow.isHidden, "list": modelChoice.diagnostics]
     }
-    func dispose() { window?.orderOut(nil) }
+    func dispose() {
+        if let obs = accountsObserver {
+            NotificationCenter.default.removeObserver(obs)
+            accountsObserver = nil
+        }
+        window?.orderOut(nil)
+    }
 }

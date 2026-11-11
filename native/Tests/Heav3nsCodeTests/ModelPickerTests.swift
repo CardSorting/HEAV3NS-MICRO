@@ -487,4 +487,131 @@ final class ModelPickerTests: XCTestCase {
         XCTAssertNotNil(WorkspaceModelCatalog(data))
         for bad in ["~", "~~a", "~/x", "-a", ""] { XCTAssertFalse(WorkspaceModelSelection.validModel(bad), bad) }
     }
+
+    func testFullSovereignCatalogWithAllProvidersAndDirectApiKeyVault() throws {
+        _ = NSApplication.shared
+        let fullProviders: [[String: Any]] = [
+            ["id": "openai-codex", "label": "OpenAI Codex", "detail": "Responses", "models": ["gpt-5.4"]],
+            ["id": "claude-subscription-directsdk-experimental", "label": "Claude Code", "detail": "Claude", "models": ["claude-sonnet-5[1m]"]],
+            ["id": "anthropic", "label": "Anthropic", "detail": "Direct Messages", "models": ["claude-sonnet-4-6", "claude-opus-4-6"]],
+            ["id": "openai", "label": "OpenAI API", "detail": "Direct OpenAI", "models": ["gpt-5.4"]],
+            ["id": "gemini", "label": "Google Gemini", "detail": "Google AI", "models": ["gemini-2.5-pro"]],
+            ["id": "deepseek", "label": "DeepSeek", "detail": "DeepSeek V3/R1", "models": ["deepseek-chat", "deepseek-reasoner"]],
+            ["id": "xai", "label": "xAI Grok", "detail": "Grok", "models": ["grok-4"]],
+            ["id": "groq", "label": "Groq", "detail": "LPU", "models": ["llama-3.3-70b-versatile"]],
+            ["id": "mistral", "label": "Mistral AI", "detail": "Mistral", "models": ["mistral-large-latest"]],
+            ["id": "qwen", "label": "Qwen (Alibaba)", "detail": "DashScope", "models": ["qwen3-coder-plus"]],
+            ["id": "moonshot", "label": "Moonshot Kimi", "detail": "Kimi", "models": ["kimi-k2.5"]],
+            ["id": "zai", "label": "Z.ai GLM", "detail": "GLM", "models": ["glm-5"]],
+            ["id": "nvidia-nim", "label": "NVIDIA NIM", "detail": "NIM", "models": ["nvidia/llama-3.3-nemotron-super-49b-v1"]],
+            ["id": "together", "label": "Together AI", "detail": "Together", "models": ["Qwen/Qwen3-235B-A22B-Instruct-2507"]],
+            ["id": "openrouter", "label": "OpenRouter", "detail": "Aggregator", "models": ["anthropic/claude-sonnet-4.6"]],
+            ["id": "cline-pass", "label": "Cline Pass", "detail": "Cline", "models": ["cline-pass/qwen3.7-max"]],
+            ["id": "nous", "label": "Nous Research", "detail": "Hermes", "models": ["Hermes-4-405B"]],
+            ["id": "opencode", "label": "OpenCode", "detail": "Zen", "models": ["claude-sonnet-4-6"]],
+            ["id": "ollama", "label": "Ollama (Local)", "detail": "Local", "models": ["llama3.2", "qwen2.5-coder:7b"]],
+            ["id": "apple-playground", "label": "On this Mac (Playground)", "detail": "Apple", "models": ["apple-foundation-model"]]
+        ]
+        let payload: [String: Any] = [
+            "provider": "gemini",
+            "model": "gemini-2.5-pro",
+            "revision": 7,
+            "reasoningEffort": "high",
+            "reasoningOptions": ["low", "medium", "high", "xhigh"],
+            "providers": fullProviders,
+            "recent": []
+        ]
+        let catalog = try XCTUnwrap(WorkspaceModelCatalog(payload))
+        XCTAssertEqual(catalog.providers.count, 20)
+        XCTAssertEqual(catalog.selection.providerLabel, "Google Gemini")
+
+        var methods = [String]()
+        var savedSecret = ""
+        var selected: WorkspaceModelSelection?
+        let picker = ModelPicker(request: { method, params, reply in
+            methods.append(method)
+            if method == "models.list" { reply(.success(payload)) }
+            else if method.hasSuffix(".status") { reply(.success(["configured": false, "saved": false])) }
+            else if method == "deepseek.saveKey" {
+                savedSecret = params["apiKey"] as? String ?? ""
+                reply(.success(["configured": true, "saved": true, "preview": "sk-d…9999"]))
+            } else if method == "models.select" {
+                var updated = payload
+                updated["provider"] = params["provider"]
+                updated["model"] = params["model"]
+                updated["revision"] = 8
+                reply(.success(updated))
+            }
+        }, connected: { true }, supportsDiscovery: { false }, supportsCredentials: { true }, canApply: { true }, onSelection: { selected = $0 })
+        defer { picker.dismiss() }
+
+        picker.load()
+        XCTAssertTrue(methods.contains("gemini.status"))
+
+        // Switch to DeepSeek, verify API key vault appears, save key without leaking secret in diagnostics
+        picker.providerProbe("deepseek")
+        XCTAssertEqual(picker.diagnostics["credentialsVisible"] as? Bool, true)
+        XCTAssertTrue(methods.contains("deepseek.status"))
+        picker.keyProbe("sk-ds-secret-9999")
+        XCTAssertEqual(savedSecret, "sk-ds-secret-9999")
+        XCTAssertFalse(String(describing: picker.diagnostics).contains("sk-ds-secret-9999"))
+
+        // Switch to Ollama (local), verify credentials row hides cleanly
+        picker.providerProbe("ollama")
+        XCTAssertEqual(picker.diagnostics["credentialsVisible"] as? Bool, false)
+
+        // Switch to Anthropic direct and select a native claude-* model without false incompatibility blocking
+        picker.providerProbe("anthropic")
+        XCTAssertEqual(picker.diagnostics["credentialsVisible"] as? Bool, true)
+        picker.selectProbe("claude-sonnet-4-6")
+        XCTAssertTrue(methods.contains("models.select"))
+        XCTAssertEqual(selected?.provider, "anthropic")
+        XCTAssertEqual(selected?.model, "claude-sonnet-4-6")
+    }
+
+    func testExpandedProviderVaultSpecsExposeCredentialsForAllCloudGateways() throws {
+        _ = NSApplication.shared
+        let expandedProviders: [[String: Any]] = [
+            ["id": "openai-codex", "label": "OpenAI Codex", "detail": "Codex", "models": ["gpt-5.4"]],
+            ["id": "opencode", "label": "OpenCode", "detail": "Zen", "models": ["claude-sonnet-4-6"]],
+            ["id": "deepinfra", "label": "DeepInfra", "detail": "DeepInfra", "models": ["deepseek-ai/DeepSeek-V3"]],
+            ["id": "siliconflow", "label": "SiliconFlow", "detail": "SiliconFlow", "models": ["deepseek-ai/DeepSeek-V3"]],
+            ["id": "baseten", "label": "Baseten", "detail": "Baseten", "models": ["deepseek-ai/DeepSeek-V3"]],
+            ["id": "novita", "label": "Novita AI", "detail": "Novita", "models": ["deepseek/deepseek-v3"]],
+            ["id": "xiaomi-mimo", "label": "Xiaomi MiMo", "detail": "MiMo", "models": ["mimo-v2-flash"]],
+            ["id": "stepfun", "label": "StepFun", "detail": "StepFun", "models": ["step-3"]],
+            ["id": "huggingface", "label": "Hugging Face", "detail": "HF", "models": ["Qwen/Qwen3-Coder-480B-A35B-Instruct"]],
+            ["id": "concentrate", "label": "Concentrate AI", "detail": "Concentrate", "models": ["gpt-5.4"]]
+        ]
+        var data = state
+        data["providers"] = expandedProviders
+        var methods = [String]()
+        var selected: WorkspaceModelSelection?
+        let picker = ModelPicker(request: { method, params, reply in
+            methods.append(method)
+            if method == "models.list" { reply(.success(data)) }
+            else if method == "models.select" {
+                var updated = data
+                updated["provider"] = params["provider"]
+                updated["model"] = params["model"]
+                updated["revision"] = 1
+                reply(.success(updated))
+            } else { reply(.success(["configured": false, "saved": false])) }
+        }, connected: { true }, supportsCredentials: { true }, canApply: { true }, onSelection: { selected = $0 })
+        defer { picker.dispose() }
+        picker.load()
+        for prov in ["deepinfra", "siliconflow", "baseten", "novita", "xiaomi-mimo", "stepfun", "huggingface", "concentrate"] {
+            picker.providerProbe(prov)
+            XCTAssertEqual(picker.diagnostics["credentialsVisible"] as? Bool, true, "Missing credential vault for \(prov)")
+        }
+        XCTAssertTrue(methods.contains("xiaomiMimo.status"))
+        XCTAssertTrue(methods.contains("huggingface.status"))
+        XCTAssertTrue(methods.contains("concentrate.status"))
+
+        // Selecting OpenCode Zen's default `claude-sonnet-4-6` model succeeds without false claude-* blocking
+        picker.providerProbe("opencode")
+        picker.selectProbe("claude-sonnet-4-6")
+        XCTAssertEqual(selected?.provider, "opencode")
+        XCTAssertEqual(selected?.model, "claude-sonnet-4-6")
+    }
 }

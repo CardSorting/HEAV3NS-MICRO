@@ -3,11 +3,14 @@ use crate::core::engine::AgentEngine;
 use crate::core::flight_runner::run_agent_flight_test;
 use crate::domain::compaction::CompactionPolicy;
 use crate::domain::swarm::{classify_task_for_legion, SwarmAssignment};
+use crate::domain::types::provider_registry::{canonicalize_provider_id, lookup_provider_descriptor, retired_provider_remediation, ReasoningEffortLevel, PROVIDER_DESCRIPTORS};
 use crate::domain::types::runtime::{CancellationToken, EngineTickInput, ExecutionAuthorityLevel, ExecutionPosture, UserApprovalChoice};
 use crate::plumbing::hash_and_math::{fnv1a_32, now_ms};
-use crate::ui::rpc_dispatch::{build_context_history_response, build_context_inspect_response, build_hello_response, build_model_catalog, build_model_discovery, build_model_selection, build_prompt_inspect_response, build_spider_check_multi_response, build_state_inspect_response, handle_files_rpc, handle_memory_rpc, sha256_hex};
-use crate::ui::worker_handlers::{discover_project_targets, emit_jsonl_line, execute_multiplexed_submit, handle_posture_and_receipts_rpc, handle_provider_credential_rpc, switch_worker_conversation, WorkerSharedState};
+use crate::ui::cli_presenter::Heav3nsUserConfig;
+use crate::ui::rpc_dispatch::{build_context_history_response, build_context_inspect_response, build_hello_response, build_model_selection, build_prompt_inspect_response, build_spider_check_multi_response, build_state_inspect_response, handle_files_rpc, handle_memory_rpc, sha256_hex};
+use crate::ui::worker_handlers::{build_sovereign_model_catalog_with_recent, build_sovereign_model_discovery, discover_project_targets, emit_jsonl_line, execute_multiplexed_submit, handle_posture_and_receipts_rpc, handle_provider_credential_rpc, switch_worker_conversation, WorkerSharedState};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::io;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -16,7 +19,7 @@ use tokio::task::JoinHandle;
 
 pub async fn run_stdio_worker(engine: Arc<AgentEngine>) {
     let stdout_lock = Arc::new(Mutex::new(io::stdout()));
-    let state = Arc::new(Mutex::new(WorkerSharedState::with_initial_model(engine.config_snapshot().model_name)));
+    let state = Arc::new(Mutex::new(WorkerSharedState::from_engine_config(&engine.config_snapshot())));
     let event_seq = Arc::new(AtomicI64::new(0));
     let mut spawned_turns: Vec<JoinHandle<()>> = Vec::new();
 
@@ -97,50 +100,104 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>) {
                 }
             }
             "models.list" => {
+                let local_ollama = AgentEngine::probe_ollama_models().await;
                 let st = state.lock().unwrap();
-                let resp = build_model_catalog(&st.active_provider, &st.active_model, &st.active_reasoning, st.model_revision);
+                let resp = build_sovereign_model_catalog_with_recent(&st.active_provider, &st.active_model, &st.active_reasoning, st.model_revision, &local_ollama, &st.recent_selections);
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
             }
             "models.select" => {
+                if let Some(p_raw) = params.get("provider").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                    if let Some(retired_msg) = retired_provider_remediation(p_raw) {
+                        emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": -32602, "message": retired_msg } }));
+                        continue;
+                    }
+                }
+                let local_ollama = AgentEngine::probe_ollama_models().await;
                 let catalog = {
                     let mut st = state.lock().unwrap();
                     if let Some(p) = params.get("provider").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-                        st.active_provider = p.to_string();
+                        st.active_provider = canonicalize_provider_id(p);
                     }
                     if let Some(m) = params.get("model").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
                         st.active_model = m.to_string();
                     }
                     if let Some(r) = params.get("reasoningEffort").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-                        st.active_reasoning = r.to_string();
+                        match ReasoningEffortLevel::parse_flexible(r) {
+                            Ok(None) => {
+                                st.active_reasoning = "default".to_string();
+                                engine.set_reasoning_effort(None);
+                            }
+                            Ok(Some(lvl)) => {
+                                st.active_reasoning = lvl.as_str().to_string();
+                                engine.set_reasoning_effort(Some(lvl.as_str().to_string()));
+                            }
+                            Err(_) => {}
+                        }
                     }
-                    let key_override = st.provider_keys.get(&st.active_provider).cloned();
-                    engine.switch_http_provider(&st.active_provider, &st.active_model, None, key_override);
+                    let slot = lookup_provider_descriptor(&st.active_provider)
+                        .map(|d| d.secret_slot)
+                        .unwrap_or(st.active_provider.as_str());
+                    let key_override = st
+                        .provider_keys
+                        .get(slot)
+                        .or_else(|| st.provider_keys.get(&st.active_provider))
+                        .cloned();
+                    let empty_ep = BTreeMap::new();
+                    engine.switch_http_provider_with_vault(&st.active_provider, &st.active_model, None, key_override, &st.provider_keys, &empty_ep);
+                    st.active_model = engine.config_snapshot().model_name;
+                    let (rp, rm, rr) = (st.active_provider.clone(), st.active_model.clone(), st.active_reasoning.clone());
+                    st.record_recent(&rp, &rm, &rr);
+                    if params.get("persist").and_then(|v| v.as_bool()) == Some(true) {
+                        let mut ucfg = Heav3nsUserConfig::load().unwrap_or_default();
+                        ucfg.record_recent_selection(&rp, &rm, &rr);
+                        let _ = ucfg.save();
+                    }
                     st.model_revision += 1;
-                    build_model_catalog(&st.active_provider, &st.active_model, &st.active_reasoning, st.model_revision)
+                    build_sovereign_model_catalog_with_recent(&st.active_provider, &st.active_model, &st.active_reasoning, st.model_revision, &local_ollama, &st.recent_selections)
                 };
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": catalog }));
                 let seq = event_seq.fetch_add(1, Ordering::SeqCst) + 1;
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id, "runtime": "heav3ns-micro", "seq": seq, "type": "models.changed", "payload": catalog }));
             }
             "models.discover" | "models.refresh" => {
-                if method == "models.refresh" || params.get("refresh").and_then(|v| v.as_bool()) == Some(true) {
+                let want_live = method == "models.refresh" || params.get("refresh").and_then(|v| v.as_bool()) == Some(true);
+                if want_live {
                     let _ = AgentEngine::refresh_model_catalog().await;
                 } else {
                     AgentEngine::trigger_model_catalog_auto_refresh();
                 }
-                let prov = {
+                let (prov, keys_snap) = {
                     let st = state.lock().unwrap();
-                    params.get("provider").and_then(|v| v.as_str()).unwrap_or(&st.active_provider).to_string()
+                    (
+                        params.get("provider").and_then(|v| v.as_str()).unwrap_or(&st.active_provider).to_string(),
+                        st.provider_keys.clone(),
+                    )
                 };
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": build_model_discovery(&prov) }));
+                let live_models = engine.probe_provider_models_live(&prov, &keys_snap, want_live).await;
+                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": build_sovereign_model_discovery(&prov, &live_models) }));
             }
-            "openrouter.status" | "openrouter.saveKey" | "openrouter.clearKey"
-            | "clinePass.status" | "clinePass.saveKey" | "clinePass.clearKey"
-            | "nous.status" | "nous.saveKey" | "nous.clearKey"
-            | "opencode.status" | "opencode.saveKey" | "opencode.clearKey" => {
+            "providers.list" => {
+                let items: Vec<Value> = PROVIDER_DESCRIPTORS
+                    .iter()
+                    .filter(|d| !d.retired)
+                    .map(|d| json!({
+                        "id": d.id,
+                        "label": d.display_name,
+                        "wireDialect": d.wire_dialect.as_str(),
+                        "defaultModel": d.default_model,
+                        "requiresApiKey": d.requires_api_key,
+                        "envVars": d.env_vars,
+                        "credentialUrl": d.credential_url
+                    }))
+                    .collect();
+                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "count": items.len(), "providers": items } }));
+            }
+            m if m.ends_with(".status") || m.ends_with(".saveKey") || m.ends_with(".clearKey") => {
                 let resp = {
                     let mut st = state.lock().unwrap();
-                    handle_provider_credential_rpc(method, &params, &mut st, &engine)
+                    let active_prov = st.active_provider.clone();
+                    let active_mod = st.active_model.clone();
+                    handle_provider_credential_rpc(m, &params, &mut st.provider_keys, &active_prov, &active_mod, &engine)
                 };
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
             }

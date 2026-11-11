@@ -2,6 +2,7 @@
 use crate::domain::types::messages::{Role, SessionMessage};
 use crate::domain::types::runtime::ExecutionPosture;
 use crate::plumbing::hash_and_math::fnv1a_32;
+use crate::plumbing::schema_and_sse::redact_endpoint_for_display;
 use crate::plumbing::secret_redactor::DeterministicSecretRedactor;
 use crate::plumbing::text_tokens::{estimate_text_tokens, safe_utf8_prefix};
 use serde::{Deserialize, Serialize};
@@ -141,7 +142,15 @@ pub fn format_append_only_context_update(memory_envelope: Option<&str>, posture:
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestManifest {
     pub schema: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "wireDialect")]
+    pub wire_dialect: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "endpointDisplay")]
+    pub endpoint_display: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "reasoningEffort")]
+    pub reasoning_effort: Option<String>,
     pub posture: String,
     #[serde(rename = "prefixFingerprint")]
     pub prefix_fingerprint: PrefixFingerprint,
@@ -221,7 +230,11 @@ impl RequestManifest {
 
         Self {
             schema: "heav3ns.request_manifest/v1".to_string(),
+            provider: None,
             model: model.to_string(),
+            wire_dialect: None,
+            endpoint_display: None,
+            reasoning_effort: None,
             posture: posture.slug().to_string(),
             prefix_fingerprint: fp,
             prefix_status: prefix_status.to_string(),
@@ -239,9 +252,34 @@ impl RequestManifest {
         }
     }
 
+    pub fn with_route_metadata(
+        mut self,
+        provider: &str,
+        wire_dialect: &str,
+        endpoint: &str,
+        reasoning_effort: Option<&str>,
+    ) -> Self {
+        self.provider = Some(provider.to_string());
+        self.wire_dialect = Some(wire_dialect.to_string());
+        self.endpoint_display = Some(redact_endpoint_for_display(endpoint));
+        self.reasoning_effort = reasoning_effort.map(String::from);
+        self
+    }
+
     pub fn render_human_readable(&self) -> String {
+        let route_line = match (&self.provider, &self.wire_dialect, &self.endpoint_display) {
+            (Some(prov), Some(wire), Some(ep)) => format!(
+                "{prov} · {wire} · {ep}{}",
+                self.reasoning_effort
+                    .as_deref()
+                    .map(|r| format!(" · effort={r}"))
+                    .unwrap_or_default()
+            ),
+            _ => "canonical".to_string(),
+        };
         format!(
             "┌─ HEAV3NS-MICRO Request Manifest ({}) ───────────────────\n\
+             │ Route / Wire    : {}\n\
              │ Model / Posture : {} · {}\n\
              │ KV-Cache Pin    : {} [sys={} · tools={} · {}]\n\
              │ Byte Accounting : sys={}B + tools={}B + hist={}B + frame={}B == {}B\n\
@@ -250,6 +288,7 @@ impl RequestManifest {
              │ Messages        : {} total\n\
              └──────────────────────────────────────────────────────────────────────────",
             self.schema,
+            route_line,
             self.model,
             self.posture,
             self.prefix_fingerprint.combined_hash,

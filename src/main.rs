@@ -1,10 +1,12 @@
 // [LAYER: UI]
 use heav3ns_micro::core::engine::AgentEngine;
 use heav3ns_micro::core::flight_runner::{format_flight_test_report, run_agent_flight_test, run_micro_benchmarks};
+use heav3ns_micro::domain::types::provider_registry::{canonicalize_provider_id, lookup_provider_descriptor, resolve_effective_wire_override, resolve_provider_route, retired_provider_remediation, ReasoningEffortLevel, WireDialect, PROVIDER_DESCRIPTORS};
 use heav3ns_micro::domain::types::runtime::{AgentConfig, CancellationToken, EngineTickInput, EngineTickOutcome};
 use heav3ns_micro::infrastructure::http_provider::{probe_local_ollama_model, HttpProvider};
-use heav3ns_micro::ui::cli_presenter::{parse_args, print_help, run_stdio_worker, CliOptions, Heav3nsUserConfig, RunMode};
+use heav3ns_micro::ui::cli_presenter::{parse_args, print_help, CliOptions, Heav3nsUserConfig, RunMode};
 use heav3ns_micro::ui::onboarding::{create_cli_progress_listener, format_auth_error_card, format_turn_summary, print_onboarding_notice, print_tool_catalog, print_welcome_banner, render_color_diff, run_doctor_cli, run_guided_demo, run_init_wizard, suggest_command};
+use heav3ns_micro::ui::stdio_worker::run_stdio_worker;
 use serde_json::{json, Value};
 use std::fs;
 use std::io::{self, Write};
@@ -15,110 +17,169 @@ async fn build_engine(opts: &CliOptions) -> (Arc<AgentEngine>, AgentConfig) {
     let user_cfg = Heav3nsUserConfig::load();
     let mut cfg = AgentConfig::default();
 
+    let mut saved_keys = user_cfg.as_ref().map(|c| c.effective_provider_keys()).unwrap_or_default();
+    for d in PROVIDER_DESCRIPTORS {
+        if d.retired {
+            continue;
+        }
+        if !saved_keys.contains_key(d.secret_slot) {
+            if let Some(val) = d.env_vars.iter().find_map(|ev| Heav3nsUserConfig::resolve_env_or_dotenv(ev, &dotenv)) {
+                saved_keys.insert(d.secret_slot.to_string(), val);
+            }
+        }
+    }
+    let mut saved_endpoints = user_cfg.as_ref().map(|c| c.provider_endpoints.clone()).unwrap_or_default();
+    for d in PROVIDER_DESCRIPTORS {
+        if d.retired {
+            continue;
+        }
+        if let Some(ep_env) = d.endpoint_env {
+            if !saved_endpoints.contains_key(d.id) {
+                if let Some(ep_val) = Heav3nsUserConfig::resolve_env_or_dotenv(ep_env, &dotenv) {
+                    saved_endpoints.insert(d.id.to_string(), ep_val);
+                }
+            }
+        }
+    }
+    if let (Some(p), Some(ep)) = (
+        user_cfg.as_ref().and_then(|c| c.provider.as_deref()),
+        user_cfg.as_ref().and_then(|c| c.endpoint.as_deref()),
+    ) {
+        let slot = lookup_provider_descriptor(p).map(|d| d.secret_slot).unwrap_or(p);
+        saved_endpoints.entry(slot.to_string()).or_insert_with(|| ep.to_string());
+    }
+
     let explicit_provider = opts
         .provider
         .clone()
         .or_else(|| user_cfg.as_ref().and_then(|c| c.provider.clone()));
 
-    if let Some(ref p) = explicit_provider {
-        cfg.provider = p.clone();
-    } else if Heav3nsUserConfig::resolve_env_or_dotenv("ANTHROPIC_API_KEY", &dotenv).is_some()
-        && Heav3nsUserConfig::resolve_env_or_dotenv("OPENAI_API_KEY", &dotenv).is_none()
-    {
-        cfg.provider = "anthropic".to_string();
-    } else if (Heav3nsUserConfig::resolve_env_or_dotenv("GEMINI_API_KEY", &dotenv).is_some()
-        || Heav3nsUserConfig::resolve_env_or_dotenv("GOOGLE_API_KEY", &dotenv).is_some())
-        && Heav3nsUserConfig::resolve_env_or_dotenv("OPENAI_API_KEY", &dotenv).is_none()
-    {
-        cfg.provider = "gemini".to_string();
-    } else if Heav3nsUserConfig::resolve_env_or_dotenv("OPENROUTER_API_KEY", &dotenv).is_some()
-        && Heav3nsUserConfig::resolve_env_or_dotenv("OPENAI_API_KEY", &dotenv).is_none()
-    {
-        cfg.provider = "openrouter".to_string();
-    } else if Heav3nsUserConfig::resolve_env_or_dotenv("DEEPSEEK_API_KEY", &dotenv).is_some()
-        && Heav3nsUserConfig::resolve_env_or_dotenv("OPENAI_API_KEY", &dotenv).is_none()
-    {
-        cfg.provider = "deepseek".to_string();
+    if let Some(ref raw_p) = explicit_provider {
+        if let Some(retired_msg) = retired_provider_remediation(raw_p) {
+            eprintln!("Error: {retired_msg}");
+            std::process::exit(1);
+        }
     }
+
+    let selected_provider = if let Some(ref p) = explicit_provider {
+        canonicalize_provider_id(p)
+    } else if Heav3nsUserConfig::resolve_env_or_dotenv("OPENAI_API_KEY", &dotenv).is_some() {
+        "openai".to_string()
+    } else {
+        PROVIDER_DESCRIPTORS
+            .iter()
+            .find(|d| {
+                !d.retired
+                    && d.requires_api_key
+                    && d.env_vars
+                        .iter()
+                        .any(|ev| Heav3nsUserConfig::resolve_env_or_dotenv(ev, &dotenv).is_some())
+            })
+            .map(|d| d.id.to_string())
+            .unwrap_or_else(|| "openai".to_string())
+    };
 
     AgentEngine::trigger_model_catalog_auto_refresh();
     let catalog = AgentEngine::model_catalog_snapshot();
-    let prov_lower = cfg.provider.to_ascii_lowercase();
-    if let Some(ref m) = opts.model {
-        cfg.model_name = m.clone();
-    } else if let Some(ref m) = user_cfg.as_ref().and_then(|c| c.model.clone()) {
-        cfg.model_name = m.clone();
-    } else {
-        cfg.model_name = match prov_lower.as_str() {
-            "gemini" | "google" | "anthropic" | "openrouter" | "deepseek" | "xai" => {
-                catalog.recommend_tiers(&prov_lower).1
-            }
-            "groq" => "llama-3.3-70b-versatile".to_string(),
-            "ollama" => "qwen2.5-coder:14b".to_string(),
-            _ => cfg.model_name,
-        };
-    }
 
-    if let Some(ref ep) = opts.endpoint {
-        cfg.api_endpoint = ep.clone();
-    } else if let Some(ref ep) = user_cfg.as_ref().and_then(|c| c.endpoint.clone()) {
-        cfg.api_endpoint = ep.clone();
-    } else {
-        cfg.api_endpoint = match prov_lower.as_str() {
-            "gemini" | "google" => "https://generativelanguage.googleapis.com/v1beta".to_string(),
-            "anthropic" => "https://api.anthropic.com/v1".to_string(),
-            "openrouter" => "https://openrouter.ai/api/v1".to_string(),
-            "deepseek" => "https://api.deepseek.com/v1".to_string(),
-            "groq" => "https://api.groq.com/openai/v1".to_string(),
-            "xai" => "https://api.x.ai/v1".to_string(),
-            "ollama" => "http://localhost:11434/v1".to_string(),
-            _ => cfg.api_endpoint,
-        };
-    }
+    let cfg_model_matches_provider = explicit_provider.is_none()
+        || opts.provider.is_none()
+        || user_cfg
+            .as_ref()
+            .and_then(|c| c.provider.as_deref())
+            .is_some_and(|up| canonicalize_provider_id(up) == selected_provider);
+    let explicit_model = opts.model.clone().or_else(|| {
+        if cfg_model_matches_provider {
+            user_cfg.as_ref().and_then(|c| c.model.clone())
+        } else {
+            None
+        }
+    });
 
-    cfg.api_key = match prov_lower.as_str() {
-        "anthropic" => Heav3nsUserConfig::resolve_env_or_dotenv("ANTHROPIC_API_KEY", &dotenv)
-            .or_else(|| user_cfg.as_ref().and_then(|c| c.api_key.clone())),
-        "gemini" | "google" => Heav3nsUserConfig::resolve_env_or_dotenv("GEMINI_API_KEY", &dotenv)
-            .or_else(|| Heav3nsUserConfig::resolve_env_or_dotenv("GOOGLE_API_KEY", &dotenv))
-            .or_else(|| user_cfg.as_ref().and_then(|c| c.api_key.clone())),
-        "openrouter" => Heav3nsUserConfig::resolve_env_or_dotenv("OPENROUTER_API_KEY", &dotenv)
-            .or_else(|| user_cfg.as_ref().and_then(|c| c.api_key.clone())),
-        "deepseek" => Heav3nsUserConfig::resolve_env_or_dotenv("DEEPSEEK_API_KEY", &dotenv)
-            .or_else(|| user_cfg.as_ref().and_then(|c| c.api_key.clone())),
-        "groq" => Heav3nsUserConfig::resolve_env_or_dotenv("GROQ_API_KEY", &dotenv)
-            .or_else(|| user_cfg.as_ref().and_then(|c| c.api_key.clone())),
-        "xai" => Heav3nsUserConfig::resolve_env_or_dotenv("XAI_API_KEY", &dotenv)
-            .or_else(|| user_cfg.as_ref().and_then(|c| c.api_key.clone())),
-        "ollama" => None,
-        _ => Heav3nsUserConfig::resolve_env_or_dotenv("OPENAI_API_KEY", &dotenv)
-            .or_else(|| user_cfg.as_ref().and_then(|c| c.api_key.clone())),
+    let wire_override = resolve_effective_wire_override(
+        opts.wire_dialect.as_deref(),
+        user_cfg.as_ref().and_then(|c| c.wire_dialect.as_deref()),
+        user_cfg.as_ref().and_then(|c| c.provider.as_deref()),
+        &selected_provider,
+    );
+
+    let route = resolve_provider_route(
+        &selected_provider,
+        explicit_model.as_deref(),
+        opts.endpoint.as_deref(),
+        None,
+        wire_override.as_deref(),
+        None,
+        None,
+        &saved_keys,
+        &saved_endpoints,
+        |env_key| Heav3nsUserConfig::resolve_env_or_dotenv(env_key, &dotenv),
+    );
+
+    cfg.provider = route.provider_id.clone();
+    cfg.model_name = if explicit_model.is_some() {
+        route.model_name
+    } else if matches!(
+        route.provider_id.as_str(),
+        "gemini" | "anthropic" | "openrouter" | "deepseek" | "xai" | "mistral" | "qwen" | "moonshot" | "zai"
+    ) {
+        catalog.recommend_tiers(&route.provider_id).1
+    } else {
+        route.model_name
     };
+    cfg.api_endpoint = route.api_endpoint;
+    cfg.api_key = route.api_key;
+    let has_explicit_wire = wire_override.is_some();
+    cfg.wire_dialect = wire_override;
+    let raw_reasoning = opts
+        .reasoning_effort
+        .clone()
+        .or_else(|| user_cfg.as_ref().and_then(|c| c.reasoning_effort.clone()));
+    cfg.reasoning_effort = raw_reasoning.and_then(|raw| {
+        ReasoningEffortLevel::parse_flexible(&raw)
+            .ok()
+            .flatten()
+            .map(|l| l.as_str().to_string())
+    });
+    cfg.fallback_providers = user_cfg
+        .as_ref()
+        .map(|c| c.fallback_providers.clone())
+        .unwrap_or_default();
+    cfg.provider_keys = saved_keys;
+    cfg.provider_endpoints = saved_endpoints;
+    if cfg.provider != "openai" {
+        cfg.fallback_model = None;
+    }
 
+    let mut effective_wire = route.wire_dialect;
+    let mut keep_explicit_wire = has_explicit_wire;
     // Zero-config local Ollama fallback when no API key is present and no cloud provider was forced
-    if cfg.api_key.is_none() && explicit_provider.is_none() && opts.endpoint.is_none() {
+    if cfg.api_key.is_none()
+        && explicit_provider.is_none()
+        && opts.endpoint.is_none()
+        && lookup_provider_descriptor(&cfg.provider).is_none_or(|d| d.requires_api_key)
+    {
         if let Some(local_model) = probe_local_ollama_model().await {
             cfg.provider = "ollama".to_string();
-            cfg.api_endpoint = "http://localhost:11434/v1".to_string();
+            cfg.api_endpoint = "http://127.0.0.1:11434/v1".to_string();
+            effective_wire = WireDialect::ChatCompletions;
+            keep_explicit_wire = false;
             if opts.model.is_none() {
                 cfg.model_name = local_model;
             }
         }
     }
 
-    let wire_provider = match cfg.provider.to_ascii_lowercase().as_str() {
-        "anthropic" => "anthropic",
-        "gemini" | "google" => "gemini",
-        "ollama" => "ollama",
-        _ => "openai",
-    };
-
-    let provider = Arc::new(HttpProvider::new(
-        wire_provider,
-        cfg.api_endpoint.clone(),
-        cfg.api_key.clone(),
-        cfg.provider_timeout_ms,
-    ));
+    let provider = Arc::new(
+        HttpProvider::new(
+            cfg.provider.clone(),
+            cfg.api_endpoint.clone(),
+            cfg.api_key.clone(),
+            cfg.provider_timeout_ms,
+        )
+        .with_wire_dialect(effective_wire)
+        .with_explicit_wire_override(keep_explicit_wire),
+    );
 
     (Arc::new(AgentEngine::new(&opts.cwd, cfg.clone(), provider)), cfg)
 }
@@ -140,6 +201,37 @@ async fn main() {
             let (engine, _) = build_engine(&opts).await;
             let fmt = if opts.format.eq_ignore_ascii_case("json") { "json" } else { "" };
             println!("{}", engine.render_request_manifest(fmt));
+        }
+        RunMode::Providers => {
+            let dotenv = Heav3nsUserConfig::read_dotenv_map(&opts.cwd);
+            let vault = Heav3nsUserConfig::load().map(|c| c.effective_provider_keys()).unwrap_or_default();
+            if opts.format.eq_ignore_ascii_case("json") {
+                let items: Vec<Value> = PROVIDER_DESCRIPTORS
+                    .iter()
+                    .filter(|d| !d.retired)
+                    .map(|d| {
+                        let env_ready = d.env_vars.iter().any(|ev| Heav3nsUserConfig::resolve_env_or_dotenv(ev, &dotenv).is_some());
+                        let vault_ready = vault.contains_key(d.secret_slot);
+                        json!({
+                            "id": d.id,
+                            "displayName": d.display_name,
+                            "aliases": d.aliases,
+                            "wireDialect": d.wire_dialect.as_str(),
+                            "defaultModel": d.default_model,
+                            "defaultEndpoint": d.default_endpoint,
+                            "envVars": d.env_vars,
+                            "requiresApiKey": d.requires_api_key,
+                            "modelAware": d.model_aware,
+                            "configured": !d.requires_api_key || env_ready || vault_ready,
+                            "credentialUrl": d.credential_url
+                        })
+                    })
+                    .collect();
+                println!("{}", serde_json::to_string_pretty(&json!({ "count": items.len(), "providers": items })).unwrap_or_default());
+            } else {
+                let (engine, _) = build_engine(&opts).await;
+                println!("{}", engine.inspect_or_switch_provider("list"));
+            }
         }
         RunMode::Models { refresh } => {
             let cat = if refresh {
@@ -214,14 +306,51 @@ async fn main() {
         },
         RunMode::ConfigSet { key, value } => {
             let mut cfg = Heav3nsUserConfig::load().unwrap_or_default();
-            match key.to_ascii_lowercase().as_str() {
-                "provider" => cfg.provider = Some(value),
-                "model" => cfg.model = Some(value),
-                "endpoint" => cfg.endpoint = Some(value),
-                "api_key" | "key" => cfg.api_key = Some(value),
-                _ => {
-                    eprintln!("Unknown config key: {key}. Valid keys: provider, model, endpoint, key");
-                    std::process::exit(1);
+            let low = key.to_ascii_lowercase();
+            if let Some(prov_slot) = low.strip_prefix("key.") {
+                cfg.set_provider_key(prov_slot, value);
+            } else if let Some(prov_slot) = low.strip_prefix("endpoint.") {
+                let slot = lookup_provider_descriptor(prov_slot).map(|d| d.secret_slot).unwrap_or(prov_slot);
+                cfg.provider_endpoints.insert(slot.to_string(), value);
+            } else {
+                match low.as_str() {
+                    "provider" => {
+                        if let Some(retired_msg) = retired_provider_remediation(&value) {
+                            eprintln!("Error: {retired_msg}");
+                            std::process::exit(1);
+                        }
+                        cfg.provider = Some(canonicalize_provider_id(&value));
+                    }
+                    "model" => cfg.model = Some(value),
+                    "endpoint" => cfg.endpoint = Some(value),
+                    "api_key" | "key" => {
+                        if let Some(ref p) = cfg.provider.clone() {
+                            cfg.set_provider_key(p, value.clone());
+                        }
+                        cfg.api_key = Some(value);
+                    }
+                    "reasoning" | "effort" => {
+                        match ReasoningEffortLevel::parse_flexible(&value) {
+                            Ok(None) => cfg.reasoning_effort = None,
+                            Ok(Some(lvl)) => cfg.reasoning_effort = Some(lvl.as_str().to_string()),
+                            Err(msg) => {
+                                eprintln!("Error: {msg}");
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                    "wire" | "wire_dialect" => cfg.wire_dialect = Some(value),
+                    "fallbacks" | "fallback_providers" => {
+                        cfg.fallback_providers = value
+                            .split(',')
+                            .map(|s| canonicalize_provider_id(s.trim()))
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                    }
+                    _ => {
+                        eprintln!("Unknown config key: {key}. Valid keys: provider, model, endpoint, key, key.<provider>, endpoint.<provider>, reasoning, wire, fallbacks");
+                        std::process::exit(1);
+                    }
                 }
             }
             if let Err(e) = cfg.save() {
@@ -322,11 +451,12 @@ async fn main() {
         RunMode::Interactive => {
             let (mut engine, mut cfg) = build_engine(&opts).await;
             let has_key = cfg.api_key.is_some();
+            let is_keyless_local = lookup_provider_descriptor(&cfg.provider).is_some_and(|d| !d.requires_api_key);
             print_welcome_banner(&opts.cwd, &cfg.provider, &cfg.model_name, has_key);
-            if !has_key && !cfg.provider.eq_ignore_ascii_case("ollama") {
+            if !has_key && !is_keyless_local {
                 print_onboarding_notice(&cfg.provider, &cfg.model_name);
             } else {
-                println!("Type /help for slash commands, /mode to cycle posture, /receipts for audit receipts, /exit to quit.\n");
+                println!("Type /help for slash commands, /provider to switch across 43+ routes, /mode to cycle posture, /exit to quit.\n");
             }
 
             let valid_slash_cmds = [
@@ -334,6 +464,7 @@ async fn main() {
                 "/context", "/prompt", "/stats", "/vfs", "/diff", "/commit", "/discard", "/tools",
                 "/guide", "/quickstart", "/demo", "/memory", "/skills", "/soul", "/forge", "/doctor",
                 "/computer", "/spatial", "/browser", "/vision", "/legion", "/swarm", "/compact", "/model",
+                "/models", "/provider", "/providers", "/reasoning", "/effort",
                 "/snapshot", "/snapshots", "/rewind", "/undo", "/clear", "/health", "/pwd", "/workspace", "/cd",
             ];
 
@@ -425,6 +556,7 @@ async fn main() {
                         input.on_progress = Some(progress_cb.clone());
                         let res = engine.tick(input).await;
                         sig_task.abort();
+                        cfg = engine.config_snapshot();
                         if res.outcome == EngineTickOutcome::Failed
                             && (res.response.contains("401") || res.response.contains("API key") || res.response.contains("Authorization"))
                         {

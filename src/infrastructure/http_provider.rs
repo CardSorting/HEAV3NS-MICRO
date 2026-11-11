@@ -1,95 +1,113 @@
 // [LAYER: INFRASTRUCTURE]
-use crate::domain::interfaces::{BoxFuture, ILlmProvider};
-use crate::domain::types::messages::{Role, ToolCall, ToolCallFunction};
+use crate::domain::interfaces::{BoxFuture, IHttpProvider, ILlmProvider};
+use crate::domain::types::messages::{ToolCall, ToolCallFunction};
+use crate::domain::types::provider_registry::{canonicalize_provider_id, infer_wire_dialect_from_endpoint, lookup_provider_descriptor, opencode_go_model_id, resolve_model_aware_wire_and_model, retired_provider_remediation, WireDialect};
 use crate::domain::types::runtime::CancellationToken;
 use crate::domain::types::tick_result::{finalize_provider_response, is_retryable_http_status, ProviderError, ProviderRequest, ProviderResponse, ProviderTokenUsage};
-use crate::plumbing::json_repair::{accumulate_streaming_tool_name, compute_streaming_arguments_delta};
-use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use crate::infrastructure::sse_and_response_parsers::{parse_multidialect_sse_stream, parse_responses_json, IncrementalSseAggregator};
+use crate::infrastructure::wire_dialects::{build_anthropic_messages_payload, build_chat_completions_payload_with_endpoint, build_google_gemini_payload, build_openai_responses_payload};
+use serde_json::Value;
 use std::time::Duration;
 
-/// Fast non-blocking probe (`150ms` timeout) for local Ollama chat models (`Codewhale zero-config discovery`).
-pub async fn probe_local_ollama_model() -> Option<String> {
-    let client = reqwest::Client::builder()
+/// Hard cap (`16 MiB`) on buffered HTTP/SSE response bodies to prevent OOM from runaway upstream streams.
+pub const MAX_HTTP_RESPONSE_BODY_BYTES: usize = 16 * 1024 * 1024;
+const MAX_DISCOVERY_BODY_BYTES: usize = 2 * 1024 * 1024;
+
+async fn read_bounded_response_text(mut resp: reqwest::Response, max_bytes: usize) -> Result<String, ProviderError> {
+    let mut buf = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(|e| ProviderError::Transport(e.to_string()))? {
+        if buf.len().saturating_add(chunk.len()) > max_bytes {
+            return Err(ProviderError::Transport(format!(
+                "HTTP response body exceeded {max_bytes}-byte safety cap"
+            )));
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
+/// Fast non-blocking probe (`150ms` timeout) returning all local Ollama model tags.
+pub async fn probe_local_ollama_models() -> Vec<String> {
+    let Ok(client) = reqwest::Client::builder()
         .timeout(Duration::from_millis(150))
         .build()
-        .ok()?;
-    let resp = client.get("http://127.0.0.1:11434/api/tags").send().await.ok()?;
+    else {
+        return Vec::new();
+    };
+    let Ok(resp) = client.get("http://127.0.0.1:11434/api/tags").send().await else {
+        return Vec::new();
+    };
     if !resp.status().is_success() {
-        return None;
+        return Vec::new();
     }
-    let body: Value = resp.json().await.ok()?;
+    let Ok(raw) = read_bounded_response_text(resp, MAX_DISCOVERY_BODY_BYTES).await else {
+        return Vec::new();
+    };
+    let Ok(body) = serde_json::from_str::<Value>(&raw) else {
+        return Vec::new();
+    };
     body.get("models")
         .and_then(Value::as_array)
-        .and_then(|arr| arr.first())
-        .and_then(|m| m.get("name"))
-        .and_then(Value::as_str)
-        .map(String::from)
-}
-
-/// Parses SSE (`data: ...`) streams with cumulative delta deduplication and token usage capture.
-pub fn parse_sse_stream(raw_sse: &str, provider_label: &str) -> Result<ProviderResponse, ProviderError> {
-    let mut text_acc = String::new();
-    let mut tool_map: BTreeMap<usize, (String, String, String)> = BTreeMap::new();
-    let mut latest_usage: Option<ProviderTokenUsage> = None;
-
-    for line in raw_sse.lines() {
-        let trimmed = line.trim();
-        let Some(data) = trimmed.strip_prefix("data:").map(str::trim) else { continue };
-        if data.is_empty() || data == "[DONE]" {
-            continue;
-        }
-        let Ok(chunk) = serde_json::from_str::<Value>(data) else { continue };
-        if let Some(u) = extract_openai_usage(&chunk) {
-            latest_usage = Some(u);
-        }
-        if let Some(choice) = chunk.get("choices").and_then(|c| c.as_array()).and_then(|a| a.first()) {
-            let delta = choice.get("delta").or_else(|| choice.get("message")).unwrap_or(choice);
-            if let Some(txt) = delta.get("content").and_then(|v| v.as_str()) {
-                text_acc.push_str(txt);
-            }
-            if let Some(tcs) = delta.get("tool_calls").and_then(|v| v.as_array()) {
-                for (i, tc) in tcs.iter().enumerate() {
-                    let idx = tc.get("index").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(i);
-                    let entry = tool_map
-                        .entry(idx)
-                        .or_insert_with(|| (format!("call_{}", idx + 1), String::new(), String::new()));
-                    if let Some(id) = tc.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-                        entry.0 = id.to_string();
-                    }
-                    if let Some(func) = tc.get("function") {
-                        if let Some(name_chunk) = func.get("name").and_then(|v| v.as_str()) {
-                            entry.1 = accumulate_streaming_tool_name(&entry.1, name_chunk);
-                        }
-                        if let Some(arg_chunk) = func.get("arguments").and_then(|v| v.as_str()) {
-                            let (_, next_acc) = compute_streaming_arguments_delta(&entry.2, arg_chunk);
-                            entry.2 = next_acc;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    let tool_calls = tool_map
-        .into_values()
-        .filter(|(_, name, _)| !name.is_empty())
-        .map(|(id, name, args)| ToolCall {
-            id,
-            r#type: "function".to_string(),
-            function: ToolCallFunction {
-                name,
-                arguments: if args.is_empty() { "{}".to_string() } else { args },
-            },
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.get("name").and_then(Value::as_str).map(String::from))
+                .collect()
         })
-        .collect();
-
-    let mut resp = finalize_provider_response(Some(text_acc), tool_calls, provider_label);
-    resp.usage = latest_usage;
-    Ok(resp)
+        .unwrap_or_default()
 }
 
-fn extract_openai_usage(body: &Value) -> Option<ProviderTokenUsage> {
+/// Fast non-blocking probe (`150ms` timeout) for the primary local Ollama chat model.
+pub async fn probe_local_ollama_model() -> Option<String> {
+    probe_local_ollama_models().await.into_iter().next()
+}
+
+/// Bounded live `GET /models` discovery probe for OpenAI-compatible gateways (vLLM, LM Studio, Groq, Mistral, etc.).
+pub async fn probe_openai_compatible_models(endpoint: &str, api_key: Option<&str>, timeout_ms: u64) -> Vec<String> {
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(Duration::from_millis(timeout_ms.clamp(100, 5_000)))
+        .build()
+    else {
+        return Vec::new();
+    };
+    let base = endpoint.trim_end_matches('/');
+    let url = if base.ends_with("/models") {
+        base.to_string()
+    } else {
+        format!("{base}/models")
+    };
+    let mut req = client.get(&url);
+    if let Some(k) = api_key.filter(|s| !s.trim().is_empty()) {
+        req = req.bearer_auth(k);
+    }
+    let Ok(resp) = req.send().await else {
+        return Vec::new();
+    };
+    if !resp.status().is_success() {
+        return Vec::new();
+    }
+    let Ok(raw) = read_bounded_response_text(resp, MAX_DISCOVERY_BODY_BYTES).await else {
+        return Vec::new();
+    };
+    let Ok(body) = serde_json::from_str::<Value>(&raw) else {
+        return Vec::new();
+    };
+    body.get("data")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.get("id").and_then(Value::as_str).map(String::from))
+                .take(64)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Parses SSE streams across OpenAI Chat, OpenAI Responses, Anthropic Messages, and Gemini dialects.
+pub fn parse_sse_stream(raw_sse: &str, provider_label: &str) -> Result<ProviderResponse, ProviderError> {
+    parse_multidialect_sse_stream(raw_sse, provider_label, extract_openai_usage)
+}
+
+pub(crate) fn extract_openai_usage(body: &Value) -> Option<ProviderTokenUsage> {
     let u = body.get("usage")?;
     let prompt_tokens = u.get("prompt_tokens").and_then(Value::as_u64)? as usize;
     let completion_tokens = u.get("completion_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
@@ -123,12 +141,56 @@ fn parse_retry_after_header(headers: &reqwest::header::HeaderMap) -> Option<u64>
     None
 }
 
-/// Multi-protocol HTTP LLM adapter supporting OpenAI, DeepSeek, OpenRouter, Ollama, Anthropic, and Gemini wire formats.
+fn is_event_stream_content_type(content_type: Option<&str>) -> bool {
+    content_type.is_some_and(|ct| ct.to_ascii_lowercase().contains("text/event-stream"))
+}
+
+fn looks_like_sse(text: &str, content_type: Option<&str>) -> bool {
+    if is_event_stream_content_type(content_type) {
+        return true;
+    }
+    let trimmed = text.trim_start();
+    trimmed.starts_with("data:")
+        || trimmed.starts_with("event:")
+        || (trimmed.starts_with(':') && (trimmed.contains("\ndata:") || trimmed.contains("\nevent:")))
+}
+
+fn is_non_loopback_cleartext_http(endpoint: &str) -> bool {
+    let low = endpoint.trim().to_ascii_lowercase();
+    let Some(rest) = low.strip_prefix("http://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host_port = authority.rsplit_once('@').map(|(_, hp)| hp).unwrap_or(authority);
+    let host = if host_port.starts_with('[') {
+        host_port.split(']').next().unwrap_or("").trim_start_matches('[')
+    } else {
+        host_port.split(':').next().unwrap_or("")
+    };
+    !matches!(host, "localhost" | "127.0.0.1" | "::1")
+}
+
+async fn stream_incremental_sse_response(
+    mut resp: reqwest::Response,
+    provider_label: &str,
+    max_bytes: usize,
+) -> Result<ProviderResponse, ProviderError> {
+    let mut agg = IncrementalSseAggregator::new(provider_label, extract_openai_usage, max_bytes);
+    while let Some(chunk) = resp.chunk().await.map_err(|e| ProviderError::Transport(e.to_string()))? {
+        agg.push_bytes(&chunk)?;
+    }
+    agg.finish()
+}
+
+/// Sovereign 4-dialect HTTP LLM adapter supporting OpenAI Chat Completions, OpenAI `/v1/responses`,
+/// Anthropic `/v1/messages`, and Google Gemini `:generateContent` across 65+ providers.
 pub struct HttpProvider {
     name: String,
     endpoint: String,
     api_key: Option<String>,
     timeout_ms: u64,
+    wire_dialect: WireDialect,
+    explicit_wire_override: bool,
     client: reqwest::Client,
 }
 
@@ -139,252 +201,161 @@ impl HttpProvider {
         api_key: Option<String>,
         timeout_ms: u64,
     ) -> Self {
+        let name_str = name.into();
+        let endpoint_str = endpoint.into();
+        let wire_dialect = lookup_provider_descriptor(&name_str)
+            .map(|d| d.wire_dialect)
+            .unwrap_or_else(|| infer_wire_dialect_from_endpoint(&endpoint_str));
         let client = reqwest::Client::builder()
             .pool_max_idle_per_host(8)
             .tcp_nodelay(true)
             .build()
             .unwrap_or_default();
         Self {
-            name: name.into(),
-            endpoint: endpoint.into(),
+            name: name_str,
+            endpoint: endpoint_str,
             api_key,
             timeout_ms: timeout_ms.max(1_000),
+            wire_dialect,
+            explicit_wire_override: false,
             client,
         }
     }
 
-    fn resolve_url(&self, model: &str) -> String {
+    pub fn with_wire_dialect(mut self, wire_dialect: WireDialect) -> Self {
+        self.wire_dialect = wire_dialect;
+        self
+    }
+
+    pub fn with_explicit_wire_override(mut self, explicit: bool) -> Self {
+        self.explicit_wire_override = explicit;
+        self
+    }
+
+    #[inline]
+    pub const fn wire_dialect(&self) -> WireDialect {
+        self.wire_dialect
+    }
+
+    pub(crate) fn resolve_request_route(&self, raw_model: &str) -> (WireDialect, String) {
+        let (model_wire, normalized_model) =
+            resolve_model_aware_wire_and_model(&self.name, raw_model, &self.endpoint, self.wire_dialect);
+        if self.explicit_wire_override {
+            (self.wire_dialect, normalized_model)
+        } else {
+            (model_wire, normalized_model)
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn resolve_url(&self, model: &str) -> String {
+        let (dialect, wire_model) = self.resolve_request_route(model);
+        self.resolve_url_for(dialect, &wire_model)
+    }
+
+    pub(crate) fn resolve_url_for(&self, dialect: WireDialect, model: &str) -> String {
         let trimmed = self.endpoint.trim_end_matches('/');
-        if self.name.eq_ignore_ascii_case("anthropic") {
-            if trimmed.ends_with("/messages") {
-                trimmed.to_string()
-            } else if trimmed.ends_with("/v1") {
-                format!("{trimmed}/messages")
-            } else {
-                format!("{trimmed}/v1/messages")
+        match dialect {
+            WireDialect::AnthropicMessages => {
+                if trimmed.ends_with("/messages") {
+                    trimmed.to_string()
+                } else if trimmed.ends_with("/v1") {
+                    format!("{trimmed}/messages")
+                } else {
+                    format!("{trimmed}/v1/messages")
+                }
             }
-        } else if self.name.eq_ignore_ascii_case("gemini") || self.name.eq_ignore_ascii_case("google") {
-            if trimmed.contains(":generateContent") {
-                trimmed.to_string()
-            } else {
-                format!("{trimmed}/models/{model}:generateContent")
+            WireDialect::GoogleGemini => {
+                if trimmed.contains(":generateContent") {
+                    trimmed.to_string()
+                } else {
+                    format!("{trimmed}/models/{model}:generateContent")
+                }
             }
-        } else if trimmed.ends_with("/chat/completions") {
-            trimmed.to_string()
-        } else {
-            format!("{trimmed}/chat/completions")
+            WireDialect::OpenAiResponses => {
+                if trimmed.ends_with("/responses") {
+                    trimmed.to_string()
+                } else if canonicalize_provider_id(&self.name) == "deepseek"
+                    && matches!(
+                        trimmed.to_ascii_lowercase().as_str(),
+                        "https://api.deepseek.com"
+                            | "https://api.deepseek.com/v1"
+                            | "https://api.deepseek.com/beta"
+                            | "https://api.deepseeki.com"
+                            | "https://api.deepseeki.com/v1"
+                            | "https://api.deepseeki.com/beta"
+                    )
+                {
+                    let base = trimmed
+                        .strip_suffix("/v1")
+                        .or_else(|| trimmed.strip_suffix("/beta"))
+                        .unwrap_or(trimmed);
+                    format!("{base}/responses")
+                } else if trimmed.ends_with("/v1") {
+                    format!("{trimmed}/responses")
+                } else {
+                    format!("{trimmed}/v1/responses")
+                }
+            }
+            WireDialect::ChatCompletions => {
+                if trimmed.ends_with("/chat/completions") {
+                    trimmed.to_string()
+                } else {
+                    format!("{trimmed}/chat/completions")
+                }
+            }
         }
     }
 
-    fn build_openai_payload(&self, req: &ProviderRequest) -> Value {
-        let messages: Vec<Value> = req
-            .messages
-            .iter()
-            .map(|m| {
-                let mut obj = json!({ "role": m.role.as_str(), "content": m.content });
-                if let Some(id) = &m.tool_call_id {
-                    obj["tool_call_id"] = Value::String(id.clone());
-                }
-                if let Some(name) = &m.name {
-                    obj["name"] = Value::String(name.clone());
-                }
-                if let Some(calls) = &m.tool_calls.as_ref().filter(|c| !c.is_empty()) {
-                    obj["tool_calls"] = serde_json::to_value(calls).unwrap_or(Value::Null);
-                }
-                obj
-            })
-            .collect();
-        let model_lower = req.model.to_ascii_lowercase();
-        let is_o_series = model_lower.starts_with("o1")
-            || model_lower.starts_with("o3")
-            || model_lower.starts_with("o4");
-        let is_reasoning_or_modern = is_o_series
-            || model_lower.starts_with("gpt-6")
-            || model_lower.starts_with("gpt-5")
-            || model_lower.contains("terra")
-            || model_lower.contains("sol")
-            || model_lower.contains("luna")
-            || model_lower.contains("astra")
-            || model_lower.contains("reasoning");
-
-        let mut payload = json!({
-            "model": req.model,
-            "messages": messages,
-        });
-
-        if is_reasoning_or_modern {
-            payload["max_completion_tokens"] = json!(req.max_tokens);
-            if !is_o_series {
-                payload["temperature"] = json!(req.temperature);
-            }
-        } else {
-            payload["max_tokens"] = json!(req.max_tokens);
-            payload["temperature"] = json!(req.temperature);
-        }
-        if !req.tools.is_empty() {
-            payload["tools"] = Value::Array(req.tools.clone());
-            payload["tool_choice"] = Value::String("auto".to_string());
-            if model_lower.contains("terra")
-                || model_lower.starts_with("gpt-6")
-                || model_lower.starts_with("gpt-5")
-            {
-                payload["reasoning_effort"] = Value::String("none".to_string());
-            }
-        }
-        payload
+    pub(crate) fn build_openai_payload(&self, req: &ProviderRequest) -> Value {
+        build_chat_completions_payload_with_endpoint(&self.name, &self.endpoint, req)
     }
 
-    /// Builds an Anthropic `/v1/messages` payload with:
-    /// 1. Consecutive `Role::Tool` coalescing into a single `role: "user"` `tool_result` block array!
-    /// 2. Strict `user`-first message alternation!
-    /// 3. Ephemeral `cache_control` breakpoints on the frozen system prompt and last tool schema!
+    pub(crate) fn build_responses_payload(&self, req: &ProviderRequest) -> Value {
+        build_openai_responses_payload(&self.name, req)
+    }
+
     pub(crate) fn build_anthropic_payload(&self, req: &ProviderRequest) -> Value {
-        let mut system_parts = Vec::new();
-        let mut messages: Vec<Value> = Vec::new();
-        for m in &req.messages {
-            match m.role {
-                Role::System if !m.content.trim().is_empty() => system_parts.push(m.content.clone()),
-                Role::User => {
-                    let text_block = json!({ "type": "text", "text": m.content });
-                    if let Some(last) = messages.last_mut().filter(|v| v.get("role") == Some(&Value::String("user".into()))) {
-                        if let Some(arr) = last.get_mut("content").and_then(Value::as_array_mut) {
-                            arr.push(text_block);
-                            continue;
-                        }
-                    }
-                    messages.push(json!({ "role": "user", "content": [text_block] }));
-                }
-                Role::Assistant => {
-                    let mut blocks = Vec::new();
-                    if !m.content.trim().is_empty() {
-                        blocks.push(json!({ "type": "text", "text": m.content }));
-                    }
-                    if let Some(calls) = &m.tool_calls {
-                        for tc in calls {
-                            let input: Value =
-                                serde_json::from_str(&tc.function.arguments).unwrap_or_else(|_| json!({}));
-                            blocks.push(json!({
-                                "type": "tool_use",
-                                "id": tc.id,
-                                "name": tc.function.name,
-                                "input": input
-                            }));
-                        }
-                    }
-                    if !blocks.is_empty() && !messages.is_empty() {
-                        messages.push(json!({ "role": "assistant", "content": blocks }));
-                    }
-                }
-                Role::Tool => {
-                    let tr_block = json!({
-                        "type": "tool_result",
-                        "tool_use_id": m.tool_call_id.clone().unwrap_or_else(|| "tool-call".to_string()),
-                        "content": m.content
-                    });
-                    if let Some(last) = messages.last_mut().filter(|v| v.get("role") == Some(&Value::String("user".into()))) {
-                        if let Some(arr) = last.get_mut("content").and_then(Value::as_array_mut) {
-                            arr.push(tr_block);
-                            continue;
-                        }
-                    }
-                    messages.push(json!({ "role": "user", "content": [tr_block] }));
-                }
-                _ => {}
-            }
-        }
-
-        let mut tools: Vec<Value> = req
-            .tools
-            .iter()
-            .filter_map(|t| {
-                let f = t.get("function")?;
-                Some(json!({
-                    "name": f.get("name")?.as_str()?,
-                    "description": f.get("description").and_then(|d| d.as_str()).unwrap_or(""),
-                    "input_schema": f.get("parameters").cloned().unwrap_or_else(|| json!({"type": "object"})),
-                }))
-            })
-            .collect();
-        if let Some(last_tool) = tools.last_mut() {
-            last_tool["cache_control"] = json!({ "type": "ephemeral" });
-        }
-
-        let mut payload = json!({
-            "model": req.model,
-            "max_tokens": req.max_tokens,
-            "temperature": req.temperature,
-            "messages": messages
-        });
-        if !system_parts.is_empty() {
-            payload["system"] = json!([{
-                "type": "text",
-                "text": system_parts.join("\n\n"),
-                "cache_control": { "type": "ephemeral" }
-            }]);
-        }
-        if !tools.is_empty() {
-            payload["tools"] = Value::Array(tools);
-        }
-        payload
+        build_anthropic_messages_payload(&self.name, &self.endpoint, req)
     }
 
-    /// Builds a Gemini `:generateContent` payload coalescing consecutive `Role::Tool` `functionResponse` parts.
     pub(crate) fn build_gemini_payload(&self, req: &ProviderRequest) -> Value {
-        let mut system_parts = Vec::new();
-        let mut contents: Vec<Value> = Vec::new();
-        for m in &req.messages {
-            match m.role {
-                Role::System if !m.content.trim().is_empty() => system_parts.push(json!({ "text": m.content })),
-                Role::User => contents.push(json!({ "role": "user", "parts": [{ "text": m.content }] })),
-                Role::Assistant => {
-                    let mut parts = Vec::new();
-                    if !m.content.is_empty() {
-                        parts.push(json!({ "text": m.content }));
-                    }
-                    if let Some(calls) = &m.tool_calls {
-                        for tc in calls {
-                            let args: Value =
-                                serde_json::from_str(&tc.function.arguments).unwrap_or_else(|_| json!({}));
-                            parts.push(json!({ "functionCall": { "name": tc.function.name, "args": args } }));
-                        }
-                    }
-                    if !parts.is_empty() {
-                        contents.push(json!({ "role": "model", "parts": parts }));
+        build_google_gemini_payload(req)
+    }
+
+    fn apply_auth_headers(&self, builder: reqwest::RequestBuilder, dialect: WireDialect) -> reqwest::RequestBuilder {
+        let mut builder = builder;
+        let canon = canonicalize_provider_id(&self.name);
+        if canon == "openrouter" {
+            builder = builder
+                .header("HTTP-Referer", "https://github.com/heav3ns/heav3ns-micro")
+                .header("X-Title", "HEAV3NS-MICRO");
+        }
+        let Some(ref key) = self.api_key else {
+            return builder;
+        };
+        match dialect {
+            WireDialect::AnthropicMessages => {
+                builder = builder.header("anthropic-version", "2023-06-01");
+                if canon == "codewhale" {
+                    return builder.bearer_auth(key);
+                }
+                let is_oauth = canon.contains("subscription") || key.starts_with("sk-ant-oat");
+                if is_oauth {
+                    builder = builder
+                        .bearer_auth(key)
+                        .header("anthropic-beta", "oauth-2025-04-20");
+                } else {
+                    builder = builder.header("x-api-key", key);
+                    if !self.endpoint.to_ascii_lowercase().contains("api.anthropic.com") {
+                        builder = builder.bearer_auth(key);
                     }
                 }
-                Role::Tool => {
-                    let fr_part = json!({
-                        "functionResponse": {
-                            "name": m.name.clone().unwrap_or_else(|| "tool".to_string()),
-                            "response": { "result": m.content }
-                        }
-                    });
-                    if let Some(last) = contents.last_mut().filter(|v| v.get("role") == Some(&Value::String("user".into()))) {
-                        if let Some(arr) = last.get_mut("parts").and_then(Value::as_array_mut) {
-                            let has_fr = arr.iter().any(|p| p.get("functionResponse").is_some());
-                            if has_fr {
-                                arr.push(fr_part);
-                                continue;
-                            }
-                        }
-                    }
-                    contents.push(json!({ "role": "user", "parts": [fr_part] }));
-                }
-                _ => {}
+                builder
             }
+            WireDialect::GoogleGemini => builder.header("x-goog-api-key", key),
+            WireDialect::OpenAiResponses | WireDialect::ChatCompletions => builder.bearer_auth(key),
         }
-        let decls: Vec<Value> = req.tools.iter().filter_map(|t| t.get("function").cloned()).collect();
-        let mut payload = json!({
-            "contents": contents,
-            "generationConfig": { "maxOutputTokens": req.max_tokens, "temperature": req.temperature }
-        });
-        if !system_parts.is_empty() {
-            payload["systemInstruction"] = json!({ "parts": system_parts });
-        }
-        if !decls.is_empty() {
-            payload["tools"] = json!([{ "functionDeclarations": decls }]);
-        }
-        payload
     }
 
     fn parse_openai_response(body: &Value) -> Result<ProviderResponse, ProviderError> {
@@ -410,14 +381,18 @@ impl HttpProvider {
                         Some(other) => other.to_string(),
                         None => "{}".to_string(),
                     };
+                    let sig = tc
+                        .pointer("/extra_content/google/thought_signature")
+                        .or_else(|| tc.pointer("/extra_content/google/thoughtSignature"))
+                        .and_then(Value::as_str)
+                        .filter(|s| !s.is_empty())
+                        .map(String::from);
                     if !name.is_empty() {
                         tool_calls.push(ToolCall {
                             id,
                             r#type: "function".to_string(),
-                            function: ToolCallFunction {
-                                name,
-                                arguments: raw_args,
-                            },
+                            function: ToolCallFunction { name, arguments: raw_args },
+                            thought_signature: sig,
                         });
                     }
                 }
@@ -454,10 +429,8 @@ impl HttpProvider {
                         tool_calls.push(ToolCall {
                             id,
                             r#type: "function".to_string(),
-                            function: ToolCallFunction {
-                                name,
-                                arguments: input,
-                            },
+                            function: ToolCallFunction { name, arguments: input },
+                            thought_signature: None,
                         });
                     }
                 }
@@ -488,42 +461,57 @@ impl HttpProvider {
             .and_then(|c| c.get("content"))
             .and_then(|c| c.get("parts"))
             .and_then(|p| p.as_array())
-            .ok_or_else(|| {
-                ProviderError::Transport("Missing candidates[0].content.parts in Gemini response".to_string())
-            })?;
+            .ok_or_else(|| ProviderError::Transport("Missing candidates[0].content.parts in Gemini response".to_string()))?;
         let mut text_parts = Vec::new();
+        let mut thought_parts = Vec::new();
         let mut tool_calls = Vec::new();
         for (idx, part) in parts.iter().enumerate() {
+            let is_thought = part.get("thought").and_then(Value::as_bool) == Some(true);
             if let Some(t) = part.get("text").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-                text_parts.push(t.to_string());
+                if is_thought {
+                    thought_parts.push(t.to_string());
+                } else {
+                    text_parts.push(t.to_string());
+                }
             }
             if let Some(fc) = part.get("functionCall") {
                 let name = fc.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let args = fc.get("args").map(|v| v.to_string()).unwrap_or_else(|| "{}".to_string());
+                let sig = part
+                    .get("thoughtSignature")
+                    .or_else(|| part.get("thought_signature"))
+                    .or_else(|| fc.get("thoughtSignature"))
+                    .or_else(|| fc.get("thought_signature"))
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                    .map(String::from);
                 if !name.is_empty() {
                     tool_calls.push(ToolCall {
                         id: format!("gemini_call_{}", idx + 1),
                         r#type: "function".to_string(),
                         function: ToolCallFunction { name, arguments: args },
+                        thought_signature: sig,
                     });
                 }
             }
         }
+        if text_parts.is_empty() && tool_calls.is_empty() && !thought_parts.is_empty() {
+            text_parts = thought_parts;
+        }
         let mut resp = finalize_provider_response(Some(text_parts.join("\n")), tool_calls, "gemini");
         if let Some(um) = body.get("usageMetadata") {
-            let prompt_tokens = um.get("promptTokenCount").and_then(Value::as_u64).unwrap_or(0) as usize;
-            let completion_tokens = um.get("candidatesTokenCount").and_then(Value::as_u64).unwrap_or(0) as usize;
-            let cached_prompt_tokens = um.get("cachedContentTokenCount").and_then(Value::as_u64).unwrap_or(0) as usize;
             resp.usage = Some(ProviderTokenUsage {
-                prompt_tokens,
-                completion_tokens,
-                cached_prompt_tokens,
+                prompt_tokens: um.get("promptTokenCount").and_then(Value::as_u64).unwrap_or(0) as usize,
+                completion_tokens: um.get("candidatesTokenCount").and_then(Value::as_u64).unwrap_or(0) as usize,
+                cached_prompt_tokens: um.get("cachedContentTokenCount").and_then(Value::as_u64).unwrap_or(0) as usize,
                 is_exact: true,
             });
         }
         Ok(resp)
     }
 }
+
+impl IHttpProvider for HttpProvider {}
 
 impl ILlmProvider for HttpProvider {
     fn provider_name(&self) -> &str {
@@ -539,27 +527,50 @@ impl ILlmProvider for HttpProvider {
             if cancel.as_ref().map(|t| t.is_cancelled()).unwrap_or(false) {
                 return Err(ProviderError::Cancelled);
             }
-            let is_anthropic = self.name.eq_ignore_ascii_case("anthropic");
-            let is_gemini = self.name.eq_ignore_ascii_case("gemini") || self.name.eq_ignore_ascii_case("google");
-            let url = self.resolve_url(&req.model);
-            let payload = if is_anthropic {
-                self.build_anthropic_payload(&req)
-            } else if is_gemini {
-                self.build_gemini_payload(&req)
-            } else {
-                self.build_openai_payload(&req)
+            if let Some(retired_msg) = retired_provider_remediation(&self.name) {
+                return Err(ProviderError::HttpStatus {
+                    status: 400,
+                    body: retired_msg.to_string(),
+                    retryable: false,
+                    retry_after_ms: None,
+                });
+            }
+            let canon_provider = canonicalize_provider_id(&self.name);
+            if canon_provider == "opencode-go" && opencode_go_model_id(&req.model).is_none() {
+                return Err(ProviderError::HttpStatus {
+                    status: 400,
+                    body: format!(
+                        "Model '{}' is not in OpenCode Go's supported roster; check `heav3ns-micro providers` or select a documented OpenCode Go model.",
+                        req.model
+                    ),
+                    retryable: false,
+                    retry_after_ms: None,
+                });
+            }
+            if canon_provider == "codewhale" && is_non_loopback_cleartext_http(&self.endpoint) {
+                return Err(ProviderError::HttpStatus {
+                    status: 400,
+                    body: "Refusing to transmit CODEWHALE_API_KEY over non-loopback cleartext HTTP; use https://api.codewhale.net/v1.".to_string(),
+                    retryable: false,
+                    retry_after_ms: None,
+                });
+            }
+
+            let (effective_wire, wire_model) = self.resolve_request_route(&req.model);
+            let mut effective_req = req;
+            effective_req.model = wire_model;
+            let url = self.resolve_url_for(effective_wire, &effective_req.model);
+            let payload = match effective_wire {
+                WireDialect::AnthropicMessages => self.build_anthropic_payload(&effective_req),
+                WireDialect::GoogleGemini => self.build_gemini_payload(&effective_req),
+                WireDialect::OpenAiResponses => self.build_responses_payload(&effective_req),
+                WireDialect::ChatCompletions => self.build_openai_payload(&effective_req),
             };
 
-            let mut builder = self.client.post(&url).header("content-type", "application/json");
-            if let Some(ref key) = self.api_key {
-                if is_anthropic {
-                    builder = builder.header("x-api-key", key).header("anthropic-version", "2023-06-01");
-                } else if is_gemini {
-                    builder = builder.header("x-goog-api-key", key);
-                } else {
-                    builder = builder.bearer_auth(key);
-                }
-            }
+            let builder = self.apply_auth_headers(
+                self.client.post(&url).header("content-type", "application/json"),
+                effective_wire,
+            );
 
             let http_fut = async {
                 let resp = builder
@@ -569,12 +580,18 @@ impl ILlmProvider for HttpProvider {
                     .map_err(|e| ProviderError::Transport(e.to_string()))?;
                 let status = resp.status().as_u16();
                 let retry_after_ms = parse_retry_after_header(resp.headers());
-                let text = resp.text().await.map_err(|e| ProviderError::Transport(e.to_string()))?;
+                let content_type = resp.headers().get("content-type").and_then(|v| v.to_str().ok()).map(String::from);
+
+                if (200..300).contains(&status) && is_event_stream_content_type(content_type.as_deref()) {
+                    return stream_incremental_sse_response(resp, &self.name, MAX_HTTP_RESPONSE_BODY_BYTES).await;
+                }
+
+                let text = read_bounded_response_text(resp, MAX_HTTP_RESPONSE_BODY_BYTES).await?;
+
                 if !(200..300).contains(&status) {
-                    if !is_anthropic && !is_gemini && status == 400 {
+                    if effective_wire == WireDialect::ChatCompletions && status == 400 {
                         let mut needs_retry = false;
                         let mut healed_payload = payload.clone();
-
                         if text.contains("max_completion_tokens") && healed_payload.get("max_tokens").is_some() {
                             if let Some(tokens) = healed_payload.as_object_mut().and_then(|o| o.remove("max_tokens")) {
                                 healed_payload["max_completion_tokens"] = tokens;
@@ -591,17 +608,20 @@ impl ILlmProvider for HttpProvider {
                                 needs_retry = true;
                             }
                         }
-
                         if needs_retry {
-                            let mut retry_builder = self.client.post(&url).header("content-type", "application/json");
-                            if let Some(ref key) = self.api_key {
-                                retry_builder = retry_builder.bearer_auth(key);
-                            }
+                            let retry_builder = self.apply_auth_headers(
+                                self.client.post(&url).header("content-type", "application/json"),
+                                effective_wire,
+                            );
                             if let Ok(retry_resp) = retry_builder.json(&healed_payload).send().await {
                                 let retry_status = retry_resp.status().as_u16();
-                                let retry_text = retry_resp.text().await.map_err(|e| ProviderError::Transport(e.to_string()))?;
+                                let retry_ct = retry_resp.headers().get("content-type").and_then(|v| v.to_str().ok()).map(String::from);
+                                if (200..300).contains(&retry_status) && is_event_stream_content_type(retry_ct.as_deref()) {
+                                    return stream_incremental_sse_response(retry_resp, &self.name, MAX_HTTP_RESPONSE_BODY_BYTES).await;
+                                }
+                                let retry_text = read_bounded_response_text(retry_resp, MAX_HTTP_RESPONSE_BODY_BYTES).await?;
                                 if (200..300).contains(&retry_status) {
-                                    if retry_text.trim_start().starts_with("data:") {
+                                    if looks_like_sse(&retry_text, retry_ct.as_deref()) {
                                         return parse_sse_stream(&retry_text, &self.name);
                                     }
                                     let json_body: Value = serde_json::from_str(&retry_text)
@@ -619,17 +639,17 @@ impl ILlmProvider for HttpProvider {
                         retry_after_ms,
                     });
                 }
-                if text.trim_start().starts_with("data:") {
+
+                if looks_like_sse(&text, content_type.as_deref()) {
                     return parse_sse_stream(&text, &self.name);
                 }
                 let json_body: Value = serde_json::from_str(&text)
                     .map_err(|e| ProviderError::Transport(format!("Invalid JSON from provider: {e}")))?;
-                if is_anthropic {
-                    Self::parse_anthropic_response(&json_body)
-                } else if is_gemini {
-                    Self::parse_gemini_response(&json_body)
-                } else {
-                    Self::parse_openai_response(&json_body)
+                match effective_wire {
+                    WireDialect::AnthropicMessages => Self::parse_anthropic_response(&json_body),
+                    WireDialect::GoogleGemini => Self::parse_gemini_response(&json_body),
+                    WireDialect::OpenAiResponses => parse_responses_json(&json_body, &self.name),
+                    WireDialect::ChatCompletions => Self::parse_openai_response(&json_body),
                 }
             };
 
@@ -652,6 +672,7 @@ impl ILlmProvider for HttpProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::types::messages::Role;
 
     #[test]
     fn test_build_openai_payload_modern_and_reasoning_models_use_max_completion_tokens() {
@@ -662,6 +683,7 @@ mod tests {
             tools: Vec::new(),
             max_tokens: 4096,
             temperature: 0.0,
+            reasoning_effort: None,
         };
         let payload = provider.build_openai_payload(&req);
         assert_eq!(payload["max_completion_tokens"], 4096);
@@ -677,6 +699,7 @@ mod tests {
             })],
             max_tokens: 4096,
             temperature: 0.0,
+            reasoning_effort: None,
         };
         let payload_tools = provider.build_openai_payload(&req_with_tools);
         assert_eq!(payload_tools["reasoning_effort"], "none");
@@ -688,6 +711,7 @@ mod tests {
                 tools: Vec::new(),
                 max_tokens: 2048,
                 temperature: 1.0,
+                reasoning_effort: None,
             };
             let payload_o = provider.build_openai_payload(&req_o);
             assert_eq!(payload_o["max_completion_tokens"], 2048);
@@ -705,6 +729,7 @@ mod tests {
             tools: Vec::new(),
             max_tokens: 1024,
             temperature: 0.0,
+            reasoning_effort: None,
         };
         let payload = provider.build_openai_payload(&req);
         assert_eq!(payload["max_tokens"], 1024);

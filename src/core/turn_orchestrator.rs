@@ -1,20 +1,22 @@
 // [LAYER: CORE]
 use crate::core::engine::AgentEngine;
 use crate::core::session_store::SessionStore;
-use crate::domain::interfaces::{IModelPricingRegistry, IWorkspaceSnapshotCas, ProgressCallback};
+use crate::domain::interfaces::{ILlmProvider, IModelPricingRegistry, IWorkspaceSnapshotCas, ProgressCallback};
 use crate::domain::types::model_catalog::ModelPricingCatalog;
 use crate::domain::pricing_and_taxonomy::{compute_retry_delay_ms, resolve_compatible_fallback_model_with_catalog, select_auto_routed_model_with_catalog, AutoRouteDecision, BillingMetering, ErrorCategory, ErrorEnvelope, ProviderTokenUsage};
 use crate::domain::turn_receipt::{CommandRunReceipt, FileChangeReceipt, TurnReceipt};
 use crate::domain::types::messages::{Role, SessionMessage};
 use crate::domain::types::posture_types::RepoConstitution;
 use crate::domain::types::progress::{EngineProgressMetadata, EngineProgressPhase, EngineProgressStatus, ToolExecutionRecord};
+use crate::domain::types::provider_registry::{canonicalize_provider_id, lookup_provider_descriptor, resolve_provider_route, ProviderChain, WireDialect};
 use crate::domain::types::runtime::{AgentConfig, CancellationToken, EngineTickOutcome, ExecutionPosture};
 use crate::domain::types::tick_result::{ProviderError, ProviderRequest, ProviderResponse};
-use crate::infrastructure::http_provider::{probe_local_ollama_model, HttpProvider};
+use crate::infrastructure::http_provider::{probe_local_ollama_model, probe_local_ollama_models, probe_openai_compatible_models, HttpProvider};
 use crate::infrastructure::pricing_updater::global_pricing_registry;
 use crate::plumbing::hash_and_math::now_ms;
 use crate::plumbing::text_tokens::{canonical_tool_name, estimate_text_tokens};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -102,6 +104,55 @@ impl AgentEngine {
         probe_local_ollama_model().await
     }
 
+    pub async fn probe_ollama_models() -> Vec<String> {
+        probe_local_ollama_models().await
+    }
+
+    pub async fn probe_provider_models_live(
+        &self,
+        provider_id: &str,
+        saved_keys: &BTreeMap<String, String>,
+        include_cloud: bool,
+    ) -> Vec<String> {
+        let canon = lookup_provider_descriptor(provider_id)
+            .map(|d| d.id)
+            .unwrap_or(provider_id);
+        if canon.eq_ignore_ascii_case("ollama") {
+            return probe_local_ollama_models().await;
+        }
+        let is_local_gateway = matches!(canon, "vllm" | "sglang" | "lmstudio" | "custom");
+        if !is_local_gateway && !include_cloud {
+            return Vec::new();
+        }
+        let cfg = self.config_snapshot();
+        let mut merged_keys = cfg.provider_keys.clone();
+        for (k, v) in saved_keys {
+            if !v.trim().is_empty() {
+                merged_keys.insert(k.clone(), v.clone());
+            }
+        }
+        let route = resolve_provider_route(
+            canon,
+            None,
+            None,
+            None,
+            None,
+            Some(&cfg.provider),
+            cfg.api_key.as_deref(),
+            &merged_keys,
+            &cfg.provider_endpoints,
+            |env_key| std::env::var(env_key).ok(),
+        );
+        if !matches!(route.wire_dialect, WireDialect::ChatCompletions | WireDialect::OpenAiResponses) {
+            return Vec::new();
+        }
+        let requires_key = lookup_provider_descriptor(&route.provider_id).is_some_and(|d| d.requires_api_key);
+        if requires_key && route.api_key.is_none() {
+            return Vec::new();
+        }
+        probe_openai_compatible_models(&route.api_endpoint, route.api_key.as_deref(), 800).await
+    }
+
     pub fn model_catalog_snapshot() -> ModelPricingCatalog {
         global_pricing_registry().snapshot_catalog()
     }
@@ -122,7 +173,8 @@ impl AgentEngine {
         select_auto_routed_model_with_catalog(provider, configured_model, prompt, &catalog)
     }
 
-    /// Hot-swaps the active provider, model, endpoint, and API key on `AgentEngine` while preserving KV-pin accounting.
+    /// Hot-swaps the active provider, model, endpoint, and API key on `AgentEngine` with strict `secret_slot`
+    /// isolation (preventing cross-provider secret leakage) and 4-dialect wire selection.
     pub fn switch_http_provider(
         &self,
         provider_id: &str,
@@ -130,67 +182,101 @@ impl AgentEngine {
         endpoint_override: Option<&str>,
         api_key_override: Option<String>,
     ) {
+        let snap = self.config_snapshot();
+        self.switch_http_provider_with_vault(
+            provider_id,
+            model_name,
+            endpoint_override,
+            api_key_override,
+            &snap.provider_keys,
+            &snap.provider_endpoints,
+        );
+    }
+
+    /// Hot-swaps the active provider using optional persisted vault maps (`provider_keys` & `provider_endpoints`).
+    pub fn switch_http_provider_with_vault(
+        &self,
+        provider_id: &str,
+        model_name: &str,
+        endpoint_override: Option<&str>,
+        api_key_override: Option<String>,
+        saved_keys: &BTreeMap<String, String>,
+        saved_endpoints: &BTreeMap<String, String>,
+    ) {
         let mut cfg = self.config_snapshot();
-        let lower_prov = provider_id.trim().to_ascii_lowercase();
-        let normalized_prov = if lower_prov.contains("claude") || lower_prov == "anthropic" {
-            "anthropic"
-        } else if lower_prov.contains("gemini") || lower_prov == "google" {
-            "gemini"
-        } else if lower_prov == "ollama" || lower_prov.contains("apple") {
-            "ollama"
-        } else if lower_prov == "openrouter" {
-            "openrouter"
-        } else if lower_prov == "deepseek" {
-            "deepseek"
-        } else if lower_prov == "groq" {
-            "groq"
-        } else if lower_prov == "xai" {
-            "xai"
-        } else {
-            "openai"
-        };
-        cfg.provider = normalized_prov.to_string();
-        if !model_name.trim().is_empty() {
-            cfg.model_name = model_name.trim().to_string();
+        for (k, v) in saved_keys {
+            if !v.trim().is_empty() {
+                cfg.provider_keys.insert(k.clone(), v.clone());
+            }
         }
-        cfg.api_endpoint = endpoint_override
-            .filter(|s| !s.trim().is_empty())
-            .map(String::from)
-            .unwrap_or_else(|| match normalized_prov {
-                "anthropic" => "https://api.anthropic.com/v1".to_string(),
-                "gemini" => "https://generativelanguage.googleapis.com/v1beta".to_string(),
-                "ollama" => "http://localhost:11434/v1".to_string(),
-                "openrouter" => "https://openrouter.ai/api/v1".to_string(),
-                "deepseek" => "https://api.deepseek.com/v1".to_string(),
-                "groq" => "https://api.groq.com/openai/v1".to_string(),
-                "xai" => "https://api.x.ai/v1".to_string(),
-                _ => "https://api.openai.com/v1".to_string(),
-            });
-        if let Some(k) = api_key_override {
-            cfg.api_key = if k.trim().is_empty() { None } else { Some(k) };
-        } else {
-            cfg.api_key = match normalized_prov {
-                "anthropic" => std::env::var("ANTHROPIC_API_KEY").ok().filter(|s| !s.is_empty()).or(cfg.api_key),
-                "gemini" => std::env::var("GEMINI_API_KEY").or_else(|_| std::env::var("GOOGLE_API_KEY")).ok().filter(|s| !s.is_empty()).or(cfg.api_key),
-                "openrouter" => std::env::var("OPENROUTER_API_KEY").ok().filter(|s| !s.is_empty()).or(cfg.api_key),
-                "deepseek" => std::env::var("DEEPSEEK_API_KEY").ok().filter(|s| !s.is_empty()).or(cfg.api_key),
-                "groq" => std::env::var("GROQ_API_KEY").ok().filter(|s| !s.is_empty()).or(cfg.api_key),
-                "xai" => std::env::var("XAI_API_KEY").ok().filter(|s| !s.is_empty()).or(cfg.api_key),
-                "ollama" => None,
-                _ => std::env::var("OPENAI_API_KEY").ok().filter(|s| !s.is_empty()).or(cfg.api_key),
-            };
+        for (k, v) in saved_endpoints {
+            if !v.trim().is_empty() {
+                cfg.provider_endpoints.insert(k.clone(), v.clone());
+            }
         }
-        let wire_prov = match normalized_prov {
-            "anthropic" | "gemini" | "ollama" => normalized_prov.to_string(),
-            _ => "openai".to_string(),
-        };
-        let http = Arc::new(HttpProvider::new(
-            wire_prov,
+
+        let prev_prov = cfg.provider.clone();
+        let prev_key = cfg.api_key.clone();
+        let explicit_key_cleared = api_key_override.as_ref().is_some_and(|k| k.trim().is_empty());
+        if explicit_key_cleared {
+            let slot = lookup_provider_descriptor(provider_id)
+                .map(|d| d.secret_slot.to_string())
+                .unwrap_or_else(|| provider_id.trim().to_ascii_lowercase());
+            cfg.provider_keys.remove(&slot);
+            cfg.provider_keys.remove(provider_id);
+        } else if let Some(explicit_key) = api_key_override.as_deref().map(str::trim).filter(|k| !k.is_empty()) {
+            let slot = lookup_provider_descriptor(provider_id)
+                .map(|d| d.secret_slot.to_string())
+                .unwrap_or_else(|| provider_id.trim().to_ascii_lowercase());
+            cfg.provider_keys.insert(slot, explicit_key.to_string());
+        }
+        if let Some(ep) = endpoint_override.map(str::trim).filter(|e| !e.is_empty()) {
+            let pid = lookup_provider_descriptor(provider_id)
+                .map(|d| d.id.to_string())
+                .unwrap_or_else(|| provider_id.trim().to_ascii_lowercase());
+            cfg.provider_endpoints.insert(pid, ep.to_string());
+        }
+
+        let changed_provider = canonicalize_provider_id(&prev_prov) != canonicalize_provider_id(provider_id);
+        let crossing_family = lookup_provider_descriptor(&prev_prov).map(|d| d.catalog_vendor)
+            != lookup_provider_descriptor(provider_id).map(|d| d.catalog_vendor);
+        if crossing_family {
+            cfg.fallback_model = None;
+        }
+        if changed_provider {
+            cfg.wire_dialect = None;
+        }
+
+        let route = resolve_provider_route(
+            provider_id,
+            Some(model_name).filter(|m| !m.trim().is_empty()),
+            endpoint_override,
+            api_key_override.as_deref().filter(|k| !k.trim().is_empty()),
+            cfg.wire_dialect.as_deref(),
+            if explicit_key_cleared { None } else { Some(prev_prov.as_str()) },
+            if explicit_key_cleared { None } else { prev_key.as_deref() },
+            &cfg.provider_keys,
+            &cfg.provider_endpoints,
+            |env_key| std::env::var(env_key).ok(),
+        );
+
+        cfg.provider = route.provider_id.clone();
+        cfg.model_name = route.model_name;
+        cfg.api_endpoint = route.api_endpoint.clone();
+        cfg.api_key = if explicit_key_cleared { None } else { route.api_key };
+
+        let mut http = HttpProvider::new(
+            route.provider_id,
             cfg.api_endpoint.clone(),
             cfg.api_key.clone(),
             cfg.provider_timeout_ms,
-        ));
-        self.swap_provider_and_config(cfg, http);
+        );
+        if let Some(dialect) = cfg.wire_dialect.as_deref().and_then(WireDialect::parse_override) {
+            http = http.with_wire_dialect(dialect).with_explicit_wire_override(true);
+        } else {
+            http = http.with_wire_dialect(route.wire_dialect);
+        }
+        self.swap_provider_and_config(cfg, Arc::new(http));
     }
 
     pub fn cas_diff_between(
@@ -243,13 +329,14 @@ impl AgentEngine {
             tools: Vec::new(),
             max_tokens: cfg.max_output_tokens.min(2048),
             temperature: cfg.temperature,
+            reasoning_effort: cfg.reasoning_effort.clone(),
         };
         let resp = self.provider_arc().complete(req, None).await?;
         Ok(resp.content.unwrap_or_default())
     }
 
     /// Executes a single provider round with jittered exponential backoff across ALL rounds (`0..max_rounds`),
-    /// separating `402`/spent-balance (`Budget`) from `429` (`RateLimit`) and preventing cross-provider fallback bugs.
+    /// separating `402`/spent-balance (`Budget`) from `429` (`RateLimit`) and preserving sticky multi-round `ProviderChain` failover.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn complete_round_with_backoff(
         &self,
@@ -259,6 +346,7 @@ impl AgentEngine {
         tools_admitted: bool,
         active_model: &mut String,
         is_fallback_model: &mut bool,
+        turn_route: &mut Option<(Arc<dyn ILlmProvider>, String, String)>,
         messages_for_provider: &[SessionMessage],
         openai_tools: &[Value],
         cancel_token: &Option<CancellationToken>,
@@ -276,12 +364,13 @@ impl AgentEngine {
 
         for attempt in 1..=max_attempts {
             let conn_id = format!("provider-r{round}-a{attempt}");
+            let active_prov_id = turn_route.as_ref().map(|(_, p, _)| p.as_str()).unwrap_or(&cfg.provider);
             if attempt >= 2 && !*is_fallback_model {
                 let catalog = global_pricing_registry().snapshot_catalog();
                 if let Some(fb) = resolve_compatible_fallback_model_with_catalog(
-                    &cfg.provider,
+                    active_prov_id,
                     active_model,
-                    cfg.fallback_model.as_deref(),
+                    if turn_route.is_none() { cfg.fallback_model.as_deref() } else { None },
                     &catalog,
                 ) {
                     *active_model = fb;
@@ -313,9 +402,13 @@ impl AgentEngine {
                 tools: openai_tools.to_vec(),
                 max_tokens: cfg.max_output_tokens,
                 temperature: cfg.temperature,
+                reasoning_effort: cfg.reasoning_effort.clone(),
             };
 
-            let provider = self.provider_arc();
+            let provider = turn_route
+                .as_ref()
+                .map(|(p, _, _)| Arc::clone(p))
+                .unwrap_or_else(|| self.provider_arc());
             match provider.complete(req, cancel_token.clone()).await {
                 Ok(resp) => {
                     self.emit_progress_internal(
@@ -415,6 +508,71 @@ impl AgentEngine {
                         }
                     } else {
                         tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                    }
+                }
+            }
+        }
+
+        if !is_scripted && !tools_admitted && turn_route.is_none() && !cfg.fallback_providers.is_empty() {
+            let can_failover = last_err
+                .as_ref()
+                .map(|(err, env)| {
+                    env.as_ref()
+                        .map(|e| {
+                            e.recoverable
+                                || matches!(
+                                    e.category,
+                                    ErrorCategory::Budget
+                                        | ErrorCategory::Authentication
+                                        | ErrorCategory::Authorization
+                                )
+                        })
+                        .unwrap_or_else(|| err.is_retryable())
+                })
+                .unwrap_or(false);
+            if can_failover {
+                let mut chain = ProviderChain::new(&cfg.provider, &cfg.fallback_providers);
+                while let Some(fb_entry) = chain.advance() {
+                    let (fb_prov_id, fb_model_override) = fb_entry
+                        .split_once(':')
+                        .map(|(p, m)| (p.trim(), Some(m.trim()).filter(|s| !s.is_empty())))
+                        .unwrap_or((fb_entry.trim(), None));
+                    let route = resolve_provider_route(
+                        fb_prov_id,
+                        fb_model_override,
+                        None,
+                        None,
+                        None,
+                        Some(&cfg.provider),
+                        cfg.api_key.as_deref(),
+                        &cfg.provider_keys,
+                        &cfg.provider_endpoints,
+                        |env_key| std::env::var(env_key).ok(),
+                    );
+                    let requires_key = lookup_provider_descriptor(&route.provider_id).is_some_and(|d| d.requires_api_key);
+                    if requires_key && route.api_key.is_none() {
+                        continue;
+                    }
+                    let fb_http = HttpProvider::new(
+                        route.provider_id.clone(),
+                        route.api_endpoint.clone(),
+                        route.api_key,
+                        cfg.provider_timeout_ms,
+                    )
+                    .with_wire_dialect(route.wire_dialect);
+                    let fb_req = ProviderRequest {
+                        model: route.model_name.clone(),
+                        messages: messages_for_provider.to_vec(),
+                        tools: openai_tools.to_vec(),
+                        max_tokens: cfg.max_output_tokens,
+                        temperature: cfg.temperature,
+                        reasoning_effort: cfg.reasoning_effort.clone(),
+                    };
+                    if let Ok(resp) = ILlmProvider::complete(&fb_http, fb_req, cancel_token.clone()).await {
+                        *active_model = route.model_name;
+                        *is_fallback_model = true;
+                        *turn_route = Some((Arc::new(fb_http), route.provider_id, route.api_endpoint));
+                        return Ok(resp);
                     }
                 }
             }

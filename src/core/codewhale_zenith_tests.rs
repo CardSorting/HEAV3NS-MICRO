@@ -251,11 +251,13 @@ mod tests {
                 id: "call_1".into(),
                 r#type: "function".into(),
                 function: ToolCallFunction { name: "view_file".into(), arguments: r#"{"path":"a.rs"}"#.into() },
+                thought_signature: None,
             },
             ToolCall {
                 id: "call_2".into(),
                 r#type: "function".into(),
                 function: ToolCallFunction { name: "view_file".into(), arguments: r#"{"path":"b.rs"}"#.into() },
+                thought_signature: None,
             },
         ]);
         let mut tr1 = SessionMessage::new(Role::Tool, "contents of a");
@@ -275,6 +277,7 @@ mod tests {
             tools: vec![json!({"type": "function", "function": {"name": "view_file", "description": "Read", "parameters": {"type": "object"}}})],
             max_tokens: 1024,
             temperature: 0.0,
+            reasoning_effort: None,
         };
         let payload = provider.build_anthropic_payload(&req);
         let wire_msgs = payload["messages"].as_array().unwrap();

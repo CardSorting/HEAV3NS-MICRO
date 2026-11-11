@@ -236,7 +236,9 @@ impl AgentEngine {
                 "  /vision [path]      - Decode binary image header metadata or generate test SVG",
                 "  /legion | /swarm    - Classify task into The Legion 7-specialist swarm DAG",
                 "  /compact            - Force rolling LUMI-CONTEXT/1 compaction",
+                "  /provider [id|list] - Inspect or switch across 43+ sovereign providers & wire dialects",
                 "  /model [name|auto]  - Inspect or switch active model (or same-provider auto routing)",
+                "  /reasoning [level]  - Inspect or set reasoning effort (low|medium|high|xhigh|off)",
                 "  /snapshot           - Capture holistic session + VFS + CAS disk snapshot",
                 "  /snapshots          - List captured snapshots and CAS checkpoints",
                 "  /rewind [snap-N|N]  - Rewind session + workspace disk to snapshot or drop last N msgs",
@@ -491,6 +493,9 @@ impl AgentEngine {
                 serde_json::to_string(&sess.compact_session(self.compactor(), &policy)).unwrap_or_default()
             }
             "/model" => self.inspect_or_switch_model(arg),
+            "/provider" => self.inspect_or_switch_provider(arg),
+            "/providers" => self.inspect_or_switch_provider(if arg.is_empty() { "list" } else { arg }),
+            "/reasoning" | "/effort" => self.inspect_or_switch_reasoning(arg),
             "/models" => {
                 AgentEngine::trigger_model_catalog_auto_refresh();
                 let cat = AgentEngine::model_catalog_snapshot();

@@ -45,6 +45,8 @@ pub struct ToolCall {
     #[serde(default = "default_tool_type")]
     pub r#type: String,
     pub function: ToolCallFunction,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "thoughtSignature")]
+    pub thought_signature: Option<String>,
 }
 
 fn default_tool_type() -> String {
@@ -130,6 +132,7 @@ pub fn extract_text_tool_calls(text: &str) -> Vec<ToolCall> {
                         name: name.to_string(),
                         arguments: args_str,
                     },
+                    thought_signature: None,
                 });
             }
         }

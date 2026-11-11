@@ -45,6 +45,7 @@ impl ProviderStep {
                     name: name.into(),
                     arguments: args.to_string(),
                 },
+                thought_signature: None,
             }],
         }
     }
