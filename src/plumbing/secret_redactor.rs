@@ -172,7 +172,7 @@ impl DeterministicSecretRedactor {
             Regex::new(r"(?i)(\bBearer\s+)[A-Za-z0-9._~+/=-]{16,}").unwrap()
         });
         let url_auth_re = URL_AUTH_RE.get_or_init(|| {
-            Regex::new(r"(https?://[^/\s:@]+:)([^@\s/]{4,})(@)").unwrap()
+            Regex::new(r"((?:https?|postgres(?:ql)?|rediss?|mongodb(?:\+srv)?|amqps?|ftps?|mysql)://[^/\s:@]+:)([^@\s/]{4,})(@)").unwrap()
         });
         let kv_re = KV_SECRET_RE.get_or_init(|| {
             Regex::new(r#"(?i)(["']?(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|password|secret[_-]?key)["']?\s*[:=]\s*["']?)([A-Za-z0-9._~+/=-]{12,})(["']?)"#).unwrap()
@@ -486,6 +486,11 @@ impl SafetyPolicy {
             "OPENAI_KEY",
             "ANTHROPIC_KEY",
             "CODEX_API_KEY",
+            "DATABASE_URL",
+            "REDIS_URL",
+            "MONGODB_URI",
+            "MONGO_URI",
+            "GOOGLE_APPLICATION_CREDENTIALS",
         ];
         if EXACT.contains(&upper.as_str()) {
             return true;
@@ -495,6 +500,7 @@ impl SafetyPolicy {
             "_ACCESS_KEY",
             "_SECRET",
             "_SECRET_KEY",
+            "_TOKEN",
             "_ACCESS_TOKEN",
             "_REFRESH_TOKEN",
             "_AUTH_TOKEN",
@@ -502,6 +508,7 @@ impl SafetyPolicy {
             "_CLIENT_SECRET",
             "_PASSWORD",
             "_PASSWD",
+            "_DATABASE_URL",
         ];
         SUFFIXES.iter().any(|suf| upper.ends_with(suf))
     }

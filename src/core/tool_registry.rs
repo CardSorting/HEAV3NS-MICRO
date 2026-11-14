@@ -20,6 +20,7 @@ use crate::infrastructure::search_tools::resolve_workspace_path;
 use crate::infrastructure::shell_runner::execute_shell_command_sandboxed;
 use crate::infrastructure::transaction_journal::TransactionJournal;
 use crate::infrastructure::vfs_store::SkillsIngestor;
+use crate::plumbing::hash_and_math::lock_unpoison;
 use crate::plumbing::secret_redactor::SafetyPolicy;
 use crate::plumbing::text_tokens::canonical_tool_name;
 use crate::plumbing::vision_and_dom::{decode_image_metadata, generate_synthetic_bmp, generate_synthetic_svg};
@@ -129,6 +130,15 @@ impl ToolRegistry {
 
     /// Selects relevant OpenAI tool schemas with bounded 8-slot LRU deferred unlocking and structural `engage_swarm` exclusion for specialists.
     pub fn select_tool_schemas_for(&self, prompt: &str, forbid_swarm: bool) -> Vec<Value> {
+        self.select_or_peek_tool_schemas(prompt, forbid_swarm, true)
+    }
+
+    /// Read-only preview of tool schemas for `/context` & HUD inspection without mutating LRU state.
+    pub fn peek_tool_schemas_for(&self, prompt: &str, forbid_swarm: bool) -> Vec<Value> {
+        self.select_or_peek_tool_schemas(prompt, forbid_swarm, false)
+    }
+
+    fn select_or_peek_tool_schemas(&self, prompt: &str, forbid_swarm: bool, mutate_lru: bool) -> Vec<Value> {
         let lower = prompt.trim().to_lowercase();
         if lower.is_empty() {
             return self
@@ -168,13 +178,18 @@ impl ToolRegistry {
                 to_unlock.push(spec.name);
             }
         }
-        for name in to_unlock {
-            self.touch_unlocked_lru(name);
+        if mutate_lru {
+            for name in &to_unlock {
+                self.touch_unlocked_lru(name);
+            }
         }
-        let unlocked = self.unlocked_tools.lock().unwrap();
+        let unlocked = lock_unpoison(&self.unlocked_tools);
         self.list_specs()
             .into_iter()
-            .filter(|spec| (!forbid_swarm || spec.name != "engage_swarm") && (spec.is_core || unlocked.contains(spec.name)))
+            .filter(|spec| {
+                (!forbid_swarm || spec.name != "engage_swarm")
+                    && (spec.is_core || unlocked.contains(spec.name) || (!mutate_lru && to_unlock.contains(&spec.name)))
+            })
             .map(|s| s.to_openai_tool())
             .collect()
     }
@@ -193,14 +208,14 @@ impl ToolRegistry {
         constitution: Option<RepoConstitution>,
         approval_gate: Option<ApprovalGateCallback>,
     ) {
-        *self.active_posture.lock().unwrap() = posture;
-        *self.constitution.lock().unwrap() = constitution;
-        *self.approval_gate.lock().unwrap() = approval_gate;
-        self.turn_approvals.lock().unwrap().clear();
+        *lock_unpoison(&self.active_posture) = posture;
+        *lock_unpoison(&self.constitution) = constitution;
+        *lock_unpoison(&self.approval_gate) = approval_gate;
+        lock_unpoison(&self.turn_approvals).clear();
     }
 
     pub fn effective_posture_for(&self, authority: ExecutionAuthorityLevel) -> ExecutionPosture {
-        if let Some(p) = *self.active_posture.lock().unwrap() {
+        if let Some(p) = *lock_unpoison(&self.active_posture) {
             return p;
         }
         match authority {
@@ -317,9 +332,21 @@ impl ToolRegistry {
     ) -> Vec<ToolExecutionRecord> {
         let waves = self.partition_waves(calls, cwd);
         let mut results = Vec::with_capacity(calls.len());
+        let mut cancelled = false;
         for wave in waves {
-            if cancel_token.map(|t| t.is_cancelled()).unwrap_or(false) {
-                break;
+            if cancelled || cancel_token.map(|t| t.is_cancelled()).unwrap_or(false) {
+                cancelled = true;
+                let now = Instant::now();
+                for call in &wave {
+                    results.push(Self::failed_record(
+                        call,
+                        call.args.clone(),
+                        "Tool execution cancelled by user before dispatch".to_string(),
+                        None,
+                        now,
+                    ));
+                }
+                continue;
             }
             if wave.len() == 1 {
                 results.push(self.execute_single(&wave[0], cwd, authority, cancel_token).await);
@@ -371,8 +398,8 @@ impl ToolRegistry {
         let posture = self.effective_posture_for(authority);
         if canonical != "execute_tools" {
             let eval = {
-                let law = self.constitution.lock().unwrap().clone();
-                let allowed = self.session_allowlist.lock().unwrap().clone();
+                let law = lock_unpoison(&self.constitution).clone();
+                let allowed = lock_unpoison(&self.session_allowlist).clone();
                 evaluate_tool_posture(posture, canonical, &prepared_val, spec.is_mutating, law.as_ref(), &allowed)
             };
             match eval.verdict {
@@ -380,7 +407,7 @@ impl ToolRegistry {
                     return Self::failed_record(call, prepared_val, eval.reason, Some(true), started);
                 }
                 AuthorizationVerdict::AskUser => {
-                    let gate = self.approval_gate.lock().unwrap().clone();
+                    let gate = lock_unpoison(&self.approval_gate).clone();
                     let choice = if let Some(cb) = gate {
                         cb(canonical, &eval.reason, &eval.session_rule_key)
                     } else {
@@ -388,19 +415,15 @@ impl ToolRegistry {
                     };
                     match choice {
                         UserApprovalChoice::AllowOnce => {
-                            self.turn_approvals
-                                .lock()
-                                .unwrap()
+                            lock_unpoison(&self.turn_approvals)
                                 .push(format!("{canonical}: allow_once ({})", eval.layer));
                         }
                         UserApprovalChoice::AllowSession => {
-                            let mut allow = self.session_allowlist.lock().unwrap();
+                            let mut allow = lock_unpoison(&self.session_allowlist);
                             if !allow.contains(&eval.session_rule_key) {
                                 allow.push(eval.session_rule_key.clone());
                             }
-                            self.turn_approvals
-                                .lock()
-                                .unwrap()
+                            lock_unpoison(&self.turn_approvals)
                                 .push(format!("{canonical}: allow_session ({})", eval.session_rule_key));
                         }
                         UserApprovalChoice::Deny => {
@@ -418,15 +441,40 @@ impl ToolRegistry {
         }
 
         // Read-Before-Write & External Staleness Guard (`FileReadTracker`)
-        if let Some(p_str) = prepared_args.get("path").and_then(Value::as_str) {
+        if let Some(p_str) = prepared_args
+            .get("path")
+            .or_else(|| prepared_args.get("source"))
+            .and_then(Value::as_str)
+        {
             let resolved = resolve_workspace_path(cwd, p_str);
-            if let Err(stale_err) = self
-                .read_tracker
-                .lock()
-                .unwrap()
+            if let Err(stale_err) = lock_unpoison(&self.read_tracker)
                 .verify_before_mutation(canonical, &resolved, posture)
             {
                 return Self::failed_record(call, prepared_val, stale_err, None, started);
+            }
+        }
+        if canonical == "move_file" {
+            if let Some(dst_str) = prepared_args.get("target").and_then(Value::as_str) {
+                let resolved = resolve_workspace_path(cwd, dst_str);
+                if let Err(stale_err) = lock_unpoison(&self.read_tracker)
+                    .verify_before_mutation(canonical, &resolved, posture)
+                {
+                    return Self::failed_record(call, prepared_val, stale_err, None, started);
+                }
+            }
+        }
+        if canonical == "apply_unified_diff" {
+            if let Some(diff_text) = prepared_args.get("diff").or_else(|| prepared_args.get("patch")).and_then(Value::as_str) {
+                for op in crate::plumbing::fuzzy_patch::DeterministicPatchEngine::parse(diff_text) {
+                    if op.op_type != "add" {
+                        let resolved = resolve_workspace_path(cwd, &op.file_path);
+                        if let Err(stale_err) = lock_unpoison(&self.read_tracker)
+                            .verify_before_mutation(canonical, &resolved, posture)
+                        {
+                            return Self::failed_record(call, prepared_val, stale_err, None, started);
+                        }
+                    }
+                }
             }
         }
 
@@ -447,9 +495,7 @@ impl ToolRegistry {
                             let full = prepared_args.get("startLine").is_none()
                                 && prepared_args.get("endLine").is_none()
                                 && prepared_args.get("contentOffset").is_none();
-                            self.read_tracker
-                                .lock()
-                                .unwrap()
+                            lock_unpoison(&self.read_tracker)
                                 .record_disk_file(&resolve_workspace_path(cwd, p_str), full);
                         }
                     }
@@ -483,17 +529,32 @@ impl ToolRegistry {
                         c.invalidate_paths(&target_resources);
                     }
                     if !denied {
-                        let mut rt = self.read_tracker.lock().unwrap();
+                        let mut rt = lock_unpoison(&self.read_tracker);
                         if canonical == "delete_file" {
                             for p in &target_resources {
                                 rt.remove_path(p);
                             }
+                        } else if canonical == "move_file" {
+                            if let Some(src_str) = prepared_args.get("source").and_then(Value::as_str) {
+                                rt.remove_path(&resolve_workspace_path(cwd, src_str));
+                            }
+                            if let Some(dst_str) = prepared_args.get("target").and_then(Value::as_str) {
+                                rt.record_disk_file(&resolve_workspace_path(cwd, dst_str), true);
+                            }
                         } else if matches!(
                             canonical,
-                            "write_file" | "replace_file_content" | "multi_replace_file_content" | "edit_file_anchored"
+                            "write_file"
+                                | "replace_file_content"
+                                | "multi_replace_file_content"
+                                | "edit_file_anchored"
+                                | "apply_unified_diff"
                         ) {
                             for p in &target_resources {
-                                rt.record_disk_file(p, true);
+                                if p.exists() {
+                                    rt.record_disk_file(p, true);
+                                } else {
+                                    rt.remove_path(p);
+                                }
                             }
                         }
                     }
@@ -503,7 +564,7 @@ impl ToolRegistry {
                             && prepared_args.get("endLine").is_none()
                             && prepared_args.get("contentOffset").is_none();
                         for p in &target_resources {
-                            self.read_tracker.lock().unwrap().record_disk_file(p, full);
+                            lock_unpoison(&self.read_tracker).record_disk_file(p, full);
                         }
                     }
                     if let Some(key) = cache_key {

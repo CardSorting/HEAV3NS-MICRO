@@ -228,11 +228,20 @@ impl SessionCompactor {
             .max(64);
         let (mut kept_rev, mut used) = (Vec::new(), 0usize);
         for msg in non_system.iter().rev() {
-            let msg_tokens = 4 + estimate_text_tokens(&msg.content);
+            let tc_tokens: usize = msg
+                .tool_calls
+                .as_ref()
+                .map(|tcs| {
+                    tcs.iter()
+                        .map(|tc| 8 + estimate_text_tokens(&tc.function.name) + estimate_text_tokens(&tc.function.arguments))
+                        .sum()
+                })
+                .unwrap_or(0);
+            let msg_tokens = 4 + estimate_text_tokens(&msg.content) + tc_tokens;
             if used + msg_tokens <= remaining_budget {
                 kept_rev.push(msg.clone());
                 used += msg_tokens;
-            } else if kept_rev.is_empty() {
+            } else if kept_rev.is_empty() && msg.role != Role::Tool {
                 let mut clamped = msg.clone();
                 clamped.content = truncate_text_to_token_budget(&msg.content, remaining_budget.saturating_sub(4));
                 kept_rev.push(clamped);
@@ -242,6 +251,9 @@ impl SessionCompactor {
             }
         }
         kept_rev.reverse();
+        while kept_rev.first().is_some_and(|m| m.role == Role::Tool) {
+            kept_rev.remove(0);
+        }
         let mut out = system;
         out.extend(kept_rev);
         out
@@ -328,6 +340,9 @@ impl SessionStore {
     pub fn truncate_active_messages(&mut self, count: usize) {
         let keep = self.messages.len().saturating_sub(count);
         self.messages.truncate(keep);
+        let t_keep = self.transcript.len().saturating_sub(count);
+        self.transcript.truncate(t_keep);
+        self.rebuild_transcript_index();
         self.rebuild_arena();
     }
 
@@ -418,7 +433,7 @@ impl SessionStore {
         self.transcript = snapshot.transcript.clone();
         self.rebuild_transcript_index();
         self.context_generation += 1;
-        let _ = self.arena.set_offset(snapshot.slab_snapshot.offset_words);
+        self.rebuild_arena();
         vfs.clear();
         for file in &snapshot.staged_files {
             if file.is_deleted {

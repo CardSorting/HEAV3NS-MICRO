@@ -65,6 +65,10 @@ impl WorkspaceSnapshotCas {
         }
     }
 
+    pub fn cas_root(&self) -> &Path {
+        &self.cas_root
+    }
+
     pub fn snapshots(&self) -> &[CasSnapshotManifest] {
         &self.snapshots
     }
@@ -137,7 +141,12 @@ impl WorkspaceSnapshotCas {
         let hash = Self::sha256_hex(bytes);
         let dest = self.blob_path(&hash);
         if !dest.exists() {
-            fs::write(&dest, bytes).map_err(|e| format!("CAS blob write failed: {e}"))?;
+            let tmp = dest.with_extension(format!("tmp.{}.{}", std::process::id(), now_ms()));
+            fs::write(&tmp, bytes).map_err(|e| format!("CAS blob write failed: {e}"))?;
+            if let Err(e) = fs::rename(&tmp, &dest) {
+                let _ = fs::remove_file(&tmp);
+                return Err(format!("CAS blob commit failed: {e}"));
+            }
         }
         Ok(hash)
     }
@@ -215,17 +224,24 @@ impl WorkspaceSnapshotCas {
     }
 
     fn atomic_write_workspace_file(&self, rel_path: &str, bytes: &[u8]) -> Result<(), String> {
-        let target = self.workspace_root.join(rel_path);
+        let p = Path::new(rel_path);
+        if p.is_absolute() || p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            return Err(format!("Refusing unsafe CAS relative path '{rel_path}'"));
+        }
+        let target = self.workspace_root.join(p);
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).map_err(|e| format!("mkdir failed for '{}': {e}", parent.display()))?;
         }
         let existing_perms = fs::metadata(&target).ok().map(|m| m.permissions());
-        let tmp = target.with_extension(format!("heav3ns-cas-tmp-{}", now_ms()));
+        let tmp = target.with_extension(format!("heav3ns-cas-tmp-{}-{}", std::process::id(), now_ms()));
         fs::write(&tmp, bytes).map_err(|e| format!("temp write failed for '{rel_path}': {e}"))?;
         if let Some(perms) = existing_perms {
             let _ = fs::set_permissions(&tmp, perms);
         }
-        fs::rename(&tmp, &target).map_err(|e| format!("atomic rename failed for '{rel_path}': {e}"))
+        fs::rename(&tmp, &target).map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            format!("atomic rename failed for '{rel_path}': {e}")
+        })
     }
 
     fn prune_empty_parents(&self, rel_path: &str) {
@@ -246,6 +262,27 @@ impl WorkspaceSnapshotCas {
 
     fn find_manifest(&self, id: &str) -> Option<&CasSnapshotManifest> {
         self.snapshots.iter().find(|s| s.id == id)
+    }
+
+    fn gc_unreferenced_blobs(&self) {
+        let mut live_hashes = std::collections::HashSet::new();
+        for snap in &self.snapshots {
+            for entry in snap.files.values() {
+                live_hashes.insert(entry.sha256.as_str());
+            }
+        }
+        let blobs_dir = self.cas_root.join("blobs");
+        let Ok(rd) = fs::read_dir(&blobs_dir) else { return };
+        for entry in rd.flatten() {
+            let name = entry.file_name();
+            let Some(name_str) = name.to_str() else { continue };
+            if name_str.contains(".tmp.") {
+                continue;
+            }
+            if !live_hashes.contains(name_str) {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
     }
 }
 
@@ -268,8 +305,18 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
             let _ = fs::write(&manifest_path, serialized);
         }
         self.snapshots.push(manifest);
+        let mut evicted_any = false;
         while self.snapshots.len() > MAX_STORED_SNAPSHOTS {
-            self.snapshots.remove(1); // preserve index 0 session baseline!
+            let evicted = self.snapshots.remove(1); // preserve index 0 session baseline!
+            let evicted_path = self
+                .cas_root
+                .join("manifests")
+                .join(format!("{}_{}.json", evicted.timestamp_ms, evicted.id));
+            let _ = fs::remove_file(evicted_path);
+            evicted_any = true;
+        }
+        if evicted_any {
+            self.gc_unreferenced_blobs();
         }
         Ok(id)
     }
@@ -319,7 +366,7 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
                         kind: "added".to_string(),
                         lines_added: added,
                         lines_removed: removed,
-                        after_hash: t_sha[..8.min(t_sha.len())].to_string(),
+                        after_hash: crate::plumbing::text_tokens::safe_utf8_prefix(t_sha, 8).to_string(),
                     });
                 }
                 (Some(b), None) => {
@@ -346,7 +393,7 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
                         kind: "modified".to_string(),
                         lines_added: added,
                         lines_removed: removed,
-                        after_hash: t_sha[..8.min(t_sha.len())].to_string(),
+                        after_hash: crate::plumbing::text_tokens::safe_utf8_prefix(t_sha, 8).to_string(),
                     });
                 }
                 (None, None) => {}
@@ -438,11 +485,29 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
 
         let _ = self.capture_snapshot(&format!("pre-restore:{snapshot_id}"), target.turn_number);
         let live = self.scan_working_tree(false)?;
+        // Pre-flight check: verify all required blobs exist before mutating the workspace
+        let mut pending_writes: Vec<(&str, Vec<u8>)> = Vec::new();
+        for (rel, t_entry) in &target.files {
+            let needs_write = live
+                .get(rel)
+                .map(|(l_entry, _)| l_entry.sha256 != t_entry.sha256)
+                .unwrap_or(true);
+            if needs_write {
+                let bytes = self.read_blob(&t_entry.sha256).ok_or_else(|| {
+                    format!("CAS blob '{}' missing for '{rel}'; aborting restore before workspace mutation", t_entry.sha256)
+                })?;
+                pending_writes.push((rel.as_str(), bytes));
+            }
+        }
         let mut actions = Vec::new();
 
         for (rel, _) in &live {
             if !target.files.contains_key(rel) {
-                let disk_path = self.workspace_root.join(rel);
+                let p = Path::new(rel);
+                if p.is_absolute() || p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+                    continue;
+                }
+                let disk_path = self.workspace_root.join(p);
                 if disk_path.exists() {
                     let _ = fs::remove_file(&disk_path);
                     self.prune_empty_parents(rel);
@@ -451,17 +516,9 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
             }
         }
 
-        for (rel, t_entry) in &target.files {
-            let needs_write = live
-                .get(rel)
-                .map(|(l_entry, _)| l_entry.sha256 != t_entry.sha256)
-                .unwrap_or(true);
-            if needs_write {
-                if let Some(bytes) = self.read_blob(&t_entry.sha256) {
-                    self.atomic_write_workspace_file(rel, &bytes)?;
-                    actions.push(format!("[Restored] {rel}"));
-                }
-            }
+        for (rel, bytes) in pending_writes {
+            self.atomic_write_workspace_file(rel, &bytes)?;
+            actions.push(format!("[Restored] {rel}"));
         }
 
         Ok(actions)

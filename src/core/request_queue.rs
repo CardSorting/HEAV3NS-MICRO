@@ -36,7 +36,10 @@ pub struct QueuePermit {
 
 impl Drop for QueuePermit {
     fn drop(&mut self) {
-        let mut st = self.queue.state.lock().unwrap();
+        let mut st = match self.queue.state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
         st.pending_count = st.pending_count.saturating_sub(1);
         st.pending_bytes = st.pending_bytes.saturating_sub(self.bytes);
         if st.pending_count == 0 {

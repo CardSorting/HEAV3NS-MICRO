@@ -1,6 +1,6 @@
 // [LAYER: INFRASTRUCTURE]
 use crate::domain::interfaces::IProjectRunner;
-use crate::plumbing::hash_and_math::{fnv1a_32, now_ms};
+use crate::plumbing::hash_and_math::{fnv1a_32, lock_unpoison, now_ms};
 use crate::plumbing::secret_redactor::SafetyPolicy;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -56,7 +56,7 @@ impl ProjectRunner {
 
     fn build_targets(&self, workspace_root: &Path) -> Vec<Value> {
         let mut targets = Vec::new();
-        if let Some(custom) = &self.inner.lock().unwrap().custom_target {
+        if let Some(custom) = &lock_unpoison(&self.inner).custom_target {
             targets.push(make_target(
                 "custom",
                 "Custom Run Command",
@@ -130,7 +130,7 @@ impl IProjectRunner for ProjectRunner {
         let resolved_cwd = resolve_safe_cwd(workspace_root, rel_cwd)?;
 
         {
-            let st = self.inner.lock().unwrap();
+            let st = lock_unpoison(&self.inner);
             if matches!(st.state.as_str(), "running" | "stopping") {
                 return Err("Project is already running. Stop it before starting another run.".to_string());
             }
@@ -159,7 +159,7 @@ impl IProjectRunner for ProjectRunner {
         let stderr = child.stderr.take();
 
         let snap = {
-            let mut st = self.inner.lock().unwrap();
+            let mut st = lock_unpoison(&self.inner);
             st.state = "running".to_string();
             st.output.clear();
             st.revision = st.revision.saturating_add(1);
@@ -191,7 +191,7 @@ impl IProjectRunner for ProjectRunner {
             if let Some(h) = err_handle {
                 let _ = h.await;
             }
-            let mut st = inner_wait.lock().unwrap();
+            let mut st = lock_unpoison(&inner_wait);
             let was_stopping = st.state == "stopping";
             st.child_pid = None;
             st.state = if was_stopping {
@@ -209,7 +209,7 @@ impl IProjectRunner for ProjectRunner {
 
     fn stop(&self) -> Value {
         let pid = {
-            let mut st = self.inner.lock().unwrap();
+            let mut st = lock_unpoison(&self.inner);
             if st.state == "running" {
                 st.state = "stopping".to_string();
                 st.revision = st.revision.saturating_add(1);
@@ -221,7 +221,7 @@ impl IProjectRunner for ProjectRunner {
             let inner = Arc::clone(&self.inner);
             tokio::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                let still_alive = inner.lock().unwrap().child_pid == Some(pid);
+                let still_alive = lock_unpoison(&inner).child_pid == Some(pid);
                 if still_alive {
                     signal_process_group(pid, "-KILL");
                 }
@@ -231,7 +231,7 @@ impl IProjectRunner for ProjectRunner {
     }
 
     fn status(&self) -> Value {
-        let st = self.inner.lock().unwrap();
+        let st = lock_unpoison(&self.inner);
         Self::status_json(&st)
     }
 
@@ -242,7 +242,7 @@ impl IProjectRunner for ProjectRunner {
         }
         let clean_cwd = if cwd.trim().is_empty() { "." } else { cwd.trim() };
         let _ = resolve_safe_cwd(workspace_root, clean_cwd)?;
-        let mut st = self.inner.lock().unwrap();
+        let mut st = lock_unpoison(&self.inner);
         st.custom_target = Some(CustomRunTarget {
             command: trimmed.to_string(),
             cwd: clean_cwd.to_string(),
@@ -293,7 +293,7 @@ fn resolve_safe_cwd(workspace_root: &Path, rel_cwd: &str) -> Result<PathBuf, Str
 async fn drain_stream<R: tokio::io::AsyncRead + Unpin>(reader: R, inner: Arc<Mutex<ProjectRunState>>) {
     let mut lines = BufReader::new(reader).lines();
     while let Ok(Some(line)) = lines.next_line().await {
-        let mut st = inner.lock().unwrap();
+        let mut st = lock_unpoison(&inner);
         st.output.push_str(&line);
         st.output.push('\n');
         if st.output.len() > MAX_RUN_OUTPUT_BYTES {

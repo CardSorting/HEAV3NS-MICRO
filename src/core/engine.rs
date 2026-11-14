@@ -21,7 +21,7 @@ use crate::plumbing::hash_and_math::now_ms;
 use crate::plumbing::secret_redactor::DeterministicSecretRedactor;
 use crate::plumbing::text_tokens::{canonical_tool_name, estimate_text_tokens};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -683,7 +683,6 @@ impl AgentEngine {
             {
                 let mut sess = self.session.lock().unwrap();
                 let mut gov = self.tools.governor.lock().unwrap();
-                let mut seen_skill_ids = BTreeSet::new();
                 for (tc, mut rec) in resp.tool_calls.iter().zip(records.into_iter()) {
                     let is_skill_call = rec.name == "use_skill" || canonical_tool_name(&rec.name) == "use_skill";
                     let (out_text, spill_id) = if is_skill_call {
@@ -691,7 +690,6 @@ impl AgentEngine {
                             Value::String(s) => s.clone(),
                             other => serde_json::to_string_pretty(other).unwrap_or_else(|_| other.to_string()),
                         };
-                        seen_skill_ids.insert(tc.id.clone());
                         (DeterministicSecretRedactor::redact(&raw), None)
                     } else {
                         let governed = gov.govern(&rec.output);

@@ -73,11 +73,12 @@ impl RepoConstitution {
         if let Some(ref err) = self.invalid_error {
             return Some((AuthorizationVerdict::AskUser, err.clone()));
         }
-        let norm = rel_path.trim_start_matches("./").replace('\\', "/");
+        let norm = normalize_rel_path(rel_path);
+        let mut strictest: Option<(AuthorizationVerdict, String)> = None;
         for rule in &self.rules {
             let matched = rule.paths.iter().any(|pat| {
-                let p = pat.trim_start_matches("./").trim_end_matches('*');
-                norm == pat.as_str() || (!p.is_empty() && norm.starts_with(p))
+                let p = normalize_rel_path(pat.trim_end_matches('*'));
+                norm == normalize_rel_path(pat) || (!p.is_empty() && norm.starts_with(&p))
             });
             if matched {
                 let verdict = if rule.action == "block" || rule.action == "deny" {
@@ -85,10 +86,16 @@ impl RepoConstitution {
                 } else {
                     AuthorizationVerdict::AskUser
                 };
-                return Some((verdict, format!("RepoLaw [{}]: {}", rule.id, rule.description)));
+                let msg = format!("RepoLaw [{}]: {}", rule.id, rule.description);
+                if verdict == AuthorizationVerdict::Deny {
+                    return Some((verdict, msg));
+                }
+                if strictest.is_none() {
+                    strictest = Some((verdict, msg));
+                }
             }
         }
-        None
+        strictest
     }
 }
 
@@ -112,15 +119,15 @@ pub fn evaluate_tool_posture(
     session_allowed_keys: &[String],
 ) -> PostureEvaluation {
     let canonical = canonical_tool_name(tool_name);
-    let target_path = extract_primary_path(args);
+    let target_paths = extract_all_paths(&canonical, args);
 
     // Layer 1: Dual-scope credential protection applies in EVERY posture (even FullAccess for Process scope)
-    if let Some(ref p) = target_path {
-        let scope = if posture == ExecutionPosture::FullAccess {
-            CredentialDenyScope::Process
-        } else {
-            CredentialDenyScope::ModelContext
-        };
+    let scope = if posture == ExecutionPosture::FullAccess {
+        CredentialDenyScope::Process
+    } else {
+        CredentialDenyScope::ModelContext
+    };
+    for p in &target_paths {
         if let Some(label) = DeterministicSecretRedactor::classify_sensitive_path(p, scope) {
             return PostureEvaluation {
                 verdict: AuthorizationVerdict::Deny,
@@ -226,26 +233,28 @@ pub fn evaluate_tool_posture(
         };
     }
 
-    // Layer 4: RepoConstitution (`RepoLaw`) invariants
-    if let (Some(law), Some(ref p)) = (constitution, &target_path) {
-        if let Some((verdict, reason)) = law.evaluate_path(p) {
-            let rule_key = format!("repolaw:{canonical}:{p}");
-            if verdict == AuthorizationVerdict::Deny {
-                return PostureEvaluation { verdict, layer: "repo_constitution".to_string(), reason, session_rule_key: rule_key };
-            }
-            if !session_allowed_keys.iter().any(|k| k == &rule_key) {
-                return PostureEvaluation { verdict, layer: "repo_constitution".to_string(), reason, session_rule_key: rule_key };
+    // Layer 4: RepoConstitution (`RepoLaw`) invariants across all path arguments
+    if let Some(law) = constitution {
+        for p in &target_paths {
+            if let Some((verdict, reason)) = law.evaluate_path(p) {
+                let rule_key = format!("repolaw:{canonical}:{}", normalize_rel_path(p));
+                if verdict == AuthorizationVerdict::Deny {
+                    return PostureEvaluation { verdict, layer: "repo_constitution".to_string(), reason, session_rule_key: rule_key };
+                }
+                if !session_allowed_keys.iter().any(|k| k == &rule_key) {
+                    return PostureEvaluation { verdict, layer: "repo_constitution".to_string(), reason, session_rule_key: rule_key };
+                }
             }
         }
     }
 
-    // Protected `.git/hooks` & `.git/config` write guard outside FullAccess
-    if let Some(ref p) = target_path {
+    // Protected `.git/hooks`, `.git/config`, and `../` write guard outside FullAccess
+    for p in &target_paths {
         let norm = p.replace('\\', "/").to_ascii_lowercase();
         if posture != ExecutionPosture::FullAccess
-            && (norm.contains(".git/hooks") || norm.ends_with(".git/config") || norm.contains("../"))
+            && (norm.contains(".git/hooks") || norm.ends_with(".git/config") || norm.contains("../") || norm == "..")
         {
-            let rule_key = format!("protected_write:{canonical}");
+            let rule_key = format!("protected_write:{canonical}:{norm}");
             if !session_allowed_keys.iter().any(|k| k == &rule_key) {
                 return PostureEvaluation {
                     verdict: AuthorizationVerdict::AskUser,
@@ -287,13 +296,59 @@ pub fn evaluate_tool_posture(
     }
 }
 
-fn extract_primary_path(args: &Value) -> Option<String> {
+fn normalize_rel_path(raw: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    let replaced = raw.replace('\\', "/");
+    for seg in replaced.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                if parts.last().copied() == Some("..") || parts.is_empty() {
+                    parts.push("..");
+                } else {
+                    parts.pop();
+                }
+            }
+            other => parts.push(other),
+        }
+    }
+    parts.join("/")
+}
+
+fn extract_all_paths(canonical: &str, args: &Value) -> Vec<String> {
+    let mut paths = Vec::new();
     for key in ["path", "filePath", "file_path", "target", "source", "destination"] {
         if let Some(s) = args.get(key).and_then(Value::as_str) {
-            if !s.trim().is_empty() {
-                return Some(s.trim().to_string());
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                paths.push(trimmed.to_string());
             }
         }
     }
-    None
+    if canonical == "apply_unified_diff" {
+        if let Some(diff) = args.get("diff").or_else(|| args.get("patch")).and_then(Value::as_str) {
+            for line in diff.lines() {
+                let candidate = if let Some(rest) = line.strip_prefix("+++ ") {
+                    Some(rest.strip_prefix("b/").unwrap_or(rest))
+                } else if let Some(rest) = line.strip_prefix("--- ") {
+                    Some(rest.strip_prefix("a/").unwrap_or(rest))
+                } else if let Some(rest) = line
+                    .strip_prefix("*** Update File: ")
+                    .or_else(|| line.strip_prefix("*** Add File: "))
+                    .or_else(|| line.strip_prefix("*** Delete File: "))
+                {
+                    Some(rest)
+                } else {
+                    None
+                };
+                if let Some(c) = candidate {
+                    let c = c.trim();
+                    if !c.is_empty() && c != "/dev/null" && !paths.iter().any(|p| p == c) {
+                        paths.push(c.to_string());
+                    }
+                }
+            }
+        }
+    }
+    paths
 }

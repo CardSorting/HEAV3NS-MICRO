@@ -295,11 +295,12 @@ impl AgentEngine {
     }
 
     pub fn undo_last_turn(&self, force: bool) -> Result<Value, String> {
-        let last = self.turn_receipts.lock().unwrap().pop();
+        let last = self.turn_receipts.lock().unwrap().last().cloned();
         if let Some(receipt) = last {
             if let (Some(before), Some(after)) = (&receipt.snapshot_before, &receipt.snapshot_after) {
                 if !receipt.file_changes.is_empty() {
                     let actions = self.cas.lock().unwrap().undo_turn_changes(before, after, force)?;
+                    self.turn_receipts.lock().unwrap().pop();
                     self.tools().cache.lock().unwrap().clear();
                     self.tools().read_tracker.lock().unwrap().reset_stamps();
                     return Ok(json!({
@@ -309,6 +310,7 @@ impl AgentEngine {
                     }));
                 }
             }
+            self.turn_receipts.lock().unwrap().pop();
         }
         let fallback = self.tools().journal.lock().unwrap().rollback_last();
         self.tools().cache.lock().unwrap().clear();
@@ -533,6 +535,9 @@ impl AgentEngine {
             if can_failover {
                 let mut chain = ProviderChain::new(&cfg.provider, &cfg.fallback_providers);
                 while let Some(fb_entry) = chain.advance() {
+                    if cancel_token.as_ref().is_some_and(|t| t.is_cancelled()) {
+                        return Err((ProviderError::Cancelled, None));
+                    }
                     let (fb_prov_id, fb_model_override) = fb_entry
                         .split_once(':')
                         .map(|(p, m)| (p.trim(), Some(m.trim()).filter(|s| !s.is_empty())))
@@ -568,11 +573,17 @@ impl AgentEngine {
                         temperature: cfg.temperature,
                         reasoning_effort: cfg.reasoning_effort.clone(),
                     };
-                    if let Ok(resp) = ILlmProvider::complete(&fb_http, fb_req, cancel_token.clone()).await {
-                        *active_model = route.model_name;
-                        *is_fallback_model = true;
-                        *turn_route = Some((Arc::new(fb_http), route.provider_id, route.api_endpoint));
-                        return Ok(resp);
+                    match ILlmProvider::complete(&fb_http, fb_req, cancel_token.clone()).await {
+                        Ok(resp) => {
+                            *active_model = route.model_name;
+                            *is_fallback_model = true;
+                            *turn_route = Some((Arc::new(fb_http), route.provider_id, route.api_endpoint));
+                            return Ok(resp);
+                        }
+                        Err(ProviderError::Cancelled) => {
+                            return Err((ProviderError::Cancelled, None));
+                        }
+                        Err(_) => {}
                     }
                 }
             }

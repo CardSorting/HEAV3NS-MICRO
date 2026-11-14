@@ -29,11 +29,16 @@ pub const OPENAI_OAUTH_SCOPES: &str = "openid profile email offline_access";
 pub const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const TOKEN_REFRESH_SKEW_MS: u64 = 60_000;
 
+fn is_safe_oauth_url(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    lower.starts_with("https://") || lower.starts_with("http://127.0.0.1") || lower.starts_with("http://localhost") || lower.starts_with("http://[::1]")
+}
+
 pub(crate) fn resolve_token_url() -> String {
     std::env::var("HEAV3NS_OPENAI_TOKEN_URL")
         .ok()
         .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+        .filter(|s| !s.is_empty() && is_safe_oauth_url(s))
         .unwrap_or_else(|| OPENAI_OAUTH_TOKEN_URL.to_string())
 }
 
@@ -41,7 +46,7 @@ pub(crate) fn resolve_codex_base_url() -> String {
     std::env::var("HEAV3NS_CODEX_BASE_URL")
         .ok()
         .map(|s| s.trim().trim_end_matches('/').to_string())
-        .filter(|s| !s.is_empty())
+        .filter(|s| !s.is_empty() && is_safe_oauth_url(s))
         .unwrap_or_else(|| CHATGPT_CODEX_BASE_URL.to_string())
 }
 
@@ -73,17 +78,17 @@ impl CodexAccountStore {
         }
         let serialized = serde_json::to_string_pretty(data).map_err(|e| format!("Failed to serialize accounts: {e}"))?;
         let tmp = self.path.with_extension(format!("json.tmp.{}", std::process::id()));
-        fs::write(&tmp, serialized.as_bytes()).map_err(|e| format!("Failed to write accounts file: {e}"))?;
+        let _ = fs::remove_file(&tmp);
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
+            use std::{io::Write, os::unix::fs::OpenOptionsExt};
+            fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)
+                .and_then(|mut f| f.write_all(serialized.as_bytes()))
+                .map_err(|e| format!("Failed to write accounts file: {e}"))?;
         }
-        fs::rename(&tmp, &self.path).map_err(|e| {
-            let _ = fs::remove_file(&tmp);
-            format!("Failed to persist accounts file: {e}")
-        })?;
-        Ok(())
+        #[cfg(not(unix))]
+        fs::write(&tmp, serialized.as_bytes()).map_err(|e| format!("Failed to write accounts file: {e}"))?;
+        fs::rename(&tmp, &self.path).map_err(|e| { let _ = fs::remove_file(&tmp); format!("Failed to persist accounts file: {e}") })
     }
 
     pub fn rpc_snapshot(&self) -> Value {
@@ -397,15 +402,10 @@ fn upsert_account(data: &mut ChatGptAccountStoreData, mut incoming: ChatGptAccou
 
 fn random_bytes_32() -> [u8; 32] {
     let mut buf = [0u8; 32];
-    if let Ok(mut f) = fs::File::open("/dev/urandom") {
-        if f.read_exact(&mut buf).is_ok() {
-            return buf;
-        }
-    }
-    let seed = now_ms();
-    for (i, b) in buf.iter_mut().enumerate() {
-        *b = ((seed >> ((i % 8) * 8)) ^ (i as u64).wrapping_mul(0x9E)) as u8;
-    }
+    let mut f = fs::File::open("/dev/urandom")
+        .expect("CSPRNG /dev/urandom unavailable for OAuth PKCE generation");
+    f.read_exact(&mut buf)
+        .expect("Failed to read 32 random bytes from /dev/urandom");
     buf
 }
 
@@ -489,6 +489,12 @@ async fn write_http_html(
     stream.flush().await
 }
 
+fn oauth_http_client() -> Result<&'static reqwest::Client, String> {
+    static CLIENT: std::sync::OnceLock<Result<reqwest::Client, String>> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| reqwest::Client::builder().timeout(Duration::from_secs(20)).build().map_err(|e| e.to_string()))
+        .as_ref().map_err(Clone::clone)
+}
+
 async fn exchange_code_for_tokens(code: &str, verifier: &str) -> Result<ChatGptAccountCredentials, String> {
     let body = format!(
         "grant_type=authorization_code&client_id={}&code={}&redirect_uri={}&code_verifier={}",
@@ -497,8 +503,7 @@ async fn exchange_code_for_tokens(code: &str, verifier: &str) -> Result<ChatGptA
         url_encode_component(OPENAI_OAUTH_REDIRECT_URI),
         url_encode_component(verifier)
     );
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(20)).build().map_err(|e| e.to_string())?;
-    let resp = client
+    let resp = oauth_http_client()?
         .post(&resolve_token_url())
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(body)
@@ -523,8 +528,7 @@ async fn refresh_oauth_token(
         url_encode_component(OPENAI_CODEX_CLIENT_ID),
         url_encode_component(refresh_token)
     );
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(20)).build().map_err(|e| e.to_string())?;
-    let resp = client
+    let resp = oauth_http_client()?
         .post(&resolve_token_url())
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(body)
@@ -628,9 +632,9 @@ pub(crate) fn build_codex_oauth_post(
 }
 
 async fn probe_codex_models(access_token: &str, account_id: Option<&str>) -> (bool, usize) {
-    let Ok(client) = reqwest::Client::builder().timeout(Duration::from_secs(5)).build() else { return (false, 0); };
+    let Ok(client) = oauth_http_client() else { return (false, 0); };
     let url = format!("{}/models?client_version={}", resolve_codex_base_url(), env!("CARGO_PKG_VERSION"));
-    let mut req = client.get(&url).header("Accept", "application/json").header("originator", "codex_cli").bearer_auth(access_token);
+    let mut req = client.get(&url).timeout(Duration::from_secs(5)).header("Accept", "application/json").header("originator", "codex_cli").bearer_auth(access_token);
     if let Some(id) = account_id.filter(|s| !s.is_empty()) {
         req = req.header("ChatGPT-Account-ID", id);
     }

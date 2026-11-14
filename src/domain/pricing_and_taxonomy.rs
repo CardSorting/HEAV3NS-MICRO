@@ -29,10 +29,18 @@ pub struct ProviderTokenUsage {
 
 impl ProviderTokenUsage {
     pub fn accumulate(&mut self, other: &Self) {
+        let was_empty = self.prompt_tokens == 0
+            && self.completion_tokens == 0
+            && self.cached_prompt_tokens == 0
+            && !self.is_exact;
         self.prompt_tokens = self.prompt_tokens.saturating_add(other.prompt_tokens);
         self.completion_tokens = self.completion_tokens.saturating_add(other.completion_tokens);
         self.cached_prompt_tokens = self.cached_prompt_tokens.saturating_add(other.cached_prompt_tokens);
-        self.is_exact = self.is_exact && other.is_exact;
+        self.is_exact = if was_empty {
+            other.is_exact
+        } else {
+            self.is_exact && other.is_exact
+        };
     }
 }
 
@@ -300,7 +308,12 @@ pub fn resolve_compatible_fallback_model_with_catalog(
         let cross_provider_mismatch = (p.contains("anthropic") && !fb_low.contains("claude"))
             || ((p.contains("gemini") || p == "google") && !fb_low.contains("gemini"))
             || (p == "deepseek" && !fb_low.contains("deepseek"))
-            || ((p == "xai" || p == "x-ai") && !fb_low.contains("grok"));
+            || ((p == "xai" || p == "x-ai") && !fb_low.contains("grok"))
+            || (!p.contains("openai")
+                && !p.contains("codex")
+                && !p.contains("azure")
+                && !p.contains("openrouter")
+                && (fb_low.starts_with("gpt-") || fb_low.starts_with("o1") || fb_low.starts_with("o3") || fb_low.starts_with("o4")));
         if !cross_provider_mismatch && fb != primary_model {
             return Some(fb.to_string());
         }

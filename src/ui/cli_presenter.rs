@@ -43,8 +43,16 @@ impl Heav3nsUserConfig {
 
     pub fn load() -> Option<Self> {
         let path = Self::config_path();
-        let content = fs::read_to_string(path).ok()?;
-        serde_json::from_str(&content).ok()
+        let content = fs::read_to_string(&path).ok()?;
+        match serde_json::from_str(&content) {
+            Ok(cfg) => Some(cfg),
+            Err(_) => {
+                // Preserve corrupted config so subsequent saves do not silently destroy user keys.
+                let backup = path.with_extension(format!("json.corrupt.{}", std::process::id()));
+                let _ = fs::copy(&path, &backup);
+                None
+            }
+        }
     }
 
     pub fn save(&self) -> io::Result<()> {
@@ -58,11 +66,24 @@ impl Heav3nsUserConfig {
         let path = Self::config_path();
         let json_str = serde_json::to_string_pretty(self)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        fs::write(&path, json_str)?;
+        let tmp = path.with_extension(format!("json.tmp.{}", std::process::id()));
+        let _ = fs::remove_file(&tmp);
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut f = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&tmp)?;
+            f.write_all(json_str.as_bytes())?;
+        }
+        #[cfg(not(unix))]
+        fs::write(&tmp, &json_str)?;
+        if let Err(e) = fs::rename(&tmp, &path) {
+            let _ = fs::remove_file(&tmp);
+            return Err(e);
         }
         Ok(())
     }

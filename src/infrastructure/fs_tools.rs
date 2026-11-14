@@ -1,5 +1,5 @@
 // [LAYER: INFRASTRUCTURE]
-use crate::infrastructure::search_tools::{atomic_write_file, batch_replace_regex_files, build_directory_tree, collect_source_files, execute_grep_search, extract_workspace_symbols, resolve_workspace_path, suggest_nearby_files, verify_model_path_access, walk_find_files};
+use crate::infrastructure::search_tools::{atomic_write_file, batch_replace_regex_files, build_directory_tree, collect_source_files, execute_grep_search, extract_workspace_symbols, read_text_file_bounded, resolve_and_verify_workspace_path, suggest_nearby_files, verify_model_path_access, walk_find_files};
 use crate::infrastructure::transaction_journal::TransactionJournal;
 use crate::infrastructure::vfs_store::SkillsIngestor;
 use crate::plumbing::fuzzy_patch::{heal_fuzzy_patch, maybe_correct_escape_drift, DeterministicPatchEngine};
@@ -12,6 +12,8 @@ use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
 
+const MAX_FS_TEXT_READ_BYTES: usize = 8 * 1024 * 1024;
+
 /// Dispatches native filesystem, diff, symbol, grep, and skill tools against the workspace
 /// with dual-scope credential checks, UTF-8 safe offsets, atomic file writes, and complete journaling.
 pub fn dispatch_fs_tool(
@@ -23,18 +25,13 @@ pub fn dispatch_fs_tool(
     match canonical {
         "view_file" => {
             let raw_path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path'")?;
-            let resolved = resolve_workspace_path(cwd, raw_path);
-            verify_model_path_access(&resolved)?;
-            let content = fs::read_to_string(&resolved).map_err(|e| {
+            let resolved = resolve_and_verify_workspace_path(cwd, raw_path)?;
+            let content = read_text_file_bounded(&resolved, MAX_FS_TEXT_READ_BYTES).map_err(|e| {
                 let nearby = suggest_nearby_files(&resolved);
                 if nearby.is_empty() {
-                    format!("Failed to read '{}': {e}", resolved.display())
+                    e
                 } else {
-                    format!(
-                        "Failed to read '{}': {e}. Nearby files: {:?}",
-                        resolved.display(),
-                        nearby
-                    )
+                    format!("{e}. Nearby files: {nearby:?}")
                 }
             })?;
             let offset = args.get("contentOffset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
@@ -71,8 +68,7 @@ pub fn dispatch_fs_tool(
         "write_file" => {
             let raw_path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path'")?;
             let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            let resolved = resolve_workspace_path(cwd, raw_path);
-            verify_model_path_access(&resolved)?;
+            let resolved = resolve_and_verify_workspace_path(cwd, raw_path)?;
             if let Ok(mut j) = journal.lock() {
                 j.record_mutation("write_file", &resolved);
             }
@@ -91,10 +87,8 @@ pub fn dispatch_fs_tool(
             let raw_path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path'")?;
             let target = args.get("target").and_then(|v| v.as_str()).ok_or("Missing 'target'")?;
             let replacement = args.get("replacement").and_then(|v| v.as_str()).unwrap_or("");
-            let resolved = resolve_workspace_path(cwd, raw_path);
-            verify_model_path_access(&resolved)?;
-            let original =
-                fs::read_to_string(&resolved).map_err(|e| format!("Failed to read '{}': {e}", resolved.display()))?;
+            let resolved = resolve_and_verify_workspace_path(cwd, raw_path)?;
+            let original = read_text_file_bounded(&resolved, MAX_FS_TEXT_READ_BYTES)?;
             let (eff_target, eff_replacement, drift_kind) =
                 maybe_correct_escape_drift(target, replacement, &original)?;
             let (matched_target, confidence) = heal_fuzzy_patch(&original, &eff_target).ok_or_else(|| {
@@ -125,10 +119,8 @@ pub fn dispatch_fs_tool(
             if chunks.is_empty() {
                 return Err("No replacement chunks provided".to_string());
             }
-            let resolved = resolve_workspace_path(cwd, raw_path);
-            verify_model_path_access(&resolved)?;
-            let mut current =
-                fs::read_to_string(&resolved).map_err(|e| format!("Failed to read '{}': {e}", resolved.display()))?;
+            let resolved = resolve_and_verify_workspace_path(cwd, raw_path)?;
+            let mut current = read_text_file_bounded(&resolved, MAX_FS_TEXT_READ_BYTES)?;
             let mut applied = 0usize;
             for (idx, chunk) in chunks.iter().enumerate() {
                 let obj = chunk.as_object().ok_or_else(|| format!("Chunk #{idx} is not an object"))?;
@@ -168,10 +160,8 @@ pub fn dispatch_fs_tool(
                 .and_then(|v| v.as_str())
                 .ok_or("Missing 'expectedAnchor'")?;
             let replacement = args.get("replacement").and_then(|v| v.as_str()).unwrap_or("");
-            let resolved = resolve_workspace_path(cwd, raw_path);
-            verify_model_path_access(&resolved)?;
-            let original =
-                fs::read_to_string(&resolved).map_err(|e| format!("Failed to read '{}': {e}", resolved.display()))?;
+            let resolved = resolve_and_verify_workspace_path(cwd, raw_path)?;
+            let original = read_text_file_bounded(&resolved, MAX_FS_TEXT_READ_BYTES)?;
             let mut lines: Vec<String> = original.lines().map(|s| s.to_string()).collect();
             if line_num == 0 || line_num > lines.len() {
                 return Err(format!(
@@ -207,11 +197,13 @@ pub fn dispatch_fs_tool(
             }
             let (mut modified, mut errors) = (Vec::new(), Vec::new());
             for op in &ops {
-                let resolved = resolve_workspace_path(cwd, &op.file_path);
-                if let Err(e) = verify_model_path_access(&resolved) {
-                    errors.push(e);
-                    continue;
-                }
+                let resolved = match resolve_and_verify_workspace_path(cwd, &op.file_path) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        errors.push(e);
+                        continue;
+                    }
+                };
                 match op.op_type {
                     "delete" => {
                         if let Ok(mut j) = journal.lock() {
@@ -230,7 +222,7 @@ pub fn dispatch_fs_tool(
                             Err(e) => errors.push(format!("Failed to add '{}': {e}", op.file_path)),
                         }
                     }
-                    _ => match fs::read_to_string(&resolved) {
+                    _ => match read_text_file_bounded(&resolved, MAX_FS_TEXT_READ_BYTES) {
                         Ok(orig) => match DeterministicPatchEngine::apply_hunks(&orig, &op.hunks) {
                             Ok(updated) => {
                                 if let Ok(mut j) = journal.lock() {
@@ -257,8 +249,7 @@ pub fn dispatch_fs_tool(
         }
         "delete_file" => {
             let raw_path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path'")?;
-            let resolved = resolve_workspace_path(cwd, raw_path);
-            verify_model_path_access(&resolved)?;
+            let resolved = resolve_and_verify_workspace_path(cwd, raw_path)?;
             if !resolved.exists() {
                 return Err(format!("File '{}' does not exist", resolved.display()));
             }
@@ -282,10 +273,8 @@ pub fn dispatch_fs_tool(
         "move_file" => {
             let src_raw = args.get("source").and_then(|v| v.as_str()).ok_or("Missing 'source'")?;
             let dst_raw = args.get("target").and_then(|v| v.as_str()).ok_or("Missing 'target'")?;
-            let src = resolve_workspace_path(cwd, src_raw);
-            let dst = resolve_workspace_path(cwd, dst_raw);
-            verify_model_path_access(&src)?;
-            verify_model_path_access(&dst)?;
+            let src = resolve_and_verify_workspace_path(cwd, src_raw)?;
+            let dst = resolve_and_verify_workspace_path(cwd, dst_raw)?;
             if let Ok(mut j) = journal.lock() {
                 j.record_mutation("move_file", &src);
                 j.record_mutation("move_file", &dst);
@@ -306,8 +295,7 @@ pub fn dispatch_fs_tool(
         }
         "list_dir" => {
             let raw_path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-            let resolved = resolve_workspace_path(cwd, raw_path);
-            verify_model_path_access(&resolved)?;
+            let resolved = resolve_and_verify_workspace_path(cwd, raw_path)?;
             let rd =
                 fs::read_dir(&resolved).map_err(|e| format!("Failed to list '{}': {e}", resolved.display()))?;
             let mut entries = Vec::new();
@@ -336,8 +324,7 @@ pub fn dispatch_fs_tool(
                 .to_lowercase();
             let raw_path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
             let max_depth = args.get("maxDepth").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
-            let resolved = resolve_workspace_path(cwd, raw_path);
-            verify_model_path_access(&resolved)?;
+            let resolved = resolve_and_verify_workspace_path(cwd, raw_path)?;
             let mut matches = Vec::new();
             walk_find_files(&resolved, &resolved, &query, 0, max_depth, &mut matches);
             matches.sort();
@@ -348,8 +335,7 @@ pub fn dispatch_fs_tool(
         }
         "file_info" => {
             let raw_path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path'")?;
-            let resolved = resolve_workspace_path(cwd, raw_path);
-            verify_model_path_access(&resolved)?;
+            let resolved = resolve_and_verify_workspace_path(cwd, raw_path)?;
             if !resolved.exists() {
                 return Ok((json!({ "exists": false, "path": resolved.to_string_lossy() }), false));
             }
@@ -379,8 +365,7 @@ pub fn dispatch_fs_tool(
         "directory_tree" => {
             let raw_path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
             let max_depth = args.get("maxDepth").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
-            let resolved = resolve_workspace_path(cwd, raw_path);
-            verify_model_path_access(&resolved)?;
+            let resolved = resolve_and_verify_workspace_path(cwd, raw_path)?;
             let mut lines = vec![resolved
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
@@ -393,7 +378,7 @@ pub fn dispatch_fs_tool(
             let raw_path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
             let case_insensitive = args.get("caseInsensitive").and_then(|v| v.as_bool()).unwrap_or(false);
             let max_results = args.get("maxResults").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
-            let resolved = resolve_workspace_path(cwd, raw_path);
+            let resolved = resolve_and_verify_workspace_path(cwd, raw_path)?;
             let hits = execute_grep_search(&resolved, query, case_insensitive, max_results)?;
             Ok((
                 json!({ "query": query, "count": hits.len(), "matches": hits }),
@@ -409,8 +394,7 @@ pub fn dispatch_fs_tool(
             let raw_path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
             let kind_filter = args.get("kind").and_then(|v| v.as_str()).map(|s| s.to_lowercase());
             let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(60) as usize;
-            let resolved = resolve_workspace_path(cwd, raw_path);
-            verify_model_path_access(&resolved)?;
+            let resolved = resolve_and_verify_workspace_path(cwd, raw_path)?;
             let symbols = extract_workspace_symbols(&resolved, cwd, &query, kind_filter.as_deref(), limit);
             Ok((json!({ "count": symbols.len(), "symbols": symbols }), false))
         }
@@ -419,8 +403,7 @@ pub fn dispatch_fs_tool(
             let replace_with = args.get("replacement").and_then(|v| v.as_str()).unwrap_or("");
             let raw_path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
             let dry_run = args.get("dryRun").and_then(|v| v.as_bool()).unwrap_or(false);
-            let resolved = resolve_workspace_path(cwd, raw_path);
-            verify_model_path_access(&resolved)?;
+            let resolved = resolve_and_verify_workspace_path(cwd, raw_path)?;
             batch_replace_regex_files(cwd, &resolved, find_pat, replace_with, dry_run, journal)
         }
         "list_skills" => {

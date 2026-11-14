@@ -68,8 +68,11 @@ pub fn extract_json_roots(input: &str) -> (Vec<Value>, String) {
 
 /// Repairs common LLM JSON syntax errors (Python literals, single quotes, trailing commas, unclosed delimiters).
 pub fn repair_json_string(input: &str) -> String {
-    let mut text = input
-        .trim()
+    let trimmed = input.trim();
+    if serde_json::from_str::<serde_json::Value>(trimmed).is_ok() {
+        return trimmed.to_string();
+    }
+    let mut text = trimmed
         .replace(": True", ": true")
         .replace(":True", ": true")
         .replace(": False", ": false")
@@ -82,6 +85,7 @@ pub fn repair_json_string(input: &str) -> String {
     let mut cleaned = String::with_capacity(text.len() + 4);
     let chars: Vec<char> = text.chars().collect();
     let (mut i, mut in_str, mut esc) = (0, false, false);
+    let (mut open_braces, mut close_braces, mut open_brackets, mut close_brackets) = (0usize, 0usize, 0usize, 0usize);
     while i < chars.len() {
         let c = chars[i];
         if in_str {
@@ -112,16 +116,19 @@ pub fn repair_json_string(input: &str) -> String {
                 continue;
             }
         }
+        match c {
+            '{' => open_braces += 1,
+            '}' => close_braces += 1,
+            '[' => open_brackets += 1,
+            ']' => close_brackets += 1,
+            _ => {}
+        }
         cleaned.push(c);
         i += 1;
     }
-    let open_braces = cleaned.chars().filter(|&c| c == '{').count();
-    let close_braces = cleaned.chars().filter(|&c| c == '}').count();
     for _ in 0..open_braces.saturating_sub(close_braces) {
         cleaned.push('}');
     }
-    let open_brackets = cleaned.chars().filter(|&c| c == '[').count();
-    let close_brackets = cleaned.chars().filter(|&c| c == ']').count();
     for _ in 0..open_brackets.saturating_sub(close_brackets) {
         cleaned.push(']');
     }

@@ -125,12 +125,7 @@ impl SessionVfs {
             if ov.is_deleted {
                 let _ = fs::remove_file(target);
             } else {
-                if let Some(parent) = target.parent() {
-                    fs::create_dir_all(parent)
-                        .map_err(|e| format!("Failed to create dir {}: {e}", parent.display()))?;
-                }
-                fs::write(target, &ov.content)
-                    .map_err(|e| format!("Failed to write {}: {e}", target.display()))?;
+                crate::infrastructure::search_tools::atomic_write_file(target, ov.content.as_bytes())?;
             }
             committed.push(ov.path);
         }
@@ -267,11 +262,7 @@ impl SkillsIngestor {
     }
 
     pub fn inspect_workspace_image(workspace_root: &Path, rel_path: &str) -> Result<Value, String> {
-        let candidate = if Path::new(rel_path).is_absolute() {
-            Path::new(rel_path).to_path_buf()
-        } else {
-            workspace_root.join(rel_path)
-        };
+        let candidate = crate::infrastructure::search_tools::resolve_and_verify_workspace_path(workspace_root, rel_path)?;
         let bytes = fs::read(&candidate).map_err(|e| format!("Failed to read image '{}': {e}", candidate.display()))?;
         let mut meta = decode_image_metadata(&bytes)?;
         meta["path"] = json!(rel_path);
@@ -330,10 +321,7 @@ pub struct FileSessionPersistence;
 
 impl ISessionPersistence for FileSessionPersistence {
     fn save_jsonl(&self, path: &Path, payload: &str) -> Result<bool, String> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-        fs::write(path, payload.as_bytes()).map_err(|e| e.to_string())?;
+        crate::infrastructure::search_tools::atomic_write_file(path, payload.as_bytes())?;
         Ok(true)
     }
 

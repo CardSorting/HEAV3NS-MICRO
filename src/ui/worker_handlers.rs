@@ -5,7 +5,7 @@ use crate::domain::types::messages::{Role, SessionMessage};
 use crate::domain::types::progress::{EngineProgressEvent, EngineProgressPhase, EngineProgressStatus};
 use crate::domain::types::provider_registry::canonicalize_provider_id;
 use crate::domain::types::runtime::{AgentConfig, CancellationToken, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel, ExecutionPosture, UserApprovalChoice};
-use crate::plumbing::hash_and_math::now_ms;
+use crate::plumbing::hash_and_math::{lock_unpoison, now_ms};
 use crate::ui::cli_presenter::Heav3nsUserConfig;
 pub use crate::ui::provider_rpc::{build_sovereign_model_catalog, build_sovereign_model_catalog_with_recent, build_sovereign_model_discovery, handle_provider_credential_rpc};
 use serde_json::{json, Value};
@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 /// Shared multiplexed state across the async JSON-RPC stdin reader and background turn tasks.
 pub struct WorkerSharedState {
-    pub active_cancel: Option<CancellationToken>,
+    pub active_cancels: BTreeMap<String, CancellationToken>,
     pub session_runs: Vec<Value>,
     pub current_conversation: String,
     pub conversations: Vec<Value>,
@@ -40,7 +40,7 @@ pub struct WorkerSharedState {
 impl WorkerSharedState {
     pub fn with_initial_model(initial_model: String) -> Self {
         Self {
-            active_cancel: None,
+            active_cancels: BTreeMap::new(),
             session_runs: Vec::new(),
             current_conversation: "default-conv".to_string(),
             conversations: vec![json!({ "id": "default-conv", "title": "Main Session" })],
@@ -114,7 +114,7 @@ pub fn switch_worker_conversation(state: &mut WorkerSharedState, engine: &AgentE
     }
     let cfg = engine.config_snapshot();
     {
-        let mut sess = engine.session().lock().unwrap();
+        let mut sess = lock_unpoison(&engine.session());
         state
             .conversation_messages
             .insert(prev_id, sess.messages().to_vec());
@@ -142,7 +142,7 @@ pub async fn handle_automation_rpc(method: &str, req_id: &str, params: &Value, e
             if method == "computer.health" && req.get("action").is_none() {
                 req["action"] = json!("audit_health");
             }
-            engine.tools().display_state.lock().unwrap().execute_action(&req).unwrap_or_else(|e| json!({"error": e}))
+            lock_unpoison(&engine.tools().display_state).execute_action(&req).unwrap_or_else(|e| json!({"error": e}))
         }
         "computer.observe" | "computer.interpret" | "computer.consult" | "computer.orchestrate" => {
             let action = match method {
@@ -162,7 +162,7 @@ pub async fn handle_automation_rpc(method: &str, req_id: &str, params: &Value, e
             if res.success { res.output } else { json!({"error": res.error}) }
         }
         "computer.patterns" => {
-            let kstore = engine.tools().computer_orchestrator.knowledge_store.lock().unwrap();
+            let kstore = lock_unpoison(&engine.tools().computer_orchestrator.knowledge_store);
             json!({ "patterns": kstore.list_patterns(), "procedures": kstore.list_procedures() })
         }
         "browser.action" | "browser.snapshot" | "browser.navigate" => {
@@ -173,7 +173,7 @@ pub async fn handle_automation_rpc(method: &str, req_id: &str, params: &Value, e
             if method == "browser.navigate" && req.get("action").is_none() {
                 req["action"] = json!("navigate");
             }
-            engine.tools().display_state.lock().unwrap().execute_browser_action(&req).unwrap_or_else(|e| json!({"error": e}))
+            lock_unpoison(&engine.tools().display_state).execute_browser_action(&req).unwrap_or_else(|e| json!({"error": e}))
         }
         "spatial.ground" | "spatial.execute" | "spatial.health" | "spatial.query" => {
             let action = match method {
@@ -193,7 +193,7 @@ pub async fn handle_automation_rpc(method: &str, req_id: &str, params: &Value, e
             if res.success { res.output } else { json!({"error": res.error}) }
         }
         _ => {
-            let mut cat = engine.tools().skill_catalog.lock().unwrap();
+            let mut cat = lock_unpoison(&engine.tools().skill_catalog);
             match method {
                 "skills.forge" => cat.forge_skill(params).unwrap_or_else(|e| json!({"error": e})),
                 "skills.lint" => {
@@ -336,8 +336,8 @@ pub async fn execute_multiplexed_submit(
     let now = now_ms() as f64;
     let token = CancellationToken::new();
     let conv_id = {
-        let mut guard = state.lock().unwrap();
-        guard.active_cancel = Some(token.clone());
+        let mut guard = lock_unpoison(&state);
+        guard.active_cancels.insert(run_id.clone(), token.clone());
         guard.current_conversation.clone()
     };
 
@@ -361,7 +361,7 @@ pub async fn execute_multiplexed_submit(
     });
 
     {
-        let mut guard = state.lock().unwrap();
+        let mut guard = lock_unpoison(&state);
         guard.session_runs.retain(|r| r.get("id").and_then(|v| v.as_str()) != Some(&run_id));
         guard.session_runs.push(run_obj.clone());
         while guard.session_runs.len() > 64 {
@@ -405,7 +405,7 @@ pub async fn execute_multiplexed_submit(
                 "choices": ["allow_once", "allow_session", "deny"]
             });
             {
-                let mut guard = st_approve.lock().unwrap();
+                let mut guard = lock_unpoison(&st_approve);
                 guard.pending_approvals.insert(approval_id.clone(), tx);
                 if let Some(existing) = guard.session_runs.iter_mut().find(|r| r.get("id").and_then(|v| v.as_str()) == Some(&run_a)) {
                     *existing = waiting_run.clone();
@@ -427,7 +427,7 @@ pub async fn execute_multiplexed_submit(
                 }),
             );
             let deadline = Instant::now() + Duration::from_secs(120);
-            let decision = loop {
+            let wait_decision = || loop {
                 if tok_a.is_cancelled() || Instant::now() >= deadline {
                     break UserApprovalChoice::Deny;
                 }
@@ -437,13 +437,20 @@ pub async fn execute_multiplexed_submit(
                     Err(RecvTimeoutError::Disconnected) => break UserApprovalChoice::Deny,
                 }
             };
+            let decision = if tokio::runtime::Handle::try_current()
+                .is_ok_and(|h| h.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread)
+            {
+                tokio::task::block_in_place(wait_decision)
+            } else {
+                wait_decision()
+            };
             let resumed_rev = rev_approve.fetch_add(1, Ordering::SeqCst) + 1;
             let mut resumed_run = waiting_run;
             resumed_run["state"] = json!("running");
             resumed_run["revision"] = json!(resumed_rev);
             resumed_run["approval"]["decision"] = json!(format!("{decision:?}").to_ascii_lowercase());
             {
-                let mut guard = st_approve.lock().unwrap();
+                let mut guard = lock_unpoison(&st_approve);
                 guard.pending_approvals.remove(&approval_id);
                 if let Some(existing) = guard.session_runs.iter_mut().find(|r| r.get("id").and_then(|v| v.as_str()) == Some(&run_a)) {
                     *existing = resumed_run.clone();
@@ -476,7 +483,7 @@ pub async fn execute_multiplexed_submit(
     input.on_progress = Some(Arc::new(move |ev| {
         let act = progress_to_walkthrough_activity(&ev);
         {
-            let mut guard = live_acts_cb.lock().unwrap();
+            let mut guard = lock_unpoison(&live_acts_cb);
             if let Some(existing) = guard.iter_mut().find(|a| a.get("activityId") == act.get("activityId")) {
                 *existing = act.clone();
             } else if guard.len() < 120 {
@@ -503,7 +510,7 @@ pub async fn execute_multiplexed_submit(
         EngineTickOutcome::Failed => ("failed", None, Some(result.response.clone())),
     };
 
-    let acts = live_acts.lock().unwrap().clone();
+    let acts = lock_unpoison(&live_acts).clone();
     let max_act_seq = acts.iter().filter_map(|a| a.get("sequence").and_then(|v| v.as_i64())).max().unwrap_or(0);
     let final_rev = run_rev.fetch_add(1, Ordering::SeqCst) + 1;
     run_obj["state"] = json!(final_state);
@@ -534,8 +541,8 @@ pub async fn execute_multiplexed_submit(
     }
 
     let changed_catalog = {
-        let mut guard = state.lock().unwrap();
-        guard.active_cancel = None;
+        let mut guard = lock_unpoison(&state);
+        guard.active_cancels.remove(&run_id);
         let mut cat_ev = None;
         if result.is_slash_command {
             let snap = engine.config_snapshot();

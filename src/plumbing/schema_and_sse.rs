@@ -66,9 +66,11 @@ pub fn parse_sse_events(raw_sse: &str) -> Vec<SseEventFrame> {
                     flush(&mut frames, &mut current_event, &mut data_buf, &mut has_data, &mut overflowed);
                     continue;
                 }
+                let trimmed_buf = data_buf.trim();
                 if has_data
                     && !overflowed
-                    && serde_json::from_str::<IgnoredAny>(data_buf.trim()).is_ok()
+                    && (trimmed_buf.ends_with('}') || trimmed_buf.ends_with(']'))
+                    && serde_json::from_str::<IgnoredAny>(trimmed_buf).is_ok()
                 {
                     flush(&mut frames, &mut current_event, &mut data_buf, &mut has_data, &mut overflowed);
                 }

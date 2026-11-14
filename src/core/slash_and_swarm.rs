@@ -138,12 +138,13 @@ impl AgentEngine {
                 let spec = SystemPromptSpec::for_specialist(&assign.role, &objective, assign.assigned_files.clone());
                 child_cfg.system_prompt = spec.render(&child_cfg, self.workspace_root(), &swarm_facts, &swarm_skills);
 
+                let child_tools = Arc::new(crate::core::tool_registry::ToolRegistry::new(Arc::clone(self.memory())));
                 let child_engine = AgentEngine::with_shared_substrate(
                     self.workspace_root().to_path_buf(),
                     child_cfg,
                     self.provider_arc(),
                     Arc::clone(self.memory()),
-                    Arc::clone(self.tools()),
+                    child_tools,
                 )
                 .without_swarm_delegation();
 
@@ -546,7 +547,11 @@ impl AgentEngine {
                 }
                 if arg.starts_with("snap-") {
                     match self.cas.lock().unwrap().restore_full_snapshot(arg) {
-                        Ok(v) => return Some(format!("Restored workspace CAS snapshot {arg}: {:?}", v)),
+                        Ok(v) => {
+                            self.tools().cache.lock().unwrap().clear();
+                            self.tools().read_tracker.lock().unwrap().reset_stamps();
+                            return Some(format!("Restored workspace CAS snapshot {arg}: {v:?}"));
+                        }
                         Err(e) => return Some(format!("Snapshot '{arg}' not found: {e}")),
                     }
                 }

@@ -154,7 +154,9 @@ impl ToolCallArgParser {
                     .keys()
                     .find(|k| {
                         let kl = k.to_lowercase();
-                        kl == lower || (kl.len() >= 3 && levenshtein(&kl, &lower) <= 2)
+                        kl == lower
+                            || (kl.len() >= 8 && lower.len() >= 8 && levenshtein(&kl, &lower) <= 2)
+                            || (kl.len() >= 5 && lower.len() >= 5 && levenshtein(&kl, &lower) <= 1)
                     })
                     .cloned();
                 if let Some(k) = found {
@@ -209,11 +211,15 @@ impl ToolCallArgParser {
                                 } else if let Ok(f) = s.trim().parse::<f64>() {
                                     if let Some(num) = serde_json::Number::from_f64(f) {
                                         args.insert(name.to_string(), Value::Number(num));
+                                    } else {
+                                        errors.push(format!("Parameter '{name}' expected finite number, got '{s}'"));
                                     }
                                 } else if let Some(pct) = s.trim().strip_suffix('%') {
                                     if let Ok(p) = pct.trim().parse::<f64>() {
                                         if let Some(num) = serde_json::Number::from_f64(p / 100.0) {
                                             args.insert(name.to_string(), Value::Number(num));
+                                        } else {
+                                            errors.push(format!("Parameter '{name}' expected finite number, got '{s}'"));
                                         }
                                     } else {
                                         errors.push(format!("Parameter '{name}' expected number, got '{s}'"));

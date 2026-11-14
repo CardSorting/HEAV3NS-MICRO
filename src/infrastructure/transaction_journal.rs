@@ -45,11 +45,21 @@ impl TransactionJournal {
     pub fn record_mutation(&mut self, tool_name: &str, target_path: &Path) -> String {
         self.seq += 1;
         let id = format!("tx_{}_{}", self.seq, now_ms());
-        let (previous_content, created_new_file) = match fs::read(target_path) {
-            Ok(bytes) => (Some(bytes), false),
+        let (previous_content, created_new_file) = match fs::metadata(target_path) {
+            Ok(meta) if meta.len() <= 8 * 1024 * 1024 => match fs::read(target_path) {
+                Ok(bytes) => (Some(bytes), false),
+                Err(_) => (None, true),
+            },
+            Ok(_) => (None, false),
             Err(_) => (None, true),
         };
         let active_turn = self.current_turn_id().to_string();
+        if self.transactions.len() >= 512 {
+            self.transactions.remove(0);
+            for idx in self.checkpoints.values_mut() {
+                *idx = idx.saturating_sub(1);
+            }
+        }
         self.transactions.push(MutationTransaction {
             id: id.clone(),
             turn_id: active_turn,
@@ -81,15 +91,24 @@ impl TransactionJournal {
 
     pub fn rollback_turn(&mut self, turn_id: Option<&str>) -> RollbackResult {
         let target_turn = turn_id.unwrap_or_else(|| self.current_turn_id()).to_string();
-        let (mut to_revert, mut remaining) = (Vec::new(), Vec::new());
-        for tx in self.transactions.drain(..) {
+        let mut to_revert = Vec::new();
+        let mut remaining = Vec::new();
+        let mut removed_before: Vec<usize> = Vec::new();
+        for (i, tx) in self.transactions.drain(..).enumerate() {
             if tx.turn_id == target_turn {
+                removed_before.push(i);
                 to_revert.push(tx);
             } else {
                 remaining.push(tx);
             }
         }
         self.transactions = remaining;
+        if !removed_before.is_empty() {
+            for idx in self.checkpoints.values_mut() {
+                let shift = removed_before.iter().filter(|&&r| r < *idx).count();
+                *idx = idx.saturating_sub(shift);
+            }
+        }
         if to_revert.is_empty() {
             return RollbackResult {
                 rolled_back_count: 0,
@@ -130,6 +149,7 @@ impl TransactionJournal {
             };
         }
         let to_revert: Vec<MutationTransaction> = self.transactions.drain(idx..).collect();
+        self.checkpoints.retain(|_, v| *v <= idx);
         let (mut restored, mut errors) = (Vec::new(), Vec::new());
         for tx in to_revert.iter().rev() {
             Self::apply_revert(tx, &mut restored, &mut errors);
@@ -187,10 +207,7 @@ impl TransactionJournal {
             }
             restored.push(format!("[Deleted] {}", tx.target_path.display()));
         } else if let Some(ref prev) = tx.previous_content {
-            if let Some(parent) = tx.target_path.parent() {
-                let _ = fs::create_dir_all(parent);
-            }
-            match fs::write(&tx.target_path, prev) {
+            match crate::infrastructure::search_tools::atomic_write_file(&tx.target_path, prev) {
                 Ok(_) => restored.push(format!("[Restored] {}", tx.target_path.display())),
                 Err(e) => errors.push(format!("Failed to restore {}: {e}", tx.target_path.display())),
             }

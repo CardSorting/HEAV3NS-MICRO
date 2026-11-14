@@ -127,7 +127,13 @@ pub fn heal_fuzzy_patch(file_content: &str, target_snippet: &str) -> Option<(Str
         }
     }
     let file_lines: Vec<&str> = file_content.lines().collect();
-    let target_lines: Vec<&str> = target_snippet.lines().filter(|l| !l.trim().is_empty()).collect();
+    let mut target_lines: Vec<&str> = target_snippet.lines().collect();
+    while target_lines.first().is_some_and(|l| l.trim().is_empty()) {
+        target_lines.remove(0);
+    }
+    while target_lines.last().is_some_and(|l| l.trim().is_empty()) {
+        target_lines.pop();
+    }
     if target_lines.is_empty() || file_lines.len() < target_lines.len() {
         return None;
     }

@@ -16,7 +16,7 @@ pub mod vision_and_dom;
 pub use crate::plumbing::display_telemetry::{apply_annotation_mutation, compute_action_ledger_health, compute_preview_delta, extract_dom_ui_tuples, query_action_ledger_dsl};
 pub use crate::plumbing::environmental_diff::{analyze_spider_structural_relationships, calibrate_confidence_score, classify_element_affordance, compute_element_deltas, detect_modal_or_dialog, diagnose_failure_cause};
 pub use crate::plumbing::fuzzy_patch::{heal_fuzzy_patch, DeterministicPatchEngine, PatchHunkLine, PatchOperation};
-pub use crate::plumbing::hash_and_math::{fnv1a_32, levenshtein, now_ms};
+pub use crate::plumbing::hash_and_math::{fnv1a_32, levenshtein, lock_unpoison, now_ms};
 pub use crate::plumbing::json_repair::{accumulate_streaming_tool_name, compute_streaming_arguments_delta, extract_json_roots, normalize_completed_tool_call_arguments, repair_json_string};
 pub use crate::plumbing::oauth_pkce::{build_openai_authorize_url, decode_base64url, encode_base64url, encode_hex_lower, extract_jwt_expiry_ms, extract_openai_account_id, extract_openai_email, extract_openai_plan_type, generate_pkce_challenge, parse_jwt_claims, parse_query_params, url_decode_component, url_encode_component};
 pub use crate::plumbing::schema_and_sse::{parse_sse_events, redact_endpoint_for_display, sanitize_tool_schema, sanitize_tool_schema_for_responses, SseEventFrame, MAX_SSE_EVENT_DATA_BYTES};

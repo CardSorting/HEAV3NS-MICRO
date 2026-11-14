@@ -81,7 +81,7 @@ impl AgentEngine {
         let system_total_tokens = estimate_text_tokens(&full_system);
 
         let probe = if sample_prompt.trim().is_empty() { "inspect workspace" } else { sample_prompt };
-        let active_schemas = self.tools().select_tool_schemas_for(probe, self.forbids_swarm_delegation());
+        let active_schemas = self.tools().peek_tool_schemas_for(probe, self.forbids_swarm_delegation());
         let full_schemas = self.tools().openai_tool_schemas();
         let tool_schema_tokens = estimate_text_tokens(&Value::Array(active_schemas.clone()).to_string());
         let tool_full_schema_tokens = estimate_text_tokens(&Value::Array(full_schemas.clone()).to_string());

@@ -79,6 +79,10 @@ pub async fn execute_shell_command_sandboxed(
     let seatbelt = if is_macos_seatbelt_available() {
         build_macos_seatbelt_invocation(sandbox_mode, cwd, home_dir.as_deref())
     } else {
+        #[cfg(target_os = "macos")]
+        if sandbox_mode != SeatbeltSandboxMode::Unrestricted {
+            return Err("macOS Seatbelt (/usr/bin/sandbox-exec) is unavailable; refusing to run sandboxed command unsandboxed".to_string());
+        }
         None
     };
 

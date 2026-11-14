@@ -211,7 +211,12 @@ impl ToolOutputGovernor {
         let spill_id = format!("spill_{}", self.seq);
         let owned_lines: Vec<String> = lines.iter().map(|s| (*s).to_string()).collect();
         if self.spills.len() >= 64 {
-            self.spills.clear();
+            let oldest_id = format!("spill_{}", self.seq.saturating_sub(64));
+            if self.spills.remove(&oldest_id).is_none() {
+                if let Some(first_key) = self.spills.keys().next().cloned() {
+                    self.spills.remove(&first_key);
+                }
+            }
         }
         self.spills.insert(spill_id.clone(), owned_lines);
 

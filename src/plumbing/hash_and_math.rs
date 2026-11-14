@@ -41,3 +41,12 @@ pub fn levenshtein(a: &str, b: &str) -> usize {
     }
     prev[b_bytes.len()]
 }
+
+/// Acquires a `std::sync::Mutex`, recovering the inner value if a prior holder panicked.
+#[inline]
+pub fn lock_unpoison<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}

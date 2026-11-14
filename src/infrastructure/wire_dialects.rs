@@ -358,7 +358,8 @@ pub(crate) fn build_anthropic_messages_payload(provider_name: &str, endpoint: &s
                 }
                 if let Some(calls) = &m.tool_calls {
                     for tc in calls {
-                        let input: Value = serde_json::from_str(&tc.function.arguments).unwrap_or_else(|_| json!({}));
+                        let parsed = serde_json::from_str::<Value>(&tc.function.arguments).unwrap_or_else(|_| json!({}));
+                        let input = if parsed.is_object() { parsed } else { json!({}) };
                         blocks.push(json!({
                             "type": "tool_use",
                             "id": tc.id,
@@ -621,7 +622,8 @@ pub(crate) fn build_google_gemini_payload(req: &ProviderRequest) -> Value {
                 }
                 if let Some(calls) = &m.tool_calls {
                     for tc in calls {
-                        let args: Value = serde_json::from_str(&tc.function.arguments).unwrap_or_else(|_| json!({}));
+                        let parsed = serde_json::from_str::<Value>(&tc.function.arguments).unwrap_or_else(|_| json!({}));
+                        let args = if parsed.is_object() { parsed } else { json!({}) };
                         let mut fc_part = json!({ "functionCall": { "name": tc.function.name, "args": args } });
                         if let Some(sig) = tc.thought_signature.as_deref().filter(|s| !s.is_empty()) {
                             fc_part["thoughtSignature"] = Value::String(sig.to_string());

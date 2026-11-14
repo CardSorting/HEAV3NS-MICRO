@@ -3,14 +3,31 @@ use crate::core::engine::AgentEngine;
 use crate::core::session_store::SessionCompactor;
 use crate::domain::memory::MemoryEntry;
 use crate::domain::pricing_and_taxonomy::BillingMetering;
-use crate::plumbing::hash_and_math::now_ms;
+use crate::plumbing::hash_and_math::{lock_unpoison, now_ms};
 use crate::plumbing::secret_redactor::SafetyPolicy;
 use crate::plumbing::text_tokens::{encode_base64, render_unified_diff, safe_utf8_prefix};
 use crate::ui::worker_handlers::{build_sovereign_model_catalog, build_sovereign_model_discovery};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+fn validate_rpc_read_path(root: &Path, path: &str) -> Option<PathBuf> {
+    if path.is_empty()
+        || path.contains("..")
+        || path.starts_with('/')
+        || SafetyPolicy::check_path(Path::new(path)).is_err()
+    {
+        return None;
+    }
+    let full_path = root.join(path);
+    if let (Ok(canon_root), Ok(canon_file)) = (root.canonicalize(), full_path.canonicalize()) {
+        if !canon_file.starts_with(&canon_root) || SafetyPolicy::check_path(&canon_file).is_err() {
+            return None;
+        }
+    }
+    Some(full_path)
+}
 
 pub fn sha256_hex(input: &str) -> String {
     let mut hasher = Sha256::new();
@@ -258,12 +275,12 @@ pub fn build_state_inspect_response(conversation: &str, session_runs: &[Value]) 
 pub fn build_context_inspect_response(conversation: &str, engine: &AgentEngine) -> Value {
     let now = now_ms() as f64;
     let (active_msgs, summaries) = {
-        let sess = engine.session().lock().unwrap();
+        let sess = lock_unpoison(&engine.session());
         let msgs = sess.messages();
         let sum_count = msgs.iter().filter(|m| SessionCompactor::is_checkpoint(m)).count();
         (msgs.len(), sum_count)
     };
-    let saved_memories = engine.memory().lock().unwrap().list_memories().len();
+    let saved_memories = lock_unpoison(&engine.memory()).list_memories().len();
     let q = engine.queue().snapshot();
     let snap = engine.inspect_context_snapshot("");
     let cfg = engine.config_snapshot();
@@ -318,7 +335,7 @@ pub fn build_prompt_inspect_response(mode: &str, engine: &AgentEngine) -> Value 
 pub fn build_context_history_response(conversation: &str, offset: usize, engine: &AgentEngine) -> Value {
     let now = now_ms() as f64;
     let full_text = {
-        let sess = engine.session().lock().unwrap();
+        let sess = lock_unpoison(&engine.session());
         sess.transcript()
             .iter()
             .map(|m| format!("[{}] {}\n", m.role.as_str().to_uppercase(), m.content))
@@ -368,7 +385,7 @@ fn format_memory_entry(entry: &MemoryEntry) -> Value {
 
 pub fn handle_memory_rpc(method: &str, params: &Value, default_conv: &str, engine: &AgentEngine) -> Value {
     let conv = params.get("conversation").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or(default_conv);
-    let mut mem = engine.memory().lock().unwrap();
+    let mut mem = lock_unpoison(&engine.memory());
     match method {
         "memory.list" => {
             let query = params.get("query").and_then(|v| v.as_str()).unwrap_or("");
@@ -507,25 +524,18 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
         }
         "files.read" | "artifact.read" => {
             let path = params.get("path").or_else(|| params.get("id")).and_then(|v| v.as_str()).unwrap_or("README.md");
-            if path.contains("..") || path.starts_with('/') || SafetyPolicy::check_path(Path::new(path)).is_err() {
-                return json!({
-                    "text": "",
-                    "revision": "rev-blocked",
-                    "offset": 0,
-                    "nextOffset": 0,
-                    "size": 0,
-                    "more": false
-                });
-            }
+            let Some(full_path) = validate_rpc_read_path(root, path) else {
+                return json!({ "text": "", "revision": "rev-blocked", "offset": 0, "nextOffset": 0, "size": 0, "more": false });
+            };
             let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(65536) as usize;
-            let text_content = fs::read_to_string(root.join(path)).unwrap_or_default();
+            let text_content = fs::read_to_string(&full_path).unwrap_or_default();
             let total = text_content.len();
             let mut safe_offset = offset.min(total);
             while safe_offset > 0 && !text_content.is_char_boundary(safe_offset) {
                 safe_offset -= 1;
             }
-            let mut end = (safe_offset + limit).min(total);
+            let mut end = safe_offset.saturating_add(limit).min(total);
             while end > safe_offset && !text_content.is_char_boundary(end) {
                 end -= 1;
             }
@@ -541,12 +551,15 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
         }
         "files.readBinary" => {
             let path = params.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let Some(full_path) = validate_rpc_read_path(root, path) else {
+                return json!({ "data": "", "revision": "bin-blocked", "offset": 0, "nextOffset": 0, "size": 0, "more": false });
+            };
             let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(65536) as usize;
-            let bytes = fs::read(root.join(path)).unwrap_or_default();
+            let bytes = fs::read(&full_path).unwrap_or_default();
             let total = bytes.len();
             let safe_offset = offset.min(total);
-            let end = (safe_offset + limit).min(total);
+            let end = safe_offset.saturating_add(limit).min(total);
             let b64 = encode_base64(&bytes[safe_offset..end]);
             let rev = format!("bin-{}", bytes.len());
             json!({
@@ -559,7 +572,7 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
             })
         }
         "changes.list" => {
-            let staged = engine.vfs().lock().unwrap().export_staged();
+            let staged = lock_unpoison(&engine.vfs()).export_staged();
             let mut entries: Vec<Value> = staged
                 .into_iter()
                 .map(|f| {
@@ -601,7 +614,7 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
         }
         "changes.read" => {
             let path = params.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            let staged = engine.vfs().lock().unwrap().export_staged();
+            let staged = lock_unpoison(&engine.vfs()).export_staged();
             let diff = if let Some(f) = staged.into_iter().find(|f| f.path == path) {
                 let old = fs::read_to_string(root.join(path)).unwrap_or_default();
                 let new = if f.is_deleted { String::new() } else { f.content };

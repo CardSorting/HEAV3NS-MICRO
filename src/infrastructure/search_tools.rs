@@ -18,6 +18,80 @@ pub fn resolve_workspace_path(cwd: &Path, raw: &str) -> PathBuf {
     }
 }
 
+fn normalize_lexical_path(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for comp in path.components() {
+        match comp {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !out.pop() {
+                    out.push(comp);
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+fn canonicalize_best_effort(path: &Path) -> PathBuf {
+    if let Ok(c) = path.canonicalize() {
+        return c;
+    }
+    let mut suffix: Vec<std::ffi::OsString> = Vec::new();
+    let mut cursor = path;
+    while !cursor.exists() {
+        if let Some(name) = cursor.file_name() {
+            suffix.push(name.to_os_string());
+        } else {
+            break;
+        }
+        match cursor.parent() {
+            Some(p) => cursor = p,
+            None => break,
+        }
+    }
+    let mut base = cursor
+        .canonicalize()
+        .unwrap_or_else(|_| normalize_lexical_path(cursor));
+    for seg in suffix.into_iter().rev() {
+        base.push(seg);
+    }
+    normalize_lexical_path(&base)
+}
+
+/// Resolves `raw` relative to `cwd`, enforces workspace containment (blocking `..` and symlink
+/// escapes outside `cwd`), and verifies `CredentialDenyScope::ModelContext`.
+pub fn resolve_and_verify_workspace_path(cwd: &Path, raw: &str) -> Result<PathBuf, String> {
+    let candidate = resolve_workspace_path(cwd, raw);
+    let canon_cwd = canonicalize_best_effort(cwd);
+    let canon_target = canonicalize_best_effort(&candidate);
+    if !canon_target.starts_with(&canon_cwd) {
+        return Err(format!(
+            "Access denied: path '{}' escapes workspace root '{}'",
+            raw.trim(),
+            cwd.display()
+        ));
+    }
+    verify_model_path_access(&candidate)?;
+    Ok(candidate)
+}
+
+/// Reads a UTF-8 text file up to `max_bytes`, failing cleanly before allocating on oversized files.
+pub fn read_text_file_bounded(path: &Path, max_bytes: usize) -> Result<String, String> {
+    let meta = fs::metadata(path).map_err(|e| format!("Failed to stat '{}': {e}", path.display()))?;
+    if meta.len() > max_bytes as u64 {
+        return Err(format!(
+            "File '{}' is too large ({} bytes > {} byte limit)",
+            path.display(),
+            meta.len(),
+            max_bytes
+        ));
+    }
+    fs::read_to_string(path).map_err(|e| format!("Failed to read '{}': {e}", path.display()))
+}
+
 /// Checks a path and its canonicalized symlink target against `CredentialDenyScope::ModelContext`
 /// without leaking symlink destination paths on refusal.
 pub fn verify_model_path_access(path: &Path) -> Result<(), String> {

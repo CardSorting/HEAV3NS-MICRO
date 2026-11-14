@@ -55,13 +55,17 @@ pub fn build_macos_seatbelt_invocation(
     }
 
     let mut params = Vec::new();
-    let ws_str = workspace_root.to_string_lossy().to_string();
+    let canon_ws = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let ws_str = canon_ws.to_string_lossy().to_string();
     params.push(("WORKSPACE_ROOT".to_string(), ws_str.clone()));
 
     let mut ro_carveouts = Vec::new();
     for (idx, sub) in READONLY_CARVEOUT_SUBDIRS.iter().enumerate() {
         let key = format!("RO_CARVEOUT_{idx}");
-        let full = workspace_root.join(sub).to_string_lossy().to_string();
+        let joined = canon_ws.join(sub);
+        let full = joined.canonicalize().unwrap_or(joined).to_string_lossy().to_string();
         params.push((key.clone(), full));
         ro_carveouts.push(key);
     }
@@ -70,12 +74,16 @@ pub fn build_macos_seatbelt_invocation(
         "(version 1)\n\
          (allow default)\n\
          (deny file-write*)\n\
-         (allow file-write* (subpath \"/dev\"))\n\
-         (allow file-write* (subpath \"/private/tmp\"))\n\
-         (allow file-write* (subpath \"/tmp\"))\n\
-         (allow file-write* (subpath \"/private/var/folders\"))\n\
-         (allow file-write* (subpath \"/var/folders\"))\n",
+         (allow file-write* (subpath \"/dev\"))\n",
     );
+    if mode != SeatbeltSandboxMode::ReadOnly {
+        sbpl.push_str(
+            "(allow file-write* (subpath \"/private/tmp\"))\n\
+             (allow file-write* (subpath \"/tmp\"))\n\
+             (allow file-write* (subpath \"/private/var/folders\"))\n\
+             (allow file-write* (subpath \"/var/folders\"))\n",
+        );
+    }
 
     if let SeatbeltSandboxMode::WorkspaceWrite { allow_network } = mode {
         sbpl.push_str("(allow file-write* (require-all (subpath (param \"WORKSPACE_ROOT\"))");
@@ -92,6 +100,7 @@ pub fn build_macos_seatbelt_invocation(
 
     // Last-match-wins Process-scope credential & SSH-agent socket blocks
     if let Some(home) = home_dir {
+        let canon_home = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
         let denied_rel = [
             ".ssh",
             ".gnupg",
@@ -100,10 +109,22 @@ pub fn build_macos_seatbelt_invocation(
             ".codewhale/credentials",
             ".codewhale/secrets",
             "Library/Keychains",
+            ".npmrc",
+            ".netrc",
+            ".git-credentials",
+            ".kube",
+            ".azure",
+            ".config/gcloud",
+            ".docker/config.json",
+            ".cargo/credentials.toml",
+            ".zsh_history",
+            ".bash_history",
         ];
         for (idx, rel) in denied_rel.iter().enumerate() {
             let key = format!("DENY_CRED_{idx}");
-            params.push((key.clone(), home.join(rel).to_string_lossy().to_string()));
+            let target = canon_home.join(rel);
+            let target_str = target.canonicalize().unwrap_or(target).to_string_lossy().to_string();
+            params.push((key.clone(), target_str));
             sbpl.push_str(&format!(
                 "(deny file-read* (subpath (param \"{key}\")))\n\
                  (deny file-write* (subpath (param \"{key}\")))\n\
@@ -327,7 +348,12 @@ fn check_network_upload_exfiltration(bin: &str, args: &[String], full_stmt: &str
 }
 
 fn is_stage_pure_readonly(bin: &str, args: &[String], raw_stage: &str) -> bool {
-    if raw_stage.contains('>') || raw_stage.contains("$(") || raw_stage.contains('`') {
+    if raw_stage.contains('>')
+        || raw_stage.contains("$(")
+        || raw_stage.contains('`')
+        || raw_stage.contains("<(")
+        || raw_stage.contains(">(")
+    {
         return false;
     }
     if PURE_READONLY_COMMANDS.contains(&bin) {
@@ -337,7 +363,12 @@ fn is_stage_pure_readonly(bin: &str, args: &[String], raw_stage: &str) -> bool {
         return true;
     }
     if bin == "find" {
-        return !args.iter().any(|a| matches!(a.as_str(), "-delete" | "-exec" | "-execdir" | "-ok"));
+        return !args.iter().any(|a| {
+            matches!(
+                a.as_str(),
+                "-delete" | "-exec" | "-execdir" | "-ok" | "-okdir" | "-fprint" | "-fprintf" | "-fls" | "-fprint0"
+            )
+        });
     }
     if bin == "git" {
         return matches!(

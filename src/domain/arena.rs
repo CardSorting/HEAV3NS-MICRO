@@ -90,11 +90,15 @@ impl ArenaAllocator {
 
     pub fn allocate_raw_bytes(&mut self, byte_len: usize) -> Result<usize, String> {
         let byte_offset = self.offset_words * 4;
-        let words_needed = (byte_len + 3) / 4;
-        if self.offset_words + words_needed > self.capacity_words() {
+        let words_needed = byte_len.div_ceil(4);
+        let new_offset = self
+            .offset_words
+            .checked_add(words_needed)
+            .ok_or_else(|| "ArenaAllocator slab exhausted for raw bytes allocation".to_string())?;
+        if new_offset > self.capacity_words() {
             return Err("ArenaAllocator slab exhausted for raw bytes allocation".to_string());
         }
-        self.offset_words += words_needed;
+        self.offset_words = new_offset;
         Ok(byte_offset)
     }
 
@@ -106,10 +110,13 @@ impl ArenaAllocator {
     }
 
     pub fn read_str(&self, byte_offset: usize, byte_len: usize) -> Result<&str, String> {
-        if byte_offset + byte_len > self.buffer.len() {
+        let end = byte_offset
+            .checked_add(byte_len)
+            .ok_or_else(|| format!("Out of bounds read_str: offset {byte_offset}, len {byte_len}"))?;
+        if end > self.buffer.len() {
             return Err(format!("Out of bounds read_str: offset {byte_offset}, len {byte_len}"));
         }
-        std::str::from_utf8(&self.buffer[byte_offset..byte_offset + byte_len])
+        std::str::from_utf8(&self.buffer[byte_offset..end])
             .map_err(|e| format!("Invalid UTF-8 in arena slab: {e}"))
     }
 
