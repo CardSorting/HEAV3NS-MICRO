@@ -80,7 +80,7 @@ cargo test
 # 2. Run the 5-scenario Agent Flight suite (FT-01..FT-05, 19 assertion checks)
 cargo run -- --flight
 
-# 3. Verify all 321 native macOS AppKit tests
+# 3. Verify all native macOS AppKit tests (323 executed, 6 skipped)
 cd native && swift test && cd ..
 
 # 4. Run strict Joyzoning architectural audit & documentation check

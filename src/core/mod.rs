@@ -12,6 +12,8 @@ pub mod spatial_engine;
 #[cfg(test)]
 pub mod codewhale_zenith_tests;
 #[cfg(test)]
+pub mod codex_oauth_e2e_tests;
+#[cfg(test)]
 pub mod computer_use_tests;
 #[cfg(test)]
 pub mod provider_parity_tests;
@@ -19,6 +21,8 @@ pub mod provider_parity_tests;
 pub mod spatial_tests;
 #[cfg(test)]
 pub mod substrate_tests;
+#[cfg(test)]
+pub mod zenith_hardening_tests;
 #[cfg(test)]
 pub mod zenith_tests;
 pub mod tool_governor;

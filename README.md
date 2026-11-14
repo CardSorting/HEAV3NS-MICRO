@@ -72,10 +72,10 @@ Every source file belongs to one of five strictly enforced architectural zones, 
 ## Quick Start & Verification
 
 ```bash
-# 1. Run Rust unit, spatial, computer-use, zenith, codewhale & integration test suites (77 tests)
+# 1. Run Rust unit, spatial, computer-use, zenith, codewhale & integration test suites (99 tests)
 cargo test
 
-# 2. Run Native macOS AppKit test suite (321 tests)
+# 2. Run Native macOS AppKit test suite (323 tests; 6 skipped)
 cd native && swift test && cd ..
 
 # 3. Inspect live prompt & context budget HUD, outbound request manifest, receipts, and Flight Suite

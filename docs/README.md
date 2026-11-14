@@ -56,7 +56,7 @@ Workspace-verified figures (`v0.1.0`):
 | Spatial grounding throughput | **$\le 0.40\ \mu\text{s}$** per operation (`> 240,000` ops/sec) | [`src/core/spatial_tests.rs`](../src/core/spatial_tests.rs) |
 | Rust unit & integration tests | **77** passed (`0` failures) across substrate, spatial, computer-use, prompt/shell-guard zenith, and Codewhale zenith suites | `cargo test` |
 | Agent Flight Test scenarios | **5** (`FT-01..FT-05`, `19/19` checks passing) | [`src/core/flight_runner.rs`](../src/core/flight_runner.rs) |
-| Native macOS AppKit Tests | **321** tests passing (`0` failures) | [`native/Tests/Heav3nsCodeTests/`](../native/Tests/Heav3nsCodeTests/) |
+| Native macOS AppKit Tests | **323** tests executed (`6` skipped, `0` failures) | [`native/Tests/Heav3nsCodeTests/`](../native/Tests/Heav3nsCodeTests/) |
 | Joyzoning Stability Index ($SI$) | **100% (`SOVEREIGN`, $E_S = 0.0043$)** | [`VALIDATION_REPORT.md`](../VALIDATION_REPORT.md) |
 | Joyzoning Build Health | **100% (`Grade: A+ — SOVEREIGN`, `0` violations, `0` advisories, `0` optimization notices)** | [`VALIDATION_REPORT.md`](../VALIDATION_REPORT.md) |
 | Architecture Decision Records (ADRs) | **15** + template (`ADR-0001..0015`) | [`docs/adr/README.md`](adr/README.md) |
@@ -118,7 +118,7 @@ flowchart TB
     MAP["PROJECT_MAP.md & CODE_TO_DOC_MAP.md"]
     API["api/ (Public API · CLI & Stdio RPC · Errors)"]
   end
-  subgraph code ["src/ (82 Modules) & native/ — 5-Zone Sovereign Architecture"]
+  subgraph code ["src/ (96 Modules) & native/ — 5-Zone Sovereign Architecture"]
     DOM["src/domain/ (posture_types · model_catalog · turn_receipt · prefix_and_manifest · arena · spatial_mediator)"]
     CORE["src/core/ (engine · turn_orchestrator · batch_executor · tool_governor · computer_use_orchestrator)"]
     INFRA["src/infrastructure/ (http_provider · pricing_updater · workspace_cas · vfs_store · shell_runner)"]
@@ -210,7 +210,7 @@ cargo run -- models
 # 3. Run the 5-scenario Agent Flight suite (FT-01..FT-05)
 cargo run -- --flight
 
-# 4. Run all 321 Native macOS AppKit tests
+# 4. Run all Native macOS AppKit tests (323 executed, 6 skipped)
 cd native && swift test && cd ..
 
 # 5. Verify Joyzoning architectural sovereignty & StabilityDoctor (100% SI, Grade A+)
@@ -229,4 +229,4 @@ node bin/docs-check.mjs
 2. **Emergent Systems Intelligence**: Cooperation across `HEAV3NS-MICRO`, `SPIDER`, `REWIND`, `BROCCOLI`, `SYNTHETIC SWARM`, `COMPUTER USE`, and `THE HARNESS`.
 3. **Deterministic Memory, Prefix Stability & Reversibility**: Contiguous 16-MiB arena allocation ($O(1)$ rewind), pure-Rust SHA-256 `WorkspaceSnapshotCas` (`WouldBlock`-safe `/undo`), baseline-verified two-phase VFS staging, and KV-cache-immutable prompt prefixes (`PrefixStabilityTracker` + `RequestManifest`).
 4. **Grounded Embodied Agency & Honest Verification**: Double-Wrapped Spatial Action Mediation (`Wrapper A` Grounding + `Wrapper B` Execution Assurance) and prose-free `TurnReceipt` (`heav3ns.receipt/v1`) verification with honest `BillingMetering`.
-5. **Verifiability**: 100% test pass rate (`77` Rust + `321` AppKit tests) and automated documentation parity across the workspace.
+5. **Verifiability**: 100% test pass rate (`99` Rust + `323` executed AppKit tests) and automated documentation parity across the workspace.

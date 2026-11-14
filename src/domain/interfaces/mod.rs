@@ -144,3 +144,31 @@ pub trait ILlmProvider: Send + Sync {
 
 pub type StaticProviderId = &'static str;
 pub use ILlmProvider as LlmProvider;
+
+/// Persisted ChatGPT / OpenAI Codex OAuth account store interface.
+pub trait ICodexAccountStore: Send + Sync {
+    fn has_active_account(&self) -> bool;
+    fn active_access_token(&self) -> Option<String>;
+    fn active_account_id(&self) -> Option<String>;
+    fn rpc_snapshot(&self) -> serde_json::Value;
+    fn switch_account(&self, target_id: &str) -> Result<serde_json::Value, String>;
+    fn rename_account(&self, target_id: &str, new_label: &str) -> Result<serde_json::Value, String>;
+    fn remove_account(&self, target_id: &str) -> Result<serde_json::Value, String>;
+    fn sign_out(&self, all: bool) -> Result<serde_json::Value, String>;
+    fn clear_limit(&self, target_id: &str) -> Result<serde_json::Value, String>;
+    fn set_auto_switch(&self, enabled: bool) -> Result<serde_json::Value, String>;
+    fn sign_in_async(
+        &self,
+        cancel: CancellationToken,
+        on_browser_url: Box<dyn FnOnce(String) + Send>,
+    ) -> BoxFuture<'_, Result<serde_json::Value, String>>;
+}
+
+/// Manages project target discovery, process execution, output capture, and cancellation.
+pub trait IProjectRunner: Send + Sync {
+    fn discover(&self, workspace_root: &Path) -> serde_json::Value;
+    fn start(&self, workspace_root: &Path, target_id: &str, expected_revision: Option<&str>) -> Result<serde_json::Value, String>;
+    fn stop(&self) -> serde_json::Value;
+    fn status(&self) -> serde_json::Value;
+    fn configure(&self, workspace_root: &Path, command: &str, cwd: &str, preview: Option<&str>) -> Result<serde_json::Value, String>;
+}

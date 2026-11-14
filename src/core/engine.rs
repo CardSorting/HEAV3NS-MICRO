@@ -3,7 +3,7 @@ use crate::core::request_queue::{PromptComposer, RuntimeRequestQueue};
 use crate::core::session_store::{SessionCompactor, SessionStore};
 use crate::core::tool_registry::ToolRegistry;
 use crate::domain::compaction::CompactionPolicy;
-use crate::domain::interfaces::{ILlmProvider, IWorkspaceSnapshotCas, ProgressCallback};
+use crate::domain::interfaces::{ICodexAccountStore, ILlmProvider, IWorkspaceSnapshotCas, ProgressCallback};
 use crate::domain::memory::{GameStateSnapshot, MemoryStore};
 use crate::domain::prefix_and_manifest::{PrefixFingerprint, PrefixStabilityTracker};
 use crate::domain::pricing_and_taxonomy::{ProviderTokenUsage, CREDENTIAL_REJECTED_UNSENT_CODE};
@@ -13,6 +13,7 @@ use crate::domain::types::progress::{EngineProgressEvent, EngineProgressMetadata
 use crate::domain::types::runtime::{AgentConfig, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel, ExecutionPosture};
 use crate::domain::types::tick_result::{EngineTickResult, ProviderError, ProviderRequest};
 use crate::domain::types::tool_schedule::ScheduledToolCall;
+use crate::infrastructure::codex_oauth::CodexAccountStore;
 use crate::infrastructure::http_provider::HttpProvider;
 use crate::infrastructure::vfs_store::SessionVfs;
 use crate::infrastructure::workspace_cas::WorkspaceSnapshotCas;
@@ -122,6 +123,11 @@ impl AgentEngine {
     }
 
     pub fn workspace_root(&self) -> &Path { &self.workspace_root }
+
+    /// Returns the active ChatGPT / OpenAI Codex OAuth account store via its domain interface.
+    pub fn default_account_store() -> Arc<dyn ICodexAccountStore> {
+        Arc::new(CodexAccountStore::default_store())
+    }
     pub fn tools(&self) -> &Arc<ToolRegistry> { &self.tools }
     pub fn session(&self) -> &Mutex<SessionStore> { &self.session }
     pub fn vfs(&self) -> &Mutex<SessionVfs> { &self.vfs }

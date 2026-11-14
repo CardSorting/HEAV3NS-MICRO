@@ -468,6 +468,57 @@ impl SafetyPolicy {
     pub fn detect_terminal_file_read(cmd: &str) -> Option<String> {
         ShellCommandGuard::detect_terminal_file_read(cmd)
     }
+
+    /// Returns `true` when an environment variable name holds a provider API key, secret, or auth token
+    /// that must be scrubbed from child shell/project subprocesses.
+    pub fn is_sensitive_env_var(name: &str) -> bool {
+        let upper = name.trim().to_ascii_uppercase();
+        if upper.is_empty() {
+            return false;
+        }
+        const EXACT: &[&str] = &[
+            "GITHUB_TOKEN",
+            "GH_TOKEN",
+            "NPM_TOKEN",
+            "HF_TOKEN",
+            "AWS_SESSION_TOKEN",
+            "AWS_ACCESS_KEY_ID",
+            "OPENAI_KEY",
+            "ANTHROPIC_KEY",
+            "CODEX_API_KEY",
+        ];
+        if EXACT.contains(&upper.as_str()) {
+            return true;
+        }
+        const SUFFIXES: &[&str] = &[
+            "_API_KEY",
+            "_ACCESS_KEY",
+            "_SECRET",
+            "_SECRET_KEY",
+            "_ACCESS_TOKEN",
+            "_REFRESH_TOKEN",
+            "_AUTH_TOKEN",
+            "_PRIVATE_KEY",
+            "_CLIENT_SECRET",
+            "_PASSWORD",
+            "_PASSWD",
+        ];
+        SUFFIXES.iter().any(|suf| upper.ends_with(suf))
+    }
+
+    /// Collects all sensitive credential environment variable names currently set in the process.
+    pub fn sensitive_env_vars() -> Vec<String> {
+        std::env::vars_os()
+            .filter_map(|(k, _)| {
+                let s = k.to_string_lossy().into_owned();
+                if Self::is_sensitive_env_var(&s) {
+                    Some(s)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
 }
 
 impl ISafetyPolicy for SafetyPolicy {

@@ -39,7 +39,7 @@ The system operates across two tightly interlaced layers uniting the seven sover
                                  │ stdio JSON-RPC (v: 1 framing)
                                  │
 ┌────────────────────────────────▼────────────────────────────────┐
-│          Rust Sovereign Substrate (heav3ns-micro · 82 Modules)  │
+│          Rust Sovereign Substrate (heav3ns-micro · 96 Modules)  │
 │                                                                 │
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │ UI: stdio_worker.rs · rpc_dispatch.rs · cli_presenter.rs  │  │
@@ -72,7 +72,7 @@ The system operates across two tightly interlaced layers uniting the seven sover
 
 ## 2. Complete Module Inventory
 
-### Rust Substrate Modules (`src/` — 82 Modules, All `< 800` Lines Tier 1 Optimal)
+### Rust Substrate Modules (`src/` — 96 Modules, All `< 800` Lines Tier 1 Optimal)
 
 | Module | Zone | Sovereign Pillar & Architectural Responsibility |
 | :--- | :--- | :--- |
@@ -80,7 +80,8 @@ The system operates across two tightly interlaced layers uniting the seven sover
 | `src/plumbing/text_tokens.rs` | `PLUMBING` | `THE HARNESS`: `safe_utf8_prefix`, `safe_utf8_slice`, `mask_secret_preview`, token budgeting, positional LCS `render_unified_diff`, `encode_base64`, `canonical_tool_name` |
 | `src/plumbing/json_repair.rs` | `PLUMBING` | `HEAV3NS-MICRO`: `extract_json_roots`, `repair_json_string`, streaming tool deduplication |
 | `src/plumbing/schema_and_sse.rs` | `PLUMBING` | `HEAV3NS-MICRO`: `parse_sse_events` (8 MiB frame cap, CRLF, heartbeats), `sanitize_tool_schema`, `sanitize_tool_schema_for_responses`, `redact_endpoint_for_display` |
-| `src/plumbing/secret_redactor.rs` | `PLUMBING` | `THE HARNESS`: `DeterministicSecretRedactor` (8 secret families), `CredentialDenyScope` (`Process` vs `ModelContext`, allowing `.env.example`), & `SafetyPolicy` |
+| `src/plumbing/oauth_pkce.rs` | `PLUMBING` | `THE HARNESS`: Pure PKCE S256 generation, Base64URL codec, URL query parsing, and OpenAI JWT claim extraction |
+| `src/plumbing/secret_redactor.rs` | `PLUMBING` | `THE HARNESS`: `DeterministicSecretRedactor` (8 secret families), `CredentialDenyScope` (`Process` vs `ModelContext`, allowing `.env.example`), & `SafetyPolicy` (including `is_sensitive_env_var` child env scrubbing) |
 | `src/plumbing/seatbelt_profile.rs` | `PLUMBING` | `THE HARNESS`: `SeatbeltSandboxMode`, `build_macos_seatbelt_invocation` (parameterized SBPL protecting `.git/hooks`, `~/.ssh`, `~/.aws`), `inspect_command_security` |
 | `src/plumbing/shell_guard.rs` | `PLUMBING` | `THE HARNESS`: `pub trait IShellCommandGuard`, `ShellCommandGuard` (quote/compound heredoc file-write interdiction & pipeline terminal file-read guard) |
 | `src/plumbing/fuzzy_patch.rs` | `PLUMBING` | `THE HARNESS`: `heal_fuzzy_patch`, `DeterministicPatchEngine` (V4A multi-file patch parser & applier) |
@@ -89,8 +90,8 @@ The system operates across two tightly interlaced layers uniting the seven sover
 | `src/plumbing/environmental_diff.rs` | `PLUMBING` | `SPIDER`: `compute_element_deltas`, `classify_element_affordance`, `detect_modal_or_dialog`, `analyze_spider_structural_relationships`, `diagnose_failure_cause` |
 | `src/plumbing/display_telemetry.rs` | `PLUMBING` | `COMPUTER USE` & `REWIND`: `compute_preview_delta`, `apply_annotation_mutation`, `query_action_ledger_dsl`, `compute_action_ledger_health`, `extract_dom_ui_tuples` |
 | `src/plumbing/mod.rs` | `PLUMBING` | Stateless plumbing module exports |
-| `src/domain/interfaces/mod.rs` | `DOMAIN` | `22` core port traits (`ILlmProvider`, `IHttpProvider`, `IScriptedProvider`, `IToolExecutor`, `ISessionPersistence`, `IFileSessionPersistence`, `ISessionVfs`, `ISkillsIngestor`, `ITransactionJournal`, `IWorkspaceSnapshotCas`, `IModelPricingRegistry`, `ISpatialMediator`, `ISpatialGroundingGate`, `IExecutionAssuranceGate`, `IEnvironmentalObserver`, `IBehavioralKnowledgeStore`, `IBehavioralStore`, `ISwarmIntelligenceConsultant`, `IEnvironmentalDiffer`, `ISpatialGeometry`, `IComputerUseOrchestrator`, `IWorkspacePromptProbe`) |
-| `src/domain/types/*.rs` (`17` files) | `DOMAIN` | Pure value & behavioral domain types (`provider_registry.rs`, `model_catalog.rs`, `posture_types.rs`, `messages.rs`, `runtime.rs`, `progress.rs`, `tick_result.rs`, `vfs_types.rs`, `tool_types.rs`, `tool_schedule.rs`, `skill_types.rs`, `computer_use_types.rs`, `spatial_types.rs`, `environmental_types.rs`, `swarm_intelligence_types.rs`, `learned_knowledge_types.rs`, `mod.rs`) |
+| `src/domain/interfaces/mod.rs` | `DOMAIN` | `24` core port traits (`ILlmProvider`, `IHttpProvider`, `IScriptedProvider`, `IToolExecutor`, `ISessionPersistence`, `IFileSessionPersistence`, `ISessionVfs`, `ISkillsIngestor`, `ITransactionJournal`, `IWorkspaceSnapshotCas`, `IModelPricingRegistry`, `ICodexAccountStore`, `IProjectRunner`, `ISpatialMediator`, `ISpatialGroundingGate`, `IExecutionAssuranceGate`, `IEnvironmentalObserver`, `IBehavioralKnowledgeStore`, `IBehavioralStore`, `ISwarmIntelligenceConsultant`, `IEnvironmentalDiffer`, `ISpatialGeometry`, `IComputerUseOrchestrator`, `IWorkspacePromptProbe`) |
+| `src/domain/types/*.rs` (`19` files) | `DOMAIN` | Pure value & behavioral domain types (`provider_registry.rs`, `model_catalog.rs`, `account_types.rs`, `posture_types.rs`, `messages.rs`, `runtime.rs`, `progress.rs`, `tick_result.rs`, `vfs_types.rs`, `tool_types.rs`, `tool_schedule.rs`, `skill_types.rs`, `computer_use_types.rs`, `spatial_types.rs`, `environmental_types.rs`, `swarm_intelligence_types.rs`, `learned_knowledge_types.rs`, `mod.rs`) |
 | `src/domain/prompt_spec.rs` | `DOMAIN` | `HEAV3NS-MICRO`: `SystemPromptSpec` (`Standard`, `Compact`, `SwarmSpecialist`, `SideQuestion`), KV-cache-deterministic `static_prefix`, `ModelPromptFamily`, & `format_bounded_handoff_item` |
 | `src/domain/prefix_and_manifest.rs` | `DOMAIN` | `HEAV3NS-MICRO`: `PrefixStabilityTracker` (`PinnedInitial`, `Stable`, `Repinned`, `Drift`), `RequestManifest` (`heav3ns.request_manifest/v1`), and `<context_update>` append blocks |
 | `src/domain/pricing_and_taxonomy.rs` | `DOMAIN` | `HEAV3NS-MICRO`: `IBillingMeter`, `IErrorClassifier`, `BillingMetering` (`Metered`, `LocalNoBill`, `Subscription`, `Unknown`), `ErrorEnvelope` (`402` Budget vs `429` RateLimit) |
@@ -108,6 +109,8 @@ The system operates across two tightly interlaced layers uniting the seven sover
 | `src/infrastructure/http_provider.rs` | `INFRASTRUCTURE` | `HEAV3NS-MICRO`: Multi-dialect `HttpProvider` (`ChatCompletions`, `OpenAiResponses`, `AnthropicMessages`, `GoogleGemini`) + live model discovery probes |
 | `src/infrastructure/wire_dialects.rs` | `INFRASTRUCTURE` | `HEAV3NS-MICRO`: Outbound payload builders for all 4 wire dialects, Anthropic dangling `tool_use` repair, adaptive thinking, and schema sanitization |
 | `src/infrastructure/sse_and_response_parsers.rs` | `INFRASTRUCTURE` | `HEAV3NS-MICRO`: Unified multi-dialect SSE stream accumulator and `/v1/responses` JSON parser |
+| `src/infrastructure/codex_oauth.rs` | `INFRASTRUCTURE` | `THE HARNESS`: `CodexAccountStore` implementing `ICodexAccountStore`, `127.0.0.1:1455` loopback OAuth callback (with HTML escaping & 5s read timeout), single-flight token refresh, and `429` auto-switch |
+| `src/infrastructure/project_runner.rs` | `INFRASTRUCTURE` | `THE HARNESS`: `ProjectRunner` implementing `IProjectRunner` for `project.*` target discovery, `256 KiB` bounded output streaming, `cwd` escape guard, and `-TERM` → `-KILL` teardown |
 | `src/infrastructure/pricing_updater.rs` | `INFRASTRUCTURE` | `HEAV3NS-MICRO`: `ModelPricingRegistry` implementing `IModelPricingRegistry`, atomic `0600` cache at `~/.heav3ns/pricing_catalog.json`, 12h TTL, background refreshing |
 | `src/infrastructure/scripted_provider.rs` | `INFRASTRUCTURE` | `THE HARNESS`: Deterministic `ScriptedProvider` & `ProviderStep` for Flight Tests |
 | `src/infrastructure/vfs_store.rs` | `INFRASTRUCTURE` | `REWIND`: `SessionVfs` (`VfsDiskBaseline` verification), `SkillsIngestor`, `FileSessionPersistence` |
@@ -131,10 +134,10 @@ The system operates across two tightly interlaced layers uniting the seven sover
 | `src/core/tool_registry.rs` | `CORE` | `THE HARNESS`: `ToolRegistry`, sticky on-demand specialist schema routing (`15` core + `16` on-demand), & parallel read / exclusive write wave scheduler (`partition_waves`) |
 | `src/core/request_queue.rs` | `CORE` | `THE HARNESS`: `RuntimeRequestQueue` & `PromptComposer` (`compose_with_spec`, `LUMI-MEMORY/1`, `LUMI-CONTEXT/1`) |
 | `src/core/flight_runner.rs` & `benchmark_runner.rs` | `CORE` | `THE HARNESS`: `run_agent_flight_test` (`FT-01..FT-05`), `run_micro_benchmarks`, & full benchmark suite |
-| `src/core/substrate_tests.rs`, `spatial_tests.rs`, `computer_use_tests.rs`, `zenith_tests.rs`, `codewhale_zenith_tests.rs`, `mod.rs` | `CORE` | 77 unit, spatial, computer-use, prompt/shell-guard zenith, and Codewhale zenith test suites |
+| `src/core/substrate_tests.rs`, `spatial_tests.rs`, `computer_use_tests.rs`, `zenith_tests.rs`, `codewhale_zenith_tests.rs`, `codex_oauth_e2e_tests.rs`, `zenith_hardening_tests.rs`, `mod.rs` | `CORE` | 99 unit, spatial, computer-use, OAuth E2E, credential env-scrubbing, prompt/shell-guard zenith, and Codewhale zenith test suites |
 | `src/ui/cli_presenter.rs` & `onboarding.rs` | `UI` | CLI parser (`context`, `doctor`, `demo`, `init`, `models`, `receipts`, `preview-request`), terminal REPL presenter, permissions enforcer |
-| `src/ui/stdio_worker.rs` | `UI` | Multiplexed Stdio JSON-RPC worker protocol engine (`v: 1` framing, `tokio::spawn` multi-tasking, handshake, token checks) |
-| `src/ui/worker_handlers.rs` | `UI` | Worker request handlers for `task.submit`, `task.stop`, `approval.resolve`, `posture.*`, `cas.*`, `receipts.*`, `models.*` |
+| `src/ui/stdio_worker.rs` | `UI` | Multiplexed Stdio JSON-RPC worker protocol engine (`v: 1` framing, `tokio::spawn` multi-tasking, `UNKNOWN_METHOD` error responses, bounded `shutdown`) |
+| `src/ui/worker_handlers.rs` & `provider_rpc.rs` | `UI` | Worker request handlers for `task.*`, `approval.resolve`, `posture.*`, `cas.*`, `receipts.*`, `models.*`, and ChatGPT OAuth / provider credential RPCs |
 | `src/ui/rpc_dispatch.rs` | `UI` | Desktop JSON-RPC method handlers (`files.*`, `changes.*`, `spider.*`, `memory.*`, `context.inspect`, `prompt.inspect`, `task.*`, `swarm.*`, `spatial.*`, `cua.*`, `models.*`) |
 | `src/ui/mod.rs`, `src/lib.rs`, `src/main.rs` | `UI` | UI module and binary/library Composition Roots |
 

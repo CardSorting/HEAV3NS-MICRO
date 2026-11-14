@@ -4,6 +4,7 @@ use crate::domain::types::messages::{ToolCall, ToolCallFunction};
 use crate::domain::types::provider_registry::{canonicalize_provider_id, infer_wire_dialect_from_endpoint, lookup_provider_descriptor, opencode_go_model_id, resolve_model_aware_wire_and_model, retired_provider_remediation, WireDialect};
 use crate::domain::types::runtime::CancellationToken;
 use crate::domain::types::tick_result::{finalize_provider_response, is_retryable_http_status, ProviderError, ProviderRequest, ProviderResponse, ProviderTokenUsage};
+use crate::infrastructure::codex_oauth::{build_codex_oauth_post, resolve_codex_base_url, CodexAccountStore};
 use crate::infrastructure::sse_and_response_parsers::{parse_multidialect_sse_stream, parse_responses_json, IncrementalSseAggregator};
 use crate::infrastructure::wire_dialects::{build_anthropic_messages_payload, build_chat_completions_payload_with_endpoint, build_google_gemini_payload, build_openai_responses_payload};
 use serde_json::Value;
@@ -559,18 +560,39 @@ impl ILlmProvider for HttpProvider {
             let (effective_wire, wire_model) = self.resolve_request_route(&req.model);
             let mut effective_req = req;
             effective_req.model = wire_model;
-            let url = self.resolve_url_for(effective_wire, &effective_req.model);
-            let payload = match effective_wire {
+            let mut url = self.resolve_url_for(effective_wire, &effective_req.model);
+            let mut payload = match effective_wire {
                 WireDialect::AnthropicMessages => self.build_anthropic_payload(&effective_req),
                 WireDialect::GoogleGemini => self.build_gemini_payload(&effective_req),
                 WireDialect::OpenAiResponses => self.build_responses_payload(&effective_req),
                 WireDialect::ChatCompletions => self.build_openai_payload(&effective_req),
             };
 
-            let builder = self.apply_auth_headers(
-                self.client.post(&url).header("content-type", "application/json"),
-                effective_wire,
-            );
+            let has_explicit_sk = self.api_key.as_deref().is_some_and(|k| k.trim().starts_with("sk-"));
+            let codex_oauth = if canon_provider == "openai-codex"
+                && !has_explicit_sk
+                && self.endpoint.trim_end_matches('/') == "https://api.openai.com/v1"
+            {
+                CodexAccountStore::default_store()
+                    .get_valid_active_credentials()
+                    .await
+                    .map_err(ProviderError::Transport)?
+            } else {
+                None
+            };
+
+            let builder = if let Some((ref oauth_token, ref account_id)) = codex_oauth {
+                url = format!("{}/responses", resolve_codex_base_url());
+                if let Some(obj) = payload.as_object_mut() {
+                    obj.insert("stream".to_string(), Value::Bool(true));
+                }
+                build_codex_oauth_post(&self.client, &url, oauth_token, account_id.as_deref())
+            } else {
+                self.apply_auth_headers(
+                    self.client.post(&url).header("content-type", "application/json"),
+                    effective_wire,
+                )
+            };
 
             let http_fut = async {
                 let resp = builder
@@ -627,6 +649,33 @@ impl ILlmProvider for HttpProvider {
                                     let json_body: Value = serde_json::from_str(&retry_text)
                                         .map_err(|e| ProviderError::Transport(format!("Invalid JSON from provider: {e}")))?;
                                     return Self::parse_openai_response(&json_body);
+                                }
+                            }
+                        }
+                    }
+
+                    if codex_oauth.is_some() && status == 429 {
+                        CodexAccountStore::default_store().record_rate_limit(retry_after_ms);
+                    }
+                    if let Some((ref rejected_tok, _)) = codex_oauth {
+                        if status == 401 {
+                            if let Ok((new_token, new_account_id)) = CodexAccountStore::default_store().force_refresh_active(rejected_tok).await {
+                                let retry_b = build_codex_oauth_post(&self.client, &url, &new_token, new_account_id.as_deref());
+                                if let Ok(retry_resp) = retry_b.json(&payload).send().await {
+                                    let retry_status = retry_resp.status().as_u16();
+                                    let retry_ct = retry_resp.headers().get("content-type").and_then(|v| v.to_str().ok()).map(String::from);
+                                    if (200..300).contains(&retry_status) && is_event_stream_content_type(retry_ct.as_deref()) {
+                                        return stream_incremental_sse_response(retry_resp, &self.name, MAX_HTTP_RESPONSE_BODY_BYTES).await;
+                                    }
+                                    let retry_text = read_bounded_response_text(retry_resp, MAX_HTTP_RESPONSE_BODY_BYTES).await?;
+                                    if (200..300).contains(&retry_status) {
+                                        if looks_like_sse(&retry_text, retry_ct.as_deref()) {
+                                            return parse_sse_stream(&retry_text, &self.name);
+                                        }
+                                        let json_body: Value = serde_json::from_str(&retry_text)
+                                            .map_err(|e| ProviderError::Transport(format!("Invalid JSON from provider: {e}")))?;
+                                        return parse_responses_json(&json_body, &self.name);
+                                    }
                                 }
                             }
                         }

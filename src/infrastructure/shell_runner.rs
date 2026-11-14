@@ -102,6 +102,9 @@ pub async fn execute_shell_command_sandboxed(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    for key in SafetyPolicy::sensitive_env_vars() {
+        cmd.env_remove(key);
+    }
 
     #[cfg(unix)]
     cmd.process_group(0);

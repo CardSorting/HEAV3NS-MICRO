@@ -39,8 +39,11 @@ We executed a comprehensive three-pillar architectural integration:
   - `spider.check` (performing syntax, import, and circular dependency checks).
   - `memory.list`, `memory.save`, and `memory.remove` (binding directly to `src/domain/memory.rs`).
   - `context.inspect` and `prompt.inspect` (token budget HUD and KV-cache prefix telemetry).
-  - `task.submit`, `task.stop`, and `task.lookup` (safe non-blocking submission reconciliation).
-  - `swarm.plan`, `swarm.next`, and `swarm.report` (topological specialist graph execution).
+  - `task.submit`, `task.cancel`, `task.cancelAll`, `task.lookup` (safe non-blocking submission reconciliation).
+  - `swarm.plan`, `swarm.next`, `swarm.report` (topological specialist graph execution).
+  - `signIn`, `cancel`, `status`, `accounts`, `switch`, `rename`, `remove`, `signOut`, `clearLimit`, `setAuto` (ChatGPT / OpenAI Codex OAuth PKCE loopback flow and multi-account lifecycle via `ICodexAccountStore`).
+  - `project.discover`, `project.start`, `project.stop`, `project.status`, `project.configure` (process-backed workspace runner via Composition Root–injected `Arc<dyn IProjectRunner>`).
+  - Strict JSON-RPC error contracts: unknown `is_rpc` methods return `UNKNOWN_METHOD` errors, `side.query` propagates `SIDE_QUERY_FAILED` / `SIDE_QUERY_EMPTY` errors, and `shutdown`/`exit` cancels active tokens and stops `project_runner` before a bounded 3s drain.
 
 ### 2. Modular Swift UI Decomposition
 - Decomposed the 3,772-line `WorkspaceWindow.swift` into 8 sovereign modules:

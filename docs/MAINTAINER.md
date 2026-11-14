@@ -18,13 +18,13 @@ Guidelines, automated guardrails, and quality checklists for maintainers of **HE
 Before merging any pull request or cutting a release, maintainers must verify that all five local verification gates exit with code `0`:
 
 ```bash
-# Gate 1: Rust compilation & test suite (77 tests)
+# Gate 1: Rust compilation & test suite (99 tests)
 cargo test
 
 # Gate 2: 5-scenario Agent Flight suite (19 checks)
 cargo run -- --flight
 
-# Gate 3: Native macOS AppKit suite (321 tests)
+# Gate 3: Native macOS AppKit suite (323 executed, 6 skipped)
 cd native && swift test && cd ..
 
 # Gate 4: Joyzoning spatial sovereignty audit (100% SI, Grade A+)

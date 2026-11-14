@@ -11,7 +11,6 @@ pub use crate::ui::provider_rpc::{build_sovereign_model_catalog, build_sovereign
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Write};
-use std::path::Path;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
@@ -132,60 +131,80 @@ pub fn switch_worker_conversation(state: &mut WorkerSharedState, engine: &AgentE
 }
 
 /// Discovers runnable workspace targets (`Cargo.toml`, `Package.swift`, `package.json`) with both `title` and `name`.
-pub fn discover_project_targets(workspace_root: &Path) -> Value {
-    let mut targets = Vec::new();
-    if workspace_root.join("Cargo.toml").exists() {
-        targets.push(json!({
-            "id": "cargo-test",
-            "title": "Rust Test Suite (cargo test)",
-            "name": "cargo test",
-            "command": "cargo test",
-            "workingDirectory": "."
-        }));
-        targets.push(json!({
-            "id": "flight-suite",
-            "title": "Agent Flight Verification (--flight)",
-            "name": "cargo run -- --flight",
-            "command": "cargo run -- --flight",
-            "workingDirectory": "."
-        }));
+/// Handles `computer.*`, `browser.*`, `spatial.*`, `skills.*`, and `soul.status` RPCs.
+pub async fn handle_automation_rpc(method: &str, req_id: &str, params: &Value, engine: &AgentEngine) -> Value {
+    match method {
+        "computer.action" | "computer.capture" | "computer.health" => {
+            let mut req = params.clone();
+            if method == "computer.capture" && req.get("action").is_none() {
+                req["action"] = json!("capture");
+            }
+            if method == "computer.health" && req.get("action").is_none() {
+                req["action"] = json!("audit_health");
+            }
+            engine.tools().display_state.lock().unwrap().execute_action(&req).unwrap_or_else(|e| json!({"error": e}))
+        }
+        "computer.observe" | "computer.interpret" | "computer.consult" | "computer.orchestrate" => {
+            let action = match method {
+                "computer.observe" => "observe",
+                "computer.interpret" => "interpret",
+                "computer.consult" => "consult_swarm",
+                _ => "orchestrate",
+            };
+            let mut req = params.clone();
+            req["action"] = json!(action);
+            let call = crate::domain::types::tool_schedule::ScheduledToolCall {
+                id: format!("req-{req_id}"),
+                name: "computer_use".into(),
+                args: req,
+            };
+            let res = engine.tools().execute_single(&call, engine.workspace_root(), ExecutionAuthorityLevel::Autonomous, None).await;
+            if res.success { res.output } else { json!({"error": res.error}) }
+        }
+        "computer.patterns" => {
+            let kstore = engine.tools().computer_orchestrator.knowledge_store.lock().unwrap();
+            json!({ "patterns": kstore.list_patterns(), "procedures": kstore.list_procedures() })
+        }
+        "browser.action" | "browser.snapshot" | "browser.navigate" => {
+            let mut req = params.clone();
+            if method == "browser.snapshot" && req.get("action").is_none() {
+                req["action"] = json!("snapshot");
+            }
+            if method == "browser.navigate" && req.get("action").is_none() {
+                req["action"] = json!("navigate");
+            }
+            engine.tools().display_state.lock().unwrap().execute_browser_action(&req).unwrap_or_else(|e| json!({"error": e}))
+        }
+        "spatial.ground" | "spatial.execute" | "spatial.health" | "spatial.query" => {
+            let action = match method {
+                "spatial.ground" => "ground",
+                "spatial.query" => "query",
+                "spatial.health" => "audit",
+                _ => "execute",
+            };
+            let mut req = params.clone();
+            req["action"] = json!(action);
+            let call = crate::domain::types::tool_schedule::ScheduledToolCall {
+                id: format!("req-{req_id}"),
+                name: "spatial_interact".into(),
+                args: req,
+            };
+            let res = engine.tools().execute_single(&call, engine.workspace_root(), ExecutionAuthorityLevel::Autonomous, None).await;
+            if res.success { res.output } else { json!({"error": res.error}) }
+        }
+        _ => {
+            let mut cat = engine.tools().skill_catalog.lock().unwrap();
+            match method {
+                "skills.forge" => cat.forge_skill(params).unwrap_or_else(|e| json!({"error": e})),
+                "skills.lint" => {
+                    let id = params.get("id").and_then(|v| v.as_str()).unwrap_or("computer-use-operator");
+                    cat.lint_and_autofix_skill(id, params.get("autofix").and_then(|v| v.as_bool()).unwrap_or(false)).unwrap_or_else(|e| json!({"error": e}))
+                }
+                "soul.status" => json!({ "activeSoul": cat.active_soul, "competencies": cat.competency_scores }),
+                _ => cat.evaluate_dag(),
+            }
+        }
     }
-    if workspace_root.join("native/Package.swift").exists() {
-        targets.push(json!({
-            "id": "swift-native-test",
-            "title": "Native macOS AppKit Tests (swift test)",
-            "name": "swift test (native)",
-            "command": "cd native && swift test",
-            "workingDirectory": "native"
-        }));
-    } else if workspace_root.join("Package.swift").exists() {
-        targets.push(json!({
-            "id": "swift-test",
-            "title": "Swift Package Tests (swift test)",
-            "name": "swift test",
-            "command": "swift test",
-            "workingDirectory": "."
-        }));
-    }
-    if workspace_root.join("package.json").exists() {
-        targets.push(json!({
-            "id": "npm-test",
-            "title": "Node Test Suite (npm test)",
-            "name": "npm test",
-            "command": "npm test",
-            "workingDirectory": "."
-        }));
-    }
-    if targets.is_empty() {
-        targets.push(json!({
-            "id": "workspace-status",
-            "title": "Workspace Status Check",
-            "name": "git status",
-            "command": "git status --short",
-            "workingDirectory": "."
-        }));
-    }
-    json!({ "targets": targets })
 }
 
 /// Handles `posture.{get,set,step}`, `receipts.list`, `turn.undo`, and `request.preview` RPCs.

@@ -4,6 +4,7 @@ use heav3ns_micro::core::flight_runner::{format_flight_test_report, run_agent_fl
 use heav3ns_micro::domain::types::provider_registry::{canonicalize_provider_id, lookup_provider_descriptor, resolve_effective_wire_override, resolve_provider_route, retired_provider_remediation, ReasoningEffortLevel, WireDialect, PROVIDER_DESCRIPTORS};
 use heav3ns_micro::domain::types::runtime::{AgentConfig, CancellationToken, EngineTickInput, EngineTickOutcome};
 use heav3ns_micro::infrastructure::http_provider::{probe_local_ollama_model, HttpProvider};
+use heav3ns_micro::infrastructure::project_runner::ProjectRunner;
 use heav3ns_micro::ui::cli_presenter::{parse_args, print_help, CliOptions, Heav3nsUserConfig, RunMode};
 use heav3ns_micro::ui::onboarding::{create_cli_progress_listener, format_auth_error_card, format_turn_summary, print_onboarding_notice, print_tool_catalog, print_welcome_banner, render_color_diff, run_doctor_cli, run_guided_demo, run_init_wizard, suggest_command};
 use heav3ns_micro::ui::stdio_worker::run_stdio_worker;
@@ -423,7 +424,7 @@ async fn main() {
         }
         RunMode::StdioWorker => {
             let (engine, _) = build_engine(&opts).await;
-            run_stdio_worker(engine).await;
+            run_stdio_worker(engine, Arc::new(ProjectRunner::create_runner())).await;
         }
         RunMode::SinglePrompt => {
             let (engine, cfg) = build_engine(&opts).await;

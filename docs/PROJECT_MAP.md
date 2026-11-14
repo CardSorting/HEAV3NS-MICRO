@@ -16,7 +16,7 @@ This map reflects the complete layout and organization of the **HEAV3NS-MICRO** 
 | **`src/core/`** (`20` modules) | `CORE` | Use-case orchestration: `engine.rs` (`AgentEngine`), `turn_orchestrator.rs`, `batch_executor.rs`, `context_inspector.rs` (`/context`, `/prompt`, `/preview-request`), `computer_use_orchestrator.rs` (`ComputerUseOrchestrator` 9-stage closed loop), `spatial_engine.rs` (`SpatialInteractionEngine`), `slash_and_swarm.rs`, `session_store.rs`, `tool_governor.rs` (`FileReadTracker`, `ToolLoopBreaker`), `tool_specs.rs` (`31` built-in tools), `tool_registry.rs`, `request_queue.rs`, `flight_runner.rs`, `benchmark_runner.rs`, `substrate_tests.rs`, `spatial_tests.rs`, `computer_use_tests.rs`, `zenith_tests.rs`, `codewhale_zenith_tests.rs`, `mod.rs` |
 | **`src/ui/` & Roots** (`8` modules) | `UI` | Presenters, multiplexed protocol handlers, and Composition Roots: `ui/cli_presenter.rs`, `ui/onboarding.rs`, `ui/stdio_worker.rs` (`"v": 1` JSON-RPC framing), `ui/worker_handlers.rs`, `ui/rpc_dispatch.rs`, `ui/mod.rs`, `lib.rs`, `main.rs` |
 | **`native/Sources/Heav3nsCode/`** | `UI` / `PLUMBING` | Native macOS AppKit IDE client modularized under Tier 1 Optimal caps (`< 800` lines) with `Shift+Tab` posture stepping, `⌘K` Omnibar shortcut badges, 3-choice session approvals, live `TurnReceiptSummaryBar`, and `dispose()` lifecycle hygiene |
-| **`native/Tests/Heav3nsCodeTests/`** | `UI` | Comprehensive `321`-test AppKit test suite (`0` failures) |
+| **`native/Tests/Heav3nsCodeTests/`** | `UI` | Comprehensive `323`-test AppKit test suite (`6` skipped, `0` failures) |
 | **`docs/`** | `UI` / `DOMAIN` | Diátaxis + Institutional Memory documentation hub (`README.md`, `papers/`, `adr/`, `playbooks/`, `postmortems/`, `wiki/`, `kb/`, `api/`) |
 
 ---
@@ -24,7 +24,7 @@ This map reflects the complete layout and organization of the **HEAV3NS-MICRO** 
 ## Unified Execution Architecture
 
 ```
-native/Sources/Heav3nsCode/ (AppKit Native Desktop IDE · 321 Tests)
+native/Sources/Heav3nsCode/ (AppKit Native Desktop IDE · 323 Tests)
   │
   │ stdio JSON-RPC (v: 1)
   ▼

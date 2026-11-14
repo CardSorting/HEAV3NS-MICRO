@@ -31,4 +31,4 @@ Long-lived controllers, execution postures, and processes must operate under fai
 
 ## VII. The Law of Proof-Before-Mutation
 No architectural or runtime change is complete without automated empirical verification.
-- **Rule**: Every change must pass `cargo test` (`77` suites), `cd native && swift test` (`321` suites), `heav3ns-micro --flight` (`FT-01..FT-05`), `joy-check --theme strict` (`100%` Stability Index, `0` violations, `0` advisories), and `node bin/docs-check.mjs`.
+- **Rule**: Every change must pass `cargo test` (`99` suites), `cd native && swift test` (`323` executed, `6` skipped), `heav3ns-micro --flight` (`FT-01..FT-05`), `joy-check --theme strict` (`100%` Stability Index, `0` violations, `0` advisories), and `node bin/docs-check.mjs`.

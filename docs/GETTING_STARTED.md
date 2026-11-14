@@ -50,7 +50,7 @@ cargo run -- --smoke
 
 Expected output:
 ```text
-running 77 tests
+running 99 tests
 test core::substrate_tests::tests::test_arena_allocator_alignment_and_o1_rewind ... ok
 test core::substrate_tests::tests::test_wave_scheduler_partitioning ... ok
 test core::substrate_tests::tests::test_self_healing_parser_and_streaming_dedup ... ok
@@ -101,7 +101,7 @@ cd ..
 Expected output:
 ```text
 Test Suite 'All tests' passed at ...
-	 Executed 321 tests, with 0 failures (0 unexpected)
+	 Executed 323 tests, with 6 tests skipped and 0 failures (0 unexpected)
 ```
 
 ---

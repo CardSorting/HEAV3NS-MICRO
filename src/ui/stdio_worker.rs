@@ -2,13 +2,15 @@
 use crate::core::engine::AgentEngine;
 use crate::core::flight_runner::run_agent_flight_test;
 use crate::domain::compaction::CompactionPolicy;
+use crate::domain::interfaces::IProjectRunner;
 use crate::domain::swarm::{classify_task_for_legion, SwarmAssignment};
 use crate::domain::types::provider_registry::{canonicalize_provider_id, lookup_provider_descriptor, retired_provider_remediation, ReasoningEffortLevel, PROVIDER_DESCRIPTORS};
 use crate::domain::types::runtime::{CancellationToken, EngineTickInput, ExecutionAuthorityLevel, ExecutionPosture, UserApprovalChoice};
 use crate::plumbing::hash_and_math::{fnv1a_32, now_ms};
 use crate::ui::cli_presenter::Heav3nsUserConfig;
+use crate::ui::provider_rpc::handle_account_mutation_rpc;
 use crate::ui::rpc_dispatch::{build_context_history_response, build_context_inspect_response, build_hello_response, build_model_selection, build_prompt_inspect_response, build_spider_check_multi_response, build_state_inspect_response, handle_files_rpc, handle_memory_rpc, sha256_hex};
-use crate::ui::worker_handlers::{build_sovereign_model_catalog_with_recent, build_sovereign_model_discovery, discover_project_targets, emit_jsonl_line, execute_multiplexed_submit, handle_posture_and_receipts_rpc, handle_provider_credential_rpc, switch_worker_conversation, WorkerSharedState};
+use crate::ui::worker_handlers::{build_sovereign_model_catalog_with_recent, build_sovereign_model_discovery, emit_jsonl_line, execute_multiplexed_submit, handle_automation_rpc, handle_posture_and_receipts_rpc, handle_provider_credential_rpc, switch_worker_conversation, WorkerSharedState};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io;
@@ -17,11 +19,12 @@ use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::task::JoinHandle;
 
-pub async fn run_stdio_worker(engine: Arc<AgentEngine>) {
+pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn IProjectRunner>) {
     let stdout_lock = Arc::new(Mutex::new(io::stdout()));
     let state = Arc::new(Mutex::new(WorkerSharedState::from_engine_config(&engine.config_snapshot())));
     let event_seq = Arc::new(AtomicI64::new(0));
     let mut spawned_turns: Vec<JoinHandle<()>> = Vec::new();
+    let mut active_signin_cancel: Option<CancellationToken> = None;
 
     let root_bytes = engine.workspace_root().to_string_lossy().as_bytes().to_vec();
     let default_ws = format!("ws-{:08x}", fnv1a_32(&root_bytes));
@@ -191,15 +194,6 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>) {
                     }))
                     .collect();
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "count": items.len(), "providers": items } }));
-            }
-            m if m.ends_with(".status") || m.ends_with(".saveKey") || m.ends_with(".clearKey") => {
-                let resp = {
-                    let mut st = state.lock().unwrap();
-                    let active_prov = st.active_provider.clone();
-                    let active_mod = st.active_model.clone();
-                    handle_provider_credential_rpc(m, &params, &mut st.provider_keys, &active_prov, &active_mod, &engine)
-                };
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
             }
             "posture.get" | "posture.set" | "posture.step" | "receipts.list" | "turn.undo" | "request.preview" => {
                 let resp = handle_posture_and_receipts_rpc(method, &params, &engine);
@@ -398,11 +392,31 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>) {
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "flagged": true } }));
             }
             "project.discover" => {
-                let targets = discover_project_targets(engine.workspace_root());
+                let targets = project_runner.discover(engine.workspace_root());
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": targets }));
             }
-            "project.status" | "project.healing" | "project.start" | "project.stop" | "project.configure" => {
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "state": "idle", "output": "", "revision": 1, "healing": { "enabled": true } } }));
+            "project.status" | "project.healing" => {
+                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": project_runner.status() }));
+            }
+            "project.start" => {
+                let target_id = params.get("id").and_then(Value::as_str).unwrap_or("");
+                let rev = params.get("revision").and_then(Value::as_str);
+                match project_runner.start(engine.workspace_root(), target_id, rev) {
+                    Ok(snap) => emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": snap })),
+                    Err(msg) => emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "PROJECT_START_FAILED", "message": msg } })),
+                }
+            }
+            "project.stop" => {
+                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": project_runner.stop() }));
+            }
+            "project.configure" => {
+                let cmd = params.get("command").and_then(Value::as_str).unwrap_or("");
+                let cwd = params.get("cwd").and_then(Value::as_str).unwrap_or(".");
+                let preview = params.get("preview").and_then(Value::as_str);
+                match project_runner.configure(engine.workspace_root(), cmd, cwd, preview) {
+                    Ok(res) => emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": res })),
+                    Err(msg) => emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "PROJECT_CONFIG_FAILED", "message": msg } })),
+                }
             }
             "project.tasks.list" => {
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "revision": 1, "total": 0, "offset": 0, "nextOffset": 0, "limited": false, "tasks": [] } }));
@@ -433,79 +447,8 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>) {
                 let legion_plan = classify_task_for_legion(task_desc, &target_files, strategy, max_spec);
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": legion_plan }));
             }
-            "computer.action" | "computer.capture" | "computer.health" => {
-                let mut req = params.clone();
-                if method == "computer.capture" && req.get("action").is_none() {
-                    req["action"] = json!("capture");
-                }
-                if method == "computer.health" && req.get("action").is_none() {
-                    req["action"] = json!("audit_health");
-                }
-                let out = engine.tools().display_state.lock().unwrap().execute_action(&req).unwrap_or_else(|e| json!({"error": e}));
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": out }));
-            }
-            "computer.observe" | "computer.interpret" | "computer.consult" | "computer.orchestrate" => {
-                let action = match method {
-                    "computer.observe" => "observe",
-                    "computer.interpret" => "interpret",
-                    "computer.consult" => "consult_swarm",
-                    _ => "orchestrate",
-                };
-                let mut req = params.clone();
-                req["action"] = json!(action);
-                let call = crate::domain::types::tool_schedule::ScheduledToolCall {
-                    id: format!("req-{req_id}"),
-                    name: "computer_use".into(),
-                    args: req,
-                };
-                let res = engine.tools().execute_single(&call, engine.workspace_root(), ExecutionAuthorityLevel::Autonomous, None).await;
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": if res.success { res.output } else { json!({"error": res.error}) } }));
-            }
-            "computer.patterns" => {
-                let kstore = engine.tools().computer_orchestrator.knowledge_store.lock().unwrap();
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "patterns": kstore.list_patterns(), "procedures": kstore.list_procedures() } }));
-            }
-            "browser.action" | "browser.snapshot" | "browser.navigate" => {
-                let mut req = params.clone();
-                if method == "browser.snapshot" && req.get("action").is_none() {
-                    req["action"] = json!("snapshot");
-                }
-                if method == "browser.navigate" && req.get("action").is_none() {
-                    req["action"] = json!("navigate");
-                }
-                let out = engine.tools().display_state.lock().unwrap().execute_browser_action(&req).unwrap_or_else(|e| json!({"error": e}));
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": out }));
-            }
-            "spatial.ground" | "spatial.execute" | "spatial.health" | "spatial.query" => {
-                let action = match method {
-                    "spatial.ground" => "ground",
-                    "spatial.query" => "query",
-                    "spatial.health" => "audit",
-                    _ => "execute",
-                };
-                let mut req = params.clone();
-                req["action"] = json!(action);
-                let call = crate::domain::types::tool_schedule::ScheduledToolCall {
-                    id: format!("req-{req_id}"),
-                    name: "spatial_interact".into(),
-                    args: req,
-                };
-                let res = engine.tools().execute_single(&call, engine.workspace_root(), ExecutionAuthorityLevel::Autonomous, None).await;
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": if res.success { res.output } else { json!({"error": res.error}) } }));
-            }
-            "skills.dag" | "skills.forge" | "skills.lint" | "soul.status" => {
-                let out = {
-                    let mut cat = engine.tools().skill_catalog.lock().unwrap();
-                    match method {
-                        "skills.forge" => cat.forge_skill(&params).unwrap_or_else(|e| json!({"error": e})),
-                        "skills.lint" => {
-                            let id = params.get("id").and_then(|v| v.as_str()).unwrap_or("computer-use-operator");
-                            cat.lint_and_autofix_skill(id, params.get("autofix").and_then(|v| v.as_bool()).unwrap_or(false)).unwrap_or_else(|e| json!({"error": e}))
-                        }
-                        "soul.status" => json!({ "activeSoul": cat.active_soul, "competencies": cat.competency_scores }),
-                        _ => cat.evaluate_dag(),
-                    }
-                };
+            "computer.action" | "computer.capture" | "computer.health" | "computer.observe" | "computer.interpret" | "computer.consult" | "computer.orchestrate" | "computer.patterns" | "browser.action" | "browser.snapshot" | "browser.navigate" | "spatial.ground" | "spatial.execute" | "spatial.health" | "spatial.query" | "skills.dag" | "skills.forge" | "skills.lint" | "soul.status" => {
+                let out = handle_automation_rpc(method, &req_id, &params, &engine).await;
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": out }));
             }
             "agentSwarm.form" | "agentSwarm.formResume" => {
@@ -657,50 +600,69 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>) {
                     params.get("conversation").and_then(|v| v.as_str()).unwrap_or(&st.current_conversation).to_string()
                 };
                 let q = params.get("question").and_then(|v| v.as_str()).unwrap_or("");
-                let ans = engine.ask_side_question(q).await.unwrap_or_else(|_| format!("HEAV3NS-MICRO side query processed ({} chars).", q.len()));
-                let reply = if ans.trim().is_empty() { "HEAV3NS-MICRO side query verified.".to_string() } else { ans };
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "conversation": conv, "response": reply, "contextLimited": false } }));
+                match engine.ask_side_question(q).await {
+                    Ok(ans) if !ans.trim().is_empty() => {
+                        emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "conversation": conv, "response": ans, "contextLimited": false } }));
+                    }
+                    Ok(_) => {
+                        emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "SIDE_QUERY_EMPTY", "message": "Provider returned an empty response." } }));
+                    }
+                    Err(err) => {
+                        emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "SIDE_QUERY_FAILED", "message": err.to_string() } }));
+                    }
+                }
             }
             "memory.list" | "memory.read" | "memory.write" | "memory.remove" => {
                 let conv = state.lock().unwrap().current_conversation.clone();
                 let resp = handle_memory_rpc(method, &params, &conv, &engine);
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
             }
-            "status" | "accounts" | "signIn" | "signOut" | "cancel" | "switch" | "rename" | "remove" | "clearLimit" | "setAuto" => {
-                let resp = {
-                    let mut st = state.lock().unwrap();
-                    if method == "signOut" || method == "remove" {
-                        st.account_signed_in = false;
-                    }
-                    if method == "signIn" {
-                        st.account_signed_in = true;
-                    }
-                    if method == "rename" {
-                        if let Some(lbl) = params.get("label").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-                            st.account_label = lbl.to_string();
-                        }
-                    }
-                    if method == "setAuto" {
-                        if let Some(en) = params.get("enabled").and_then(|v| v.as_bool()) {
-                            st.account_auto_switch = en;
-                        }
-                    }
-                    let acc_list = if st.account_signed_in {
-                        vec![json!({ "id": "acc-default", "label": st.account_label, "planType": "pro", "active": true, "limited": false, "canRefresh": true })]
-                    } else {
-                        Vec::new()
-                    };
-                    json!({
-                        "saved": st.account_signed_in,
-                        "created": true,
-                        "accessChecked": true,
-                        "modelCount": 3,
-                        "account": { "id": "acc-default", "label": st.account_label },
-                        "accounts": acc_list,
-                        "autoSwitch": st.account_auto_switch
-                    })
-                };
+            "status" | "accounts" => {
+                let resp = AgentEngine::default_account_store().rpc_snapshot();
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
+            }
+            "signIn" => {
+                if let Some(prev) = active_signin_cancel.take() {
+                    prev.cancel();
+                }
+                let cancel = CancellationToken::new();
+                active_signin_cancel = Some(cancel.clone());
+                let out_task = Arc::clone(&stdout_lock);
+                let req_id_task = req_id.clone();
+                let handle = tokio::spawn(async move {
+                    let out_browser = Arc::clone(&out_task);
+                    let store = AgentEngine::default_account_store();
+                    let res = store
+                        .sign_in_async(
+                            cancel,
+                            Box::new(move |url| {
+                                emit_jsonl_line(&out_browser, &json!({ "v": 1, "event": "browser", "url": url }));
+                            }),
+                        )
+                        .await;
+                    match res {
+                        Ok(result) => {
+                            emit_jsonl_line(&out_task, &json!({ "v": 1, "kind": "response", "id": req_id_task, "result": result }));
+                        }
+                        Err(err) => {
+                            emit_jsonl_line(&out_task, &json!({ "v": 1, "kind": "response", "id": req_id_task, "error": err }));
+                        }
+                    }
+                });
+                spawned_turns.push(handle);
+            }
+            "cancel" => {
+                if let Some(tok) = active_signin_cancel.take() {
+                    tok.cancel();
+                }
+                let resp = AgentEngine::default_account_store().rpc_snapshot();
+                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
+            }
+            "switch" | "rename" | "remove" | "signOut" | "clearLimit" | "setAuto" => {
+                match handle_account_mutation_rpc(method, &params) {
+                    Ok(result) => emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": result })),
+                    Err(err) => emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": err })),
+                }
             }
             "ping" | "health" => {
                 let q = engine.queue().snapshot();
@@ -720,9 +682,19 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>) {
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "id": req_id, "type": "result", "swarm": res }));
             }
             "shutdown" | "exit" => {
-                for handle in spawned_turns.drain(..) {
-                    let _ = handle.await;
+                if let Some(tok) = active_signin_cancel.take() {
+                    tok.cancel();
                 }
+                if let Some(ref tok) = state.lock().unwrap().active_cancel {
+                    tok.cancel();
+                }
+                let _ = project_runner.stop();
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                    for handle in spawned_turns.drain(..) {
+                        let _ = handle.await;
+                    }
+                })
+                .await;
                 if is_rpc {
                     emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "stopped": true } }));
                 } else {
@@ -746,9 +718,18 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>) {
                 state.lock().unwrap().active_cancel = None;
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "id": req_id, "type": "result", "result": result }));
             }
+            m if m.ends_with(".status") || m.ends_with(".saveKey") || m.ends_with(".clearKey") => {
+                let resp = {
+                    let mut st = state.lock().unwrap();
+                    let active_prov = st.active_provider.clone();
+                    let active_mod = st.active_model.clone();
+                    handle_provider_credential_rpc(m, &params, &mut st.provider_keys, &active_prov, &active_mod, &engine)
+                };
+                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
+            }
             other => {
                 if is_rpc {
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "status": "ok", "unhandled": other } }));
+                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "UNKNOWN_METHOD", "message": format!("Unsupported method: {other}") } }));
                 } else {
                     emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "id": req_id, "type": "error", "code": "UNKNOWN_METHOD", "message": format!("Unsupported method: {other}") }));
                 }
@@ -756,6 +737,10 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>) {
         }
     }
 
+    if let Some(tok) = active_signin_cancel.take() {
+        tok.cancel();
+    }
+    let _ = project_runner.stop();
     for handle in spawned_turns {
         let _ = handle.await;
     }

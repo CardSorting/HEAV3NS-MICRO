@@ -1,4 +1,5 @@
 // [LAYER: DOMAIN]
+pub mod account_types;
 pub mod computer_use_types;
 pub mod environmental_types;
 pub mod learned_knowledge_types;
@@ -17,6 +18,7 @@ pub mod tool_schedule;
 pub mod tool_types;
 pub mod vfs_types;
 
+pub use crate::domain::types::account_types::{ChatGptAccountCredentials, ChatGptAccountStoreData, ChatGptAccountSummary};
 pub use crate::domain::types::computer_use_types::{IUiElement, IVirtualWindow, UiElement, VirtualWindow};
 pub use crate::domain::types::environmental_types::{BehavioralAffordance, EnvironmentalObservation, EnvironmentalRegion, IBehavioralAffordance, IEnvironmentalObservation, RegionKind};
 pub use crate::domain::types::learned_knowledge_types::{EnvironmentalReconciliationReport, ILearnedPattern, IReconciliationReport, LearnedInteractionPattern, LearnedWorkflowProcedure};

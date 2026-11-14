@@ -29,7 +29,7 @@ _Companion to [The Ascendant Computational Intelligence](ascendant-intelligence.
 | Spatial grounding throughput | **$\le 0.40\ \mu\text{s}$** per operation (`> 240,000` ops/sec) | [`src/core/spatial_tests.rs`](../../src/core/spatial_tests.rs) |
 | Rust unit & integration tests | **77** passed (`0` failed) across substrate, spatial, computer-use, prompt/shell-guard zenith, and Codewhale zenith suites | `cargo test` |
 | Agent Flight Test scenarios | **5** (`FT-01..FT-05`, `19/19` checks passing) | [`src/core/flight_runner.rs`](../../src/core/flight_runner.rs) |
-| Native macOS AppKit Tests | **321** passed (`0` failed) | [`native/Tests/Heav3nsCodeTests/`](../../native/Tests/Heav3nsCodeTests/) |
+| Native macOS AppKit Tests | **323** executed (`6` skipped, `0` failed) | [`native/Tests/Heav3nsCodeTests/`](../../native/Tests/Heav3nsCodeTests/) |
 | Joyzoning Stability Index ($SI$) | **100% (`SOVEREIGN`, $E_S = 0.0043$)** | [`VALIDATION_REPORT.md`](../../VALIDATION_REPORT.md) |
 | Joyzoning Build Health | **100% (`Grade: A+ — SOVEREIGN`, `0` violations, `0` advisories)** | [`VALIDATION_REPORT.md`](../../VALIDATION_REPORT.md) |
 | Architecture Decision Records (ADRs) | **15** + template (`ADR-0001..0015`) | [`docs/adr/README.md`](../adr/README.md) |
@@ -56,7 +56,7 @@ Autonomous coding and computer-use agents frequently suffer from runtime bloat, 
 ## Architecture at a glance
 
 ```text
-Native macOS AppKit IDE (native/Sources/Heav3nsCode/ · 321 tests) / CLI REPL
+Native macOS AppKit IDE (native/Sources/Heav3nsCode/ · 323 tests) / CLI REPL
          ↕ (stdio JSON-RPC 2.0 · "v": 1 framing)
 UI: cli_presenter.rs · stdio_worker.rs · rpc_dispatch.rs · lib.rs · main.rs
          ↕

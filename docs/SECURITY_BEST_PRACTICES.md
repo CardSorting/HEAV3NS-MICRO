@@ -55,8 +55,8 @@ Agent sessions operate under a 5-stop execution posture ([`ExecutionPosture`](..
 - **`FullAccess`**: Unrestricted agent execution for autonomous runs.
 - **Fail-Closed Governance**: Repository constitutions (`.heav3ns/constitution.json`) are strictly validated via `RepoConstitution::parse_strict`. Any syntax or parsing error defaults to `AuthorizationVerdict::AskUser`.
 
-### 4. Parameterized macOS Seatbelt Sandbox & Process-Group Termination
-Subprocess execution (`execute_shell_command_sandboxed`) generates dynamic SBPL profiles (`/usr/bin/sandbox-exec`) blocking writes to `.git/hooks`, `.git/config`, `~/.ssh`, `~/.aws`, `~/.gnupg`, and system binaries. Processes run with Unix `.process_group(0)` and terminate via `SIGKILL` to `-pgid` on timeout or cancellation, with concurrent stdout/stderr draining to prevent pipe deadlock.
+### 4. Parameterized macOS Seatbelt Sandbox, Env Scrubbing & Process-Group Termination
+Subprocess execution (`execute_shell_command_sandboxed` and `ProjectRunner::start`) scrubs sensitive credential environment variables (`SafetyPolicy::sensitive_env_vars()`, covering `*_API_KEY`, `*_ACCESS_KEY`, `*_SECRET*`, `*_TOKEN`, `*_PRIVATE_KEY`, `*_PASSWORD`, and known provider/VCS tokens) before spawning child processes. Shell commands generate dynamic SBPL profiles (`/usr/bin/sandbox-exec`) blocking writes to `.git/hooks`, `.git/config`, `~/.ssh`, `~/.aws`, `~/.gnupg`, and system binaries, run with Unix `.process_group(0)`, and terminate `-pgid` on timeout or cancellation with concurrent stdout/stderr draining. `ProjectRunner` additionally enforces `workspace_root` `cwd` path-escape rejection and `256 KiB` bounded output capture, while the `127.0.0.1:1455` OAuth loopback callback escapes HTML output and bounds per-connection reads to 5s.
 
 ### 5. Bounded Memory Slab
 The 16-MiB memory arena enforces a strict physical ceiling on runtime memory consumption, preventing rogue prompts from inducing system-wide Out-Of-Memory thrashing.

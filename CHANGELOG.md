@@ -3,6 +3,20 @@
 
 All notable changes to **HEAV3NS-MICRO** are documented in this file.
 
+## [0.1.0] - 2026-11-14
+
+### Added & Hardened
+- **ChatGPT / OpenAI Codex OAuth PKCE Interconnection & Multi-Account Store (`src/plumbing/oauth_pkce.rs`, `src/domain/types/account_types.rs`, `src/infrastructure/codex_oauth.rs`, `src/infrastructure/http_provider.rs`, `src/ui/provider_rpc.rs`, `src/core/codex_oauth_e2e_tests.rs`)**:
+  - Implemented pure PKCE S256 generation, Base64URL codec, and JWT claim extraction (`chatgpt_account_id`, `email`, `chatgpt_plan_type`, `exp`).
+  - Implemented `CodexAccountStore` (`ICodexAccountStore`) with `0600` atomic persistence (`~/.heav3ns/accounts.json` / `HEAV3NS_ACCOUNTS_PATH`), `127.0.0.1:1455` `/auth/callback` loopback listener (with HTML escaping and 5s per-connection read timeout), single-flight `AsyncMutex` refresh deduplication, and `429` rate-limit `auto_switch`.
+  - Wired `openai-codex` in `HttpProvider` to `CodexAccountStore` (`ChatGPT-Account-ID` header, `stream: true`, `401` refresh-and-retry, `429` rate-limit recording).
+- **Process-Backed `ProjectRunner` & Stdio RPC Integrity (`src/infrastructure/project_runner.rs`, `src/ui/stdio_worker.rs`, `src/main.rs`)**:
+  - Implemented `ProjectRunner` (`IProjectRunner`) for `project.discover`, `project.start`, `project.stop`, `project.status`, and `project.configure` with `256 KiB` bounded output, `workspace_root` path-escape guard, and `-TERM` → `-KILL` process-group teardown.
+  - Fixed `project.status` wildcard shadowing, propagated `SIDE_QUERY_FAILED` / `SIDE_QUERY_EMPTY` JSON-RPC errors on `side.query`, returned `UNKNOWN_METHOD` JSON-RPC errors for unhandled `is_rpc` methods, and cancelled active sign-in / turn tokens before bounded `shutdown` drain.
+  - Resolved `SPI-106` and `SPI-107` advisories (`ProjectRunner::create_runner()`, Composition Root injection from `src/main.rs` into `run_stdio_worker`).
+- **Child Subprocess Credential Env Scrubbing (`src/plumbing/secret_redactor.rs`, `src/infrastructure/shell_runner.rs`, `src/infrastructure/project_runner.rs`, `src/core/zenith_hardening_tests.rs`)**:
+  - Added `SafetyPolicy::is_sensitive_env_var` and `SafetyPolicy::sensitive_env_vars()` to scrub `*_API_KEY`, `*_ACCESS_KEY`, `*_SECRET*`, `*_TOKEN`, `*_PRIVATE_KEY`, `*_PASSWORD`, and known provider/VCS tokens from child shell and project subprocesses (`99/99` Rust tests passing, `0` Joyzoning violations/advisories).
+
 ## [0.1.0] - 2026-11-08
 
 ### Added

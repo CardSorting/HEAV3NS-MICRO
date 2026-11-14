@@ -22,6 +22,30 @@ fn is_valid_ipc_model_id(raw: &str) -> bool {
     chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '/' | '[' | ']' | '-'))
 }
 
+/// Handles ChatGPT multi-account mutations (`switch`, `rename`, `remove`, `signOut`, `clearLimit`, `setAuto`).
+pub fn handle_account_mutation_rpc(method: &str, params: &Value) -> Result<Value, String> {
+    let store = AgentEngine::default_account_store();
+    let target = params.get("account").and_then(Value::as_str).unwrap_or("");
+    match method {
+        "switch" => store.switch_account(target),
+        "rename" => {
+            let label = params.get("label").and_then(Value::as_str).unwrap_or("");
+            store.rename_account(target, label)
+        }
+        "remove" => store.remove_account(target),
+        "signOut" => {
+            let all = params.get("all").and_then(Value::as_bool).unwrap_or(true);
+            store.sign_out(all)
+        }
+        "clearLimit" => store.clear_limit(target),
+        "setAuto" => {
+            let enabled = params.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+            store.set_auto_switch(enabled)
+        }
+        _ => Ok(store.rpc_snapshot()),
+    }
+}
+
 /// Handles `<provider>.{status,saveKey,clearKey}` and `provider.{status,saveKey,clearKey}` RPCs across all 43+ providers.
 pub fn handle_provider_credential_rpc(
     method: &str,
@@ -101,11 +125,12 @@ pub fn handle_provider_credential_rpc(
             .find_map(|ev| std::env::var(ev).ok().filter(|v| !v.trim().is_empty()))
     });
     let effective = saved_val.clone().or(env_val);
+    let has_oauth = canon_id == "openai-codex" && AgentEngine::default_account_store().has_active_account();
     json!({
         "provider": raw_prefix,
         "canonicalProvider": canon_id,
-        "configured": effective.is_some(),
-        "saved": saved_val.is_some(),
+        "configured": effective.is_some() || has_oauth,
+        "saved": saved_val.is_some() || has_oauth,
         "maskedKey": effective.as_deref().map(mask_secret_preview),
         "updatedAt": now_ms() as f64
     })
