@@ -35,7 +35,7 @@ We elevate **HEAV3NS-MICRO** into the runtime substrate of **HEAV3NS — The Sov
 
 1. **First-Class Spatial Action Architecture & Double-Wrapped Mediation (`Wrapper A` + `Wrapper B`)**:
    - Introduce [`SpatialActionMediator`](../../src/domain/spatial_mediator.rs) and [`SpatialInteractionEngine`](../../src/core/spatial_engine.rs) implementing formal domain interfaces (`ISpatialMediator`, `ISpatialGroundingGate`, `IExecutionAssuranceGate`).
-   - **Wrapper A (Spatial Grounding Gate)** verifies `layout_epoch` freshness, resolves targets across Set-of-Marks (`som_id`), frame tokens (`s{hex}:{id}`), labels, and normalized coordinate spaces, computes exact 2D sweep-line occlusion union (`calculate_rectangles_union_area`), detects off-screen targets (`requires_scroll`), and computes a 15% inset safe point.
+   - **Wrapper A (Spatial Grounding Gate)** verifies `layout_epoch` freshness (preserving DOM-reconciled scenes and `layout_epoch` across unchanged `frame_seq` dispatches, with `reconcile_dom_and_visual` returning the updated `SpatialScene` epoch), resolves targets across Set-of-Marks (`som_id`), frame tokens (`s{hex}:{id}`), labels, and normalized coordinate spaces, computes exact 2D sweep-line occlusion union (`calculate_rectangles_union_area`), detects off-screen targets (`requires_scroll`), and computes a 15% inset safe point.
    - **Wrapper B (Execution Assurance Gate)** enforces pre-execution role and enabled-state invariants (`SpatialError::TargetDisabled`, `ActionNotPermittedForRole`), dispatches automatic off-screen pre-scrolling and multi-step `SpatialActionPlan` execution (`execute_plan`), and verifies post-execution observable deltas (`Confirmed` vs. `SuspectedNoop`).
 2. **9-Stage Closed-Loop Computer Use Orchestrator (`COMPUTER USE` $\times$ `SPIDER`)**:
    - Introduce [`ComputerUseOrchestrator`](../../src/core/computer_use_orchestrator.rs) executing `OBSERVE -> ORIENT -> INTERPRET -> REASON -> PLAN -> ACT -> OBSERVE -> VERIFY -> LEARN`.
@@ -45,7 +45,7 @@ We elevate **HEAV3NS-MICRO** into the runtime substrate of **HEAV3NS — The Sov
    - Convene `VisualPerceiver`, `StructuralAnalyst`, `WorkflowNavigator`, `RiskAssessor`, and `RecoverySpecialist` alongside `HistoricalKnowledge` and `ConflictResolver`.
    - Enforce **Grounding Sovereignty**: live environmental observation always overrides conflicting historical assumptions.
 4. **Durable Behavioral Knowledge Store (`BROCCOLI`) & Temporal Reconciliation (`REWIND`)**:
-   - Track Laplace-smoothed interaction confidence in [`BehavioralKnowledgeStore`](../../src/infrastructure/behavioral_store.rs), synthesize multi-step [`LearnedWorkflowProcedure`](../../src/domain/types/learned_knowledge_types.rs) sequences, synchronize high-confidence patterns into `MemoryStore`, and reconcile layout epoch drift via `reconcile_state`.
+   - Track app-scoped `(app, pattern_id)` Laplace-smoothed interaction confidence in [`BehavioralKnowledgeStore`](../../src/infrastructure/behavioral_store.rs) (rejecting vacuous empty-trigger or short-word matches and bounding pattern/procedure maps), synthesize multi-step [`LearnedWorkflowProcedure`](../../src/domain/types/learned_knowledge_types.rs) sequences, synchronize high-confidence patterns into `MemoryStore`, and reconcile layout epoch drift via `reconcile_state`.
 
 ---
 

@@ -58,7 +58,12 @@ Agent sessions operate under a 5-stop execution posture ([`ExecutionPosture`](..
 ### 4. Parameterized macOS Seatbelt Sandbox, Env Scrubbing & Process-Group Termination
 Subprocess execution (`execute_shell_command_sandboxed` and `ProjectRunner::start`) scrubs sensitive credential environment variables (`SafetyPolicy::sensitive_env_vars()`, covering `*_API_KEY`, `*_ACCESS_KEY`, `*_SECRET*`, `*_TOKEN`, `*_PRIVATE_KEY`, `*_PASSWORD`, and known provider/VCS tokens) before spawning child processes. Shell commands generate dynamic SBPL profiles (`/usr/bin/sandbox-exec`) blocking writes to `.git/hooks`, `.git/config`, `~/.ssh`, `~/.aws`, `~/.gnupg`, and system binaries, run with Unix `.process_group(0)`, and terminate `-pgid` on timeout or cancellation with concurrent stdout/stderr draining. `ProjectRunner` additionally enforces `workspace_root` `cwd` path-escape rejection and `256 KiB` bounded output capture, while the `127.0.0.1:1455` OAuth loopback callback escapes HTML output and bounds per-connection reads to 5s.
 
-### 5. Bounded Memory Slab
+### 5. SSRF, Cleartext API-Key & Display Lease Guards
+- **Navigation & Browser URL Validation (`src/plumbing/vision_and_dom.rs`)**: `validate_navigation_url` blocks `http(s)` SSRF targets across standard and obfuscated encodings (decimal, hex, octal IPv4, IPv4-mapped IPv6 `[::ffff:...]`, loopback, RFC1918 private networks, CGNAT `100.64.0.0/10`, link-local/ULA IPv6, and cloud IMDS endpoints), and percent-decodes `file://` URLs to block path traversal (`..`) and sensitive host files (`.ssh`, `.aws`, `.env`, `/etc/`). Fallback browser HTML escapes interpolated URLs, and DOM snapshots are capped at `MAX_DOM_SNAPSHOT_BYTES` (`64 KiB`).
+- **Transport Credential Isolation (`src/infrastructure/http_provider.rs`)**: Both `HttpProvider::complete` and `probe_openai_compatible_models` refuse to transmit API keys over non-loopback cleartext `http://` endpoints.
+- **Human-Lease Fencing (`src/domain/computer_use.rs`)**: `VirtualDisplayState` enforces `assert_agent_may_act` across pointer/keyboard/window mutations as well as `clipboard_write`, `register_window`, and `browser_navigate`.
+
+### 6. Bounded Memory Slab
 The 16-MiB memory arena enforces a strict physical ceiling on runtime memory consumption, preventing rogue prompts from inducing system-wide Out-Of-Memory thrashing.
 
 ---
