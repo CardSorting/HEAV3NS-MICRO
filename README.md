@@ -67,17 +67,57 @@ Every source file belongs to one of five strictly enforced architectural zones, 
 | **`CORE`** | [`src/core/`](src/core/mod.rs) (`23` modules) | Use-case orchestration: [`AgentEngine`](src/core/engine.rs), [`turn_orchestrator`](src/core/turn_orchestrator.rs), [`batch_executor`](src/core/batch_executor.rs), [`context_inspector`](src/core/context_inspector.rs), [`ComputerUseOrchestrator`](src/core/computer_use_orchestrator.rs), [`SpatialInteractionEngine`](src/core/spatial_engine.rs), [`slash_and_swarm`](src/core/slash_and_swarm.rs), [`SessionStore`](src/core/session_store.rs), [`ToolRegistry`](src/core/tool_registry.rs), [`tool_specs`](src/core/tool_specs.rs), [`ToolOutputGovernor`](src/core/tool_governor.rs), [`RuntimeRequestQueue`](src/core/request_queue.rs), [`flight_runner`](src/core/flight_runner.rs), [`benchmark_runner`](src/core/benchmark_runner.rs), and test suites (`substrate_tests`, `spatial_tests`, `computer_use_tests`, `zenith_tests`, `codewhale_zenith_tests`, `codex_oauth_e2e_tests`, `zenith_hardening_tests`). |
 | **`UI`** | [`src/ui/`](src/ui/mod.rs) (`7` modules + roots), [`native/`](native/) | CLI presenter (`cli_presenter.rs`, `onboarding.rs`), multiplexed stdio JSON-RPC worker (`stdio_worker.rs`, `worker_handlers.rs`, `provider_rpc.rs`), desktop RPC router (`rpc_dispatch.rs`), AppKit Native Desktop IDE (`native/Sources/Heav3nsCode/`), and Composition Roots ([`lib.rs`](src/lib.rs), [`main.rs`](src/main.rs)). |
 
+```mermaid
+flowchart LR
+  UI["UI (CLI · Stdio JSON-RPC v1 · Native macOS AppKit IDE)"] --> CORE["CORE (AgentEngine · TurnOrchestrator · ToolRegistry · SpatialEngine)"]
+  CORE --> DOMAIN["DOMAIN (Pure Entities · 24 Port Traits I<Name> · 0% I/O)"]
+  INFRA["INFRASTRUCTURE (HttpProvider · CodexOAuth · CAS · VFS · Journal · Shell)"] --> DOMAIN
+  CORE -.->|"Port Traits"| INFRA
+  CORE --> PLUMB["PLUMBING (Stateless Leaf Primitives · 0 Upward Imports)"]
+  INFRA --> PLUMB
+```
+
+---
+
+## Multi-Provider Routing, Wire Dialects & Auth (`43` Providers)
+
+[`provider_registry.rs`](src/domain/types/provider_registry.rs), [`wire_dialects.rs`](src/infrastructure/wire_dialects.rs), and [`codex_oauth.rs`](src/infrastructure/codex_oauth.rs) support multi-provider routing with `ProviderChain` fallback, `ModelPricingRegistry` live OpenRouter synchronization (`12h` TTL), and isolated credential handling:
+
+| Wire Dialect | Target Providers & Capabilities | Hardening Invariants |
+| :--- | :--- | :--- |
+| **OpenAI Chat (`/v1/chat/completions`)** | OpenAI, OpenRouter, DeepSeek, Qwen, Z.AI, MiniMax, Groq, Together, Fireworks, local OpenAI-compatible endpoints | Streaming SSE delta accumulation (`schema_and_sse.rs`), `json_repair.rs`, and `canonical_vendor_prefix` fallback resolution. |
+| **OpenAI Responses (`/v1/responses`)** | OpenAI reasoning & responses endpoints | `sanitize_tool_schema_for_responses` (`allOf` `required` union + dangling-key pruning) and strict schema normalization. |
+| **OpenAI Codex OAuth PKCE** | `openai-codex` via `CodexAccountStore` (`ICodexAccountStore`) | Pure S256 PKCE + `127.0.0.1:1455` loopback callback, `0600` atomic persistence, single-flight `AsyncMutex` refresh, `429` account auto-switch. |
+| **Anthropic (`/v1/messages`)** | Anthropic Claude & `*-anthropic` compatible endpoints | Adaptive thinking blocks, dangling `tool_use` repair, `Role::User` compaction checkpoints for strict `user`-first alternation. |
+| **Google Gemini & Local** | Gemini `generateContent` / SSE, Ollama, deterministic `ScriptedProvider` (`FT-01..FT-05`) | Credential-unsent preflight (`CREDENTIAL_REJECTED_UNSENT_CODE`), SSRF/IPv6 endpoint guards, and zero-network flight replay. |
+
+---
+
+## Governance, Tooling & Execution Postures
+
+- **5-Stop `ExecutionPosture` (`Shift+Tab`)**: `Ask -> AcceptEdits -> Plan -> AutoReview -> FullAccess` enforced monotonically alongside fail-closed `.heav3ns/constitution.json` (`RepoConstitution`) across tool calls, `AgentEngine::run_swarm`, and `handle_automation_rpc`.
+- **31 Native Tools & Parallel Wave Scheduler**: `15` always-loaded core tools + `16` on-demand specialist tools (`tool_search` 8-slot LRU + `execute_tools` 32-step batch) partitioned into parallel read waves and serialized mutation waves in [`tool_registry.rs`](src/core/tool_registry.rs).
+- **35 Interactive Slash Commands**: Includes `/mode`, `/posture`, `/preview-request`, `/receipts`, `/turn`, `/restore`, `/undo`, `/models`, `/context`, `/prompt`, `/tools`, `/vfs`, `/diff`, `/commit`, `/skills`, `/rewind`, `/doctor`, `/computer`, `/browser`, `/vision`, `/spatial`, and `/legion`.
+
 ---
 
 ## Hardening & Reliability Guarantees (Waves 4–13)
 
-- **Workspace & Credential Isolation**: Dangling-symlink resolution (`canonicalize_best_effort` 16-hop `read_link`), `CredentialDenyScope::ModelContext` blocking, child-process credential env scrubbing, POSIX `>&1`/`>&2`/`>&-` fd-duplication checks in `ShellCommandGuard`, and macOS Seatbelt sandboxing.
+- **Workspace & Credential Isolation**: Dangling-symlink resolution (`canonicalize_best_effort` 16-hop `read_link`), `CredentialDenyScope::ModelContext` blocking, child-process credential env scrubbing (`SafetyPolicy::is_sensitive_env_var`), POSIX `>&1`/`>&2`/`>&-` fd-duplication checks in `ShellCommandGuard`, and macOS Seatbelt sandboxing.
 - **Durable Persistence & XML/SSE Safety**: `sync_all()` + temp-rename atomic writes across CAS blobs, manifests, and filesystem tools; fail-closed `WorkspaceSnapshotCas` GC; checkpoint-preserving `TransactionJournal::discard_turn`; bounded `MemoryStore` (`128` entries / `2048`B fields / `24_576`B envelope) with XML fence escaping; $O(N)$ SSE frame tracking and CRLF-preserving `FuzzyPatch` engine.
 - **Turn Serialization & AppKit Lifecycle**: `legacy_turn_gate` serialization across `task.submit` (`32`-task `RUNTIME_QUEUE_FULL` cap), `TURN_IN_PROGRESS` guards on mid-turn conversation switches, posture-checked automation RPC routing, and `client === source` / `closing` / `conversationSwitchGeneration` guards across AppKit windows and stores. See [`CHANGELOG.md`](CHANGELOG.md) and [`docs/SECURITY_BEST_PRACTICES.md`](docs/SECURITY_BEST_PRACTICES.md).
 
 ---
 
 ## Quick Start & Verification
+
+| Gate | Command | Current Verified Baseline |
+| :--- | :--- | :--- |
+| **1. Rust Test Suite** | `cargo test` | **119 passed**, `0` failed (unit, spatial, computer-use, OAuth E2E, Wave 4–13 hardening) |
+| **2. Agent Flight Suite** | `cargo run -- --flight` | **5 scenarios** (`FT-01..FT-05`, `19/19` checks passing) |
+| **3. Native macOS AppKit** | `cd native && swift test` | **323 executed**, `6` skipped, `0` failed |
+| **4. Joyzoning & Doctor** | `joy-check . --theme strict` / `--doctor` | **100% Stability Index**, `343` files, `0` errors, `0` warnings |
+| **5. Documentation Guardrails** | `node bin/docs-check.mjs` | **72** required docs (`16` ADRs, `6` playbooks, `4` wiki, `5` postmortems, `3` KB), `437` verified links |
 
 ```bash
 # 1. Run Rust unit, spatial, computer-use, zenith, codewhale, OAuth & hardening test suites (119 tests)
@@ -101,3 +141,11 @@ node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --doctor
 # 5. Run documentation guardrails check
 node bin/docs-check.mjs
 ```
+
+---
+
+## Documentation Index
+
+- **Architecture & Governance**: [`docs/architecture/current.md`](docs/architecture/current.md) · [`docs/CONSTITUTION.md`](docs/CONSTITUTION.md) · [`docs/adr/README.md`](docs/adr/README.md) · [`CHANGELOG.md`](CHANGELOG.md)
+- **Operations & Security**: [`docs/SECURITY_BEST_PRACTICES.md`](docs/SECURITY_BEST_PRACTICES.md) · [`docs/playbooks/README.md`](docs/playbooks/README.md) · [`docs/api/errors.md`](docs/api/errors.md) · [`docs/api/cli.md`](docs/api/cli.md)
+- **Knowledge & Benchmarks**: [`docs/wiki/README.md`](docs/wiki/README.md) · [`docs/kb/README.md`](docs/kb/README.md) · [`docs/papers/README.md`](docs/papers/README.md) · [`VALIDATION_REPORT.md`](VALIDATION_REPORT.md)
