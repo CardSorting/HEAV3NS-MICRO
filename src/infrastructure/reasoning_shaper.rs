@@ -157,7 +157,23 @@ pub(crate) fn apply_chat_completions_reasoning_controls(
     }
 
     // 6. Toggle-only `thinking: {"type": "enabled"|"disabled"}` vendors (`xiaomi-mimo`, `zai`, `moonshot`)
-    if matches!(canon.as_str(), "xiaomi-mimo" | "zai" | "moonshot") || model_low.starts_with("glm-") {
+    if matches!(canon.as_str(), "xiaomi-mimo" | "zai" | "moonshot")
+        || (!matches!(
+            canon.as_str(),
+            "qwen"
+                | "modelstudio-token-plan"
+                | "modelstudio-coding-plan"
+                | "vllm"
+                | "nvidia-nim"
+                | "ollama"
+                | "ollama-cloud"
+                | "arcee"
+                | "huggingface"
+                | "modelscope"
+                | "fireworks"
+                | "stepfun"
+        ) && model_low.starts_with("glm-"))
+    {
         payload["thinking"] = json!({ "type": if is_off { "disabled" } else { "enabled" } });
         return;
     }

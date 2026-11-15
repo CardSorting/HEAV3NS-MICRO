@@ -154,9 +154,9 @@ fn build_img_meta(fmt: &str, mime: &str, width: u32, height: u32, byte_size: usi
     let aspect = calculate_aspect_ratio(width, height);
     let megapixels = ((width as f64 * height as f64) / 1_000_000.0 * 1000.0).round() / 1000.0;
     // Vision token heuristic (~85 base + 170 per 512x512 tile)
-    let tiles_x = ((width.max(1) + 511) / 512).max(1);
-    let tiles_y = ((height.max(1) + 511) / 512).max(1);
-    let estimated_vision_tokens = 85 + (tiles_x * tiles_y * 170);
+    let tiles_x = ((width.max(1) as u64).saturating_add(511) / 512).max(1);
+    let tiles_y = ((height.max(1) as u64).saturating_add(511) / 512).max(1);
+    let estimated_vision_tokens = 85u64.saturating_add(tiles_x.saturating_mul(tiles_y).saturating_mul(170));
     json!({
         "format": fmt,
         "mimeType": mime,
@@ -273,8 +273,12 @@ pub fn validate_navigation_url(url: &str) -> Result<String, String> {
         }
     }
     if lower.starts_with("file://") {
+        let decoded = percent_decode_ascii(&lower).replace('\\', "/");
+        if decoded.contains("/../") || decoded.ends_with("/..") {
+            return Err("Blocked path traversal in file:// URL".to_string());
+        }
         let sensitive = ["/etc/", "/root/", "/var/run/", "/proc/", "/sys/", "/private/etc/", ".ssh", ".aws", ".env", "id_rsa"];
-        if sensitive.iter().any(|s| lower.contains(s)) {
+        if sensitive.iter().any(|s| decoded.contains(s)) {
             return Err("Blocked sensitive local file:// path".to_string());
         }
         return Ok(trimmed.to_string());
@@ -293,6 +297,10 @@ pub fn validate_navigation_url(url: &str) -> Result<String, String> {
         }
         if authority.contains('%') {
             return Err("Blocked URL with percent-encoded hostname (SSRF obfuscation guard)".to_string());
+        }
+        let host = extract_authority_host(authority);
+        if is_blocked_ssrf_host(host) {
+            return Err(format!("Blocked cloud metadata / private / loopback SSRF endpoint: {}", host));
         }
     }
     // Cloud metadata & SSRF protection (AWS/GCP/Alibaba/Azure IMDSv1/v2 + IPv4-mapped IPv6 + CGNAT)
@@ -317,6 +325,85 @@ pub fn validate_navigation_url(url: &str) -> Result<String, String> {
         }
     }
     Ok(trimmed.to_string())
+}
+
+fn percent_decode_ascii(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(hex_str) = std::str::from_utf8(&bytes[i + 1..i + 3]) {
+                if let Ok(val) = u8::from_str_radix(hex_str, 16) {
+                    out.push(val);
+                    i += 3;
+                    continue;
+                }
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn extract_authority_host(authority: &str) -> &str {
+    if let Some(rest) = authority.strip_prefix('[') {
+        rest.split(']').next().unwrap_or(rest)
+    } else {
+        authority.split(':').next().unwrap_or(authority)
+    }
+}
+
+fn parse_nonstandard_ipv4(host: &str) -> Option<std::net::Ipv4Addr> {
+    if let Some(hex) = host.strip_prefix("0x") {
+        return u32::from_str_radix(hex, 16).ok().map(std::net::Ipv4Addr::from);
+    }
+    if host.chars().all(|c| c.is_ascii_digit()) {
+        return host.parse::<u32>().ok().map(std::net::Ipv4Addr::from);
+    }
+    let parts: Vec<&str> = host.split('.').collect();
+    if parts.len() == 4 {
+        let mut octets = [0u8; 4];
+        for (i, p) in parts.iter().enumerate() {
+            let v = if let Some(h) = p.strip_prefix("0x") {
+                u32::from_str_radix(h, 16).ok()?
+            } else if p.len() > 1 && p.starts_with('0') {
+                u32::from_str_radix(p, 8).ok()?
+            } else {
+                p.parse::<u32>().ok()?
+            };
+            if v > 255 { return None; }
+            octets[i] = v as u8;
+        }
+        return Some(std::net::Ipv4Addr::from(octets));
+    }
+    None
+}
+
+fn is_blocked_ipv4(v4: std::net::Ipv4Addr) -> bool {
+    let o = v4.octets();
+    v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
+        || (o[0] == 100 && (64..=127).contains(&o[1]))
+}
+
+fn is_blocked_ssrf_host(host: &str) -> bool {
+    if matches!(host, "localhost" | "metadata.google.internal" | "metadata.goog") || host.ends_with(".localhost") || host.ends_with(".internal") {
+        return true;
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return match ip {
+            std::net::IpAddr::V4(v4) => is_blocked_ipv4(v4),
+            std::net::IpAddr::V6(v6) => {
+                if let Some(mapped) = v6.to_ipv4_mapped().or_else(|| v6.to_ipv4()) {
+                    return is_blocked_ipv4(mapped);
+                }
+                let seg = v6.segments();
+                v6.is_loopback() || v6.is_unspecified() || (seg[0] & 0xfe00 == 0xfc00) || (seg[0] & 0xffc0 == 0xfe80)
+            }
+        };
+    }
+    parse_nonstandard_ipv4(host).is_some_and(is_blocked_ipv4)
 }
 
 /// Pre-screens JavaScript expressions for embedded URLs targeting cloud metadata, private networks,
@@ -378,7 +465,8 @@ pub fn sanitize_trojan_unicode(text: &str) -> String {
 }
 
 pub fn snapshot_html_dom(html: &str, url: &str, max_elements: usize) -> Value {
-    let sanitized = strip_heavy_html_blocks(html);
+    let bounded_html = crate::plumbing::text_tokens::safe_utf8_prefix(html, MAX_DOM_SNAPSHOT_BYTES);
+    let sanitized = strip_heavy_html_blocks(bounded_html);
     let title = extract_tag_inner(&sanitized, "title").unwrap_or_else(|| "Untitled Document".to_string());
     let mut interactive = Vec::new();
     let mut som_id = 1usize;
@@ -468,16 +556,22 @@ fn strip_heavy_html_blocks(html: &str) -> String {
     for tag in ["script", "style", "svg", "noscript"] {
         let open_pat = format!("<{}", tag);
         let close_pat = format!("</{}>", tag);
-        loop {
-            let lower = current.to_ascii_lowercase();
-            if let Some(start) = lower.find(&open_pat) {
-                if let Some(end_rel) = lower[start..].find(&close_pat) {
-                    let end = start + end_rel + close_pat.len();
-                    current.replace_range(start..end, " ");
-                    continue;
-                }
+        let lower = current.to_ascii_lowercase();
+        let mut out = String::with_capacity(current.len());
+        let mut cursor = 0usize;
+        while let Some(rel_start) = lower[cursor..].find(&open_pat) {
+            let start = cursor + rel_start;
+            if let Some(rel_end) = lower[start..].find(&close_pat) {
+                out.push_str(&current[cursor..start]);
+                out.push(' ');
+                cursor = start + rel_end + close_pat.len();
+            } else {
+                break;
             }
-            break;
+        }
+        if cursor > 0 {
+            out.push_str(&current[cursor..]);
+            current = out;
         }
     }
     current
@@ -566,8 +660,9 @@ pub fn parse_scroll_deltas(args: &Value) -> (i32, i32) {
     let dir = args.get("direction").and_then(|v| v.as_str()).map(|s| s.trim().to_ascii_lowercase());
     let amount = args.get("amount").or_else(|| args.get("clicks")).or_else(|| args.get("steps"))
         .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
-        .unwrap_or(2) as i32;
-    let step = amount * 120;
+        .unwrap_or(2)
+        .clamp(-100, 100) as i32;
+    let step = amount.saturating_mul(120);
     if let Some(d) = dir {
         match d.as_str() {
             "up" => (0, step),
@@ -600,19 +695,24 @@ pub fn parse_drag_points(args: &Value, width: u32, height: u32, cur: [i32; 2], i
          parse_coordinate_value(args.get("from_y"), height, cur[1], is_norm_1000))
     };
 
+    let fx_clamped = fx.clamp(0, width as i32);
+    let fy_clamped = fy.clamp(0, height as i32);
+    let def_tx = fx_clamped.saturating_add(100);
+    let def_ty = fy_clamped.saturating_add(100);
+
     let (tx, ty) = if let Some(arr) = args.get("to").and_then(|v| v.as_array()) {
         if arr.len() >= 2 {
-            (parse_coordinate_value(arr.get(0), width, fx + 100, is_norm_1000),
-             parse_coordinate_value(arr.get(1), height, fy + 100, is_norm_1000))
+            (parse_coordinate_value(arr.get(0), width, def_tx, is_norm_1000),
+             parse_coordinate_value(arr.get(1), height, def_ty, is_norm_1000))
         } else {
-            (fx + 100, fy + 100)
+            (def_tx, def_ty)
         }
     } else {
-        (parse_coordinate_value(args.get("to_x").or_else(|| args.get("x")), width, fx + 100, is_norm_1000),
-         parse_coordinate_value(args.get("to_y").or_else(|| args.get("y")), height, fy + 100, is_norm_1000))
+        (parse_coordinate_value(args.get("to_x").or_else(|| args.get("x")), width, def_tx, is_norm_1000),
+         parse_coordinate_value(args.get("to_y").or_else(|| args.get("y")), height, def_ty, is_norm_1000))
     };
 
-    ([fx.clamp(0, width as i32), fy.clamp(0, height as i32)],
+    ([fx_clamped, fy_clamped],
      [tx.clamp(0, width as i32), ty.clamp(0, height as i32)])
 }
 

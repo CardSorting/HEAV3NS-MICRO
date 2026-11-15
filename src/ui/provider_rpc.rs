@@ -87,7 +87,8 @@ pub fn handle_provider_credential_rpc(
             }
         }
         if affects_active {
-            engine.switch_http_provider_with_vault(active_provider, active_model, None, Some(String::new()), keys, &BTreeMap::new());
+            let endpoints = Heav3nsUserConfig::load().map(|c| c.provider_endpoints).unwrap_or_default();
+            engine.switch_http_provider_with_vault(active_provider, active_model, None, Some(String::new()), keys, &endpoints);
         }
     };
 
@@ -106,7 +107,8 @@ pub fn handle_provider_credential_rpc(
                         let _ = ucfg.save();
                     }
                     if affects_active {
-                        engine.switch_http_provider_with_vault(active_provider, active_model, None, Some(clean), provider_keys, &BTreeMap::new());
+                        let endpoints = Heav3nsUserConfig::load().map(|c| c.provider_endpoints).unwrap_or_default();
+                        engine.switch_http_provider_with_vault(active_provider, active_model, None, Some(clean), provider_keys, &endpoints);
                     }
                 }
             }

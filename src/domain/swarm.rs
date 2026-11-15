@@ -173,7 +173,7 @@ pub fn classify_task_for_legion(
         "strategy": strategy,
         "complexity": complexity,
         "specialistCount": specialists.len(),
-        "waves": if roles.iter().any(|r| r.2 == 3) { 3 } else { 2 },
+        "waves": roles.iter().map(|r| r.2).collect::<std::collections::BTreeSet<_>>().len(),
         "specialists": specialists,
         "assignments": assignments
     })

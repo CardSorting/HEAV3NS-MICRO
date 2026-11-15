@@ -122,21 +122,23 @@ impl SpatialInteractionEngine {
         }
 
         let mut med = self.mediator.lock().unwrap();
-        med.update_scene(scene.clone());
-        scene
+        med.update_scene(scene);
+        med.active_scene.clone()
     }
 
     /// Dispatches an action through the complete Double-Wrapped Spatial Action Architecture:
     /// Wrapper A (Spatial Grounding) -> Wrapper B Pre (Preconditions & Containment) ->
     /// Native Dispatch -> Wrapper B Post (Observable Postcondition Verification).
     pub fn execute_spatially_grounded_action(&self, contract: &SpatialActionContract) -> Result<Value, String> {
-        // Step 1: Refresh scene state from display
+        // Step 1: Refresh scene state from display only when frame_seq changed or mediator has no active scene
         let before_scene = {
             let disp = self.display.lock().unwrap();
             let fresh = Self::extract_scene_from_display(&disp);
             let mut med = self.mediator.lock().unwrap();
-            med.update_scene(fresh.clone());
-            fresh
+            if med.layout_epoch == 0 || med.active_scene.frame_seq != fresh.frame_seq || med.active_scene.targets.is_empty() {
+                med.update_scene(fresh.clone());
+            }
+            med.active_scene.clone()
         };
 
         // Step 2: WRAPPER A — Spatial Grounding
@@ -268,7 +270,9 @@ impl SpatialInteractionEngine {
             let disp = self.display.lock().unwrap();
             let fresh = Self::extract_scene_from_display(&disp);
             let mut med = self.mediator.lock().unwrap();
-            med.update_scene(fresh);
+            if med.layout_epoch == 0 || med.active_scene.frame_seq != fresh.frame_seq || med.active_scene.targets.is_empty() {
+                med.update_scene(fresh);
+            }
             med.plan_action(contract)
         };
 

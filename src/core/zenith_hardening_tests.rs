@@ -225,3 +225,103 @@ fn test_cas_on_disk_gc_and_lock_unpoison() {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&cas_root);
 }
+
+#[test]
+fn test_zenith_wave2_http_sse_reasoning_hardening() {
+    // 1. Alibaba ModelStudio `glm-5` must receive `enable_thinking` + `reasoning_effort`, not Z.ai `thinking`
+    let mut alibaba_payload = json!({ "model": "glm-5" });
+    crate::infrastructure::reasoning_shaper::apply_chat_completions_reasoning_controls(
+        &mut alibaba_payload,
+        "qwen",
+        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "glm-5",
+        Some("high"),
+        false,
+    );
+    assert_eq!(alibaba_payload["enable_thinking"], json!(true));
+    assert_eq!(alibaba_payload["reasoning_effort"], json!("high"));
+    assert!(alibaba_payload.get("thinking").is_none());
+
+    // 2. Gemini SSE streaming across multiple chunks with mixed text + functionCall parts must not collide
+    let chunk1 = r#"data: {"candidates":[{"content":{"parts":[{"text":"thinking"},{"functionCall":{"name":"read_file","args":{"path":"a.rs"}}}]}}]}"#;
+    let chunk2 = r#"data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"write_file","args":{"path":"b.rs"}}}]}}]}"#;
+    let resp = crate::infrastructure::sse_and_response_parsers::parse_multidialect_sse_stream(
+        &format!("{chunk1}\n\n{chunk2}\n\n"),
+        "google",
+        crate::infrastructure::http_provider::extract_openai_usage,
+    ).unwrap();
+    assert_eq!(resp.tool_calls.len(), 2, "Expected 2 distinct Gemini tool calls, got {:?}", resp.tool_calls);
+    assert_eq!(resp.tool_calls[0].function.name, "read_file");
+    assert_eq!(resp.tool_calls[1].function.name, "write_file");
+
+    // 3. GoogleGemini URL builder preserves query parameters before appending `/models/...`
+    let gemini = crate::infrastructure::http_provider::HttpProvider::new(
+        "google",
+        "https://generativelanguage.googleapis.com/v1beta?alt=sse",
+        None,
+        5_000,
+    );
+    let resolved = gemini.resolve_url_for(
+        crate::domain::types::provider_registry::WireDialect::GoogleGemini,
+        "gemini-2.5-pro",
+    );
+    assert_eq!(
+        resolved,
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?alt=sse"
+    );
+}
+
+#[test]
+fn test_zenith_wave2_ssrf_spatial_behavioral_and_ui_hardening() {
+    use crate::domain::computer_use::VirtualDisplayState;
+    use crate::domain::interfaces::IBehavioralKnowledgeStore;
+    use crate::domain::types::spatial_types::SpatialActionContract;
+    use crate::infrastructure::behavioral_store::BehavioralKnowledgeStore;
+    use crate::plumbing::vision_and_dom::validate_navigation_url;
+    use std::sync::{Arc, Mutex};
+
+    // 1. SSRF obfuscated IPv4/IPv6 & percent-encoded file:// URLs must be blocked
+    assert!(validate_navigation_url("http://2852039166/latest/meta-data/").is_err());
+    assert!(validate_navigation_url("http://0xa9fea9fe/latest/meta-data/").is_err());
+    assert!(validate_navigation_url("http://0251.0376.0251.0376/latest/").is_err());
+    assert!(validate_navigation_url("http://[::ffff:a9fe:a9fe]/latest").is_err());
+    assert!(validate_navigation_url("http://127.0.0.1:8080/").is_err());
+    assert!(validate_navigation_url("http://10.0.0.1/admin").is_err());
+    assert!(validate_navigation_url("file:///%65tc/passwd").is_err());
+
+    // 2. VirtualDisplayState: human lease blocks clipboard_write/register_window/browser_navigate & HTML escapes fallback
+    let mut disp = VirtualDisplayState::new();
+    disp.execute_action(&json!({"action": "lease_acquire", "holder": "human", "viewer_id": "op-1"})).unwrap();
+    assert!(disp.execute_action(&json!({"action": "clipboard_write", "text": "x"})).is_err());
+    assert!(disp.execute_action(&json!({"action": "register_window", "window_id": "w2"})).is_err());
+    assert!(disp.execute_browser_action(&json!({"action": "navigate", "url": "https://example.com"})).is_err());
+    disp.execute_action(&json!({"action": "lease_release"})).unwrap();
+    let nav = disp.execute_browser_action(&json!({"action": "navigate", "url": "https://example.com/?q=<b>"})).unwrap();
+    assert!(nav["textDigest"].as_str().unwrap_or("").contains("https://example.com"));
+
+    // 3. SpatialInteractionEngine: expected_epoch from reconcile_dom_and_visual must NOT fail with StaleTargetEpoch
+    let disp_arc = Arc::new(Mutex::new(disp));
+    let engine = crate::core::spatial_engine::SpatialInteractionEngine::new(Arc::clone(&disp_arc));
+    let scene = engine.reconcile_dom_and_visual(&[json!({"id": "btn-run", "somId": 1, "role": "button", "label": "Run"})]);
+    let mut contract = SpatialActionContract::default();
+    contract.action_name = "click".into();
+    contract.target_selector = Some("btn-run".into());
+    contract.expected_epoch = Some(scene.layout_epoch);
+    let res = engine.execute_spatially_grounded_action(&contract).unwrap();
+    assert_eq!(res["success"], json!(true), "Expected grounded click to succeed with matching epoch, got {res}");
+
+    // 4. BehavioralKnowledgeStore: app-scoped patterns must not collide & empty trigger must not match
+    let mut bstore = BehavioralKnowledgeStore::new(None);
+    bstore.record_outcome("btn-save", "AppA", true, 1);
+    bstore.record_outcome("btn-save", "AppB", false, 2);
+    let pat_a = bstore.lookup_pattern("AppA", "btn-save").unwrap();
+    let pat_b = bstore.lookup_pattern("AppB", "btn-save").unwrap();
+    assert_eq!(pat_a.success_count, 2);
+    assert_eq!(pat_b.failure_count, 1);
+    assert!(bstore.lookup_pattern("AppA", "").is_none());
+
+    // 5. Swarm classify waves count reflects actual retained waves when max_specialists == 1
+    let plan = crate::domain::swarm::classify_task_for_legion("audit and implement full stack", &[], None, 1);
+    assert_eq!(plan["specialistCount"], json!(1));
+    assert_eq!(plan["waves"], json!(1));
+}

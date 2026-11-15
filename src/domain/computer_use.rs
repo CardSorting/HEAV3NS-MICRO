@@ -90,7 +90,7 @@ impl VirtualDisplayState {
     }
 
     fn save_undo_checkpoint(&mut self) {
-        if let Ok(snap) = serde_json::to_string(&(&self.windows, &self.cursor, &self.active_window_id)) {
+        if let Ok(snap) = serde_json::to_string(&(&self.windows, &self.cursor, &self.active_window_id, &self.last_target_app, &self.scroll_offset)) {
             if self.undo_stack.len() >= 32 { self.undo_stack.remove(0); }
             self.undo_stack.push(snap); self.redo_stack.clear();
         }
@@ -98,24 +98,27 @@ impl VirtualDisplayState {
 
     pub fn undo(&mut self) -> Result<Value, String> {
         let prev = self.undo_stack.pop().ok_or_else(|| "Undo stack is empty".to_string())?;
-        if let Ok(cur) = serde_json::to_string(&(&self.windows, &self.cursor, &self.active_window_id)) { self.redo_stack.push(cur); }
-        let (wins, cursor, active): (Vec<VirtualWindow>, [i32; 2], String) = serde_json::from_str(&prev).map_err(|e| format!("Undo error: {e}"))?;
-        self.windows = wins; self.cursor = cursor; self.active_window_id = active; self.frame_seq += 1;
+        if let Ok(cur) = serde_json::to_string(&(&self.windows, &self.cursor, &self.active_window_id, &self.last_target_app, &self.scroll_offset)) { self.redo_stack.push(cur); }
+        let (wins, cursor, active, target_app, scroll): (Vec<VirtualWindow>, [i32; 2], String, String, [i32; 2]) = serde_json::from_str(&prev).map_err(|e| format!("Undo error: {e}"))?;
+        self.windows = wins; self.cursor = cursor; self.active_window_id = active; self.last_target_app = target_app; self.scroll_offset = scroll; self.frame_seq += 1;
         self.record_action("undo", "success", 1, json!({"restoredFrame": self.frame_seq}));
         Ok(self.capture_frame())
     }
 
     pub fn redo(&mut self) -> Result<Value, String> {
         let next = self.redo_stack.pop().ok_or_else(|| "Redo stack is empty".to_string())?;
-        if let Ok(cur) = serde_json::to_string(&(&self.windows, &self.cursor, &self.active_window_id)) { self.undo_stack.push(cur); }
-        let (wins, cursor, active): (Vec<VirtualWindow>, [i32; 2], String) = serde_json::from_str(&next).map_err(|e| format!("Redo error: {e}"))?;
-        self.windows = wins; self.cursor = cursor; self.active_window_id = active; self.frame_seq += 1;
+        if let Ok(cur) = serde_json::to_string(&(&self.windows, &self.cursor, &self.active_window_id, &self.last_target_app, &self.scroll_offset)) { self.undo_stack.push(cur); }
+        let (wins, cursor, active, target_app, scroll): (Vec<VirtualWindow>, [i32; 2], String, String, [i32; 2]) = serde_json::from_str(&next).map_err(|e| format!("Redo error: {e}"))?;
+        self.windows = wins; self.cursor = cursor; self.active_window_id = active; self.last_target_app = target_app; self.scroll_offset = scroll; self.frame_seq += 1;
         self.record_action("redo", "success", 1, json!({"restoredFrame": self.frame_seq}));
         Ok(self.capture_frame())
     }
 
     fn record_action(&mut self, action: &str, status: &str, duration_ms: u64, detail: Value) {
-        let seq = self.action_ledger.len() + 1;
+        let seq = self.action_ledger.last().and_then(|v| v.get("seq")).and_then(|v| v.as_u64()).unwrap_or(0) + 1;
+        if self.action_ledger.len() >= 512 {
+            self.action_ledger.remove(0);
+        }
         self.action_ledger.push(json!({
             "seq": seq, "action": action, "window": self.active_window_id, "status": status,
             "durationMs": duration_ms, "timestampMs": now_ms(), "cursor": self.cursor, "detail": detail
@@ -138,7 +141,7 @@ impl VirtualDisplayState {
                 .map(|w| w.elements.iter().map(|el| el.to_som_json(self.frame_seq, true)).collect())
                 .unwrap_or_default()
         };
-        let max_x = active_win.and_then(|w| w.elements.iter().map(|e| e.bounds[0] + e.bounds[2]).max()).unwrap_or(0) as u32;
+        let max_x = active_win.and_then(|w| w.elements.iter().map(|e| e.bounds[0].saturating_add(e.bounds[2]).max(0)).max()).unwrap_or(0) as u32;
         let eff_scale = if scale > 1 { scale } else if max_x > self.width { 2 } else { 1 };
         json!({
             "mode": mode, "frameSeq": self.frame_seq, "frameHash": frame_hash, "screenUnchanged": unchanged,
@@ -415,6 +418,7 @@ impl VirtualDisplayState {
                 Ok(json!({ "action": "key", "keys": keys, "deliveryMode": delivery, "verdict": verdict, "frame": self.capture_frame() }))
             }
             "clipboard_write" | "copy_to_clipboard" => {
+                self.assert_agent_may_act(args)?;
                 let text = args.get("text").or_else(|| args.get("value")).and_then(|v| v.as_str()).unwrap_or("");
                 self.clipboard = text.to_string();
                 self.record_action("clipboard_write", "success", 1, json!({"length": self.clipboard.len()}));
@@ -472,8 +476,8 @@ impl VirtualDisplayState {
                     self.cursor = [sx.clamp(0, self.width as i32), sy.clamp(0, self.height as i32)];
                 }
                 let (delta_x, delta_y) = parse_scroll_deltas(args);
-                self.scroll_offset[0] += delta_x;
-                self.scroll_offset[1] += delta_y;
+                self.scroll_offset[0] = self.scroll_offset[0].saturating_add(delta_x);
+                self.scroll_offset[1] = self.scroll_offset[1].saturating_add(delta_y);
                 self.frame_seq += 1;
                 self.record_action("scroll", "success", 2, json!({"delta": [delta_x, delta_y], "scrollOffset": self.scroll_offset, "cursor": self.cursor}));
                 Ok(json!({ "action": "scroll", "delta": [delta_x, delta_y], "scrollOffset": self.scroll_offset, "cursor": self.cursor, "frameSeq": self.frame_seq }))
@@ -550,16 +554,28 @@ impl VirtualDisplayState {
                 Ok(self.capture_frame())
             }
             "register_window" => {
+                self.assert_agent_may_act(args)?;
                 self.save_undo_checkpoint();
                 let id = args.get("window_id").or_else(|| args.get("id")).and_then(|v| v.as_str()).unwrap_or("win-custom").to_string();
                 let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("Custom Window").to_string();
                 let app = args.get("app").and_then(|v| v.as_str()).unwrap_or("CustomApp").to_string();
                 for w in &mut self.windows { w.focused = false; }
-                self.windows.push(VirtualWindow {
-                    id: id.clone(), title, app: app.clone(), bounds: [120, 120, 1024, 640], focused: true,
-                    z_order: (self.windows.len() + 1) as u32, url: "about:blank".into(),
-                    html: "<html><body></body></html>".into(), elements: Vec::new(),
-                });
+                let z = (self.windows.len() + 1) as u32;
+                if let Some(existing) = self.windows.iter_mut().find(|w| w.id == id) {
+                    existing.title = title;
+                    existing.app = app.clone();
+                    existing.focused = true;
+                    existing.z_order = z;
+                } else {
+                    if self.windows.len() >= 32 {
+                        self.windows.retain(|w| w.focused || w.id == self.active_window_id);
+                    }
+                    self.windows.push(VirtualWindow {
+                        id: id.clone(), title, app: app.clone(), bounds: [120, 120, 1024, 640], focused: true,
+                        z_order: z, url: "about:blank".into(),
+                        html: "<html><body></body></html>".into(), elements: Vec::new(),
+                    });
+                }
                 self.active_window_id = id.clone();
                 self.last_target_app = app;
                 self.frame_seq += 1;
@@ -603,14 +619,16 @@ impl VirtualDisplayState {
         let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("snapshot").trim().to_ascii_lowercase();
         match action.as_str() {
             "navigate" | "goto" | "open" => {
+                self.assert_agent_may_act(args)?;
                 let url = args.get("url").and_then(|v| v.as_str()).ok_or_else(|| "Missing 'url' for browser navigate".to_string())?;
                 let validated = validate_navigation_url(url)?;
                 self.save_undo_checkpoint();
                 self.annotations.clear();
                 self.preview_inventory.clear();
                 let safe_u = redact_cdp_url(&validated);
+                let escaped_u = safe_u.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&#39;");
                 let html = args.get("html").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_else(|| {
-                    format!("<html><head><title>Page: {safe_u}</title></head><body><main><h1>Navigated to {safe_u}</h1><button id=\"nav-cta\" role=\"button\" aria-label=\"Continue\">Continue</button><input id=\"search-box\" type=\"search\" placeholder=\"Search page...\"/></main></body></html>")
+                    format!("<html><head><title>Page: {escaped_u}</title></head><body><main><h1>Navigated to {escaped_u}</h1><button id=\"nav-cta\" role=\"button\" aria-label=\"Continue\">Continue</button><input id=\"search-box\" type=\"search\" placeholder=\"Search page...\"/></main></body></html>")
                 });
                 let dom_snap = snapshot_html_dom(&html, &validated, 64);
                 let sync_dom = args.get("sync_elements").and_then(|v| v.as_bool()).unwrap_or(false);

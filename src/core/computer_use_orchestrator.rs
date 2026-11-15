@@ -109,7 +109,7 @@ impl ComputerUseOrchestrator {
             obs.regions.push(reg);
         }
         if !sidebar_ids.is_empty() {
-            let mut reg = EnvironmentalRegion::new("reg-sidebar", RegionKind::Sidebar, [0, 64, 260, disp.height as i32 - 64], 2);
+            let mut reg = EnvironmentalRegion::new("reg-sidebar", RegionKind::Sidebar, [0, 64, 260, (disp.height as i32).saturating_sub(64)], 2);
             reg.element_ids = sidebar_ids;
             obs.regions.push(reg);
         }
@@ -119,7 +119,7 @@ impl ComputerUseOrchestrator {
             obs.regions.push(reg);
         }
         if !footer_ids.is_empty() {
-            let mut reg = EnvironmentalRegion::new("reg-footer", RegionKind::FooterStatusBar, [0, disp.height as i32 - 40, disp.width as i32, 40], 2);
+            let mut reg = EnvironmentalRegion::new("reg-footer", RegionKind::FooterStatusBar, [0, (disp.height as i32).saturating_sub(40), disp.width as i32, 40], 2);
             reg.element_ids = footer_ids;
             obs.regions.push(reg);
         }
@@ -385,8 +385,10 @@ impl ComputerUseOrchestrator {
                     delivery_mode: "foreground".into(),
                     ..SpatialActionContract::default()
                 };
-                if self.spatial_engine.execute_spatially_grounded_action(&focus_click_contract).is_ok() {
-                    auto_focused = true;
+                if let Ok(res) = self.spatial_engine.execute_spatially_grounded_action(&focus_click_contract) {
+                    if res.get("success").and_then(|v| v.as_bool()) == Some(true) {
+                        auto_focused = true;
+                    }
                 }
             }
         }
@@ -457,6 +459,9 @@ impl ComputerUseOrchestrator {
             } else {
                 kstore.record_outcome(&target_key, &after_obs.app_name, false, after_obs.layout_epoch);
                 let mut fc = self.failure_counts.lock().unwrap();
+                if !fc.contains_key(&target_key) && fc.len() >= 128 {
+                    fc.clear();
+                }
                 let c = fc.entry(target_key.clone()).or_insert(0);
                 *c += 1;
             }
@@ -466,8 +471,9 @@ impl ComputerUseOrchestrator {
         let reconciliation = {
             let kstore = self.knowledge_store.lock().unwrap();
             let ckpt = *self.last_checkpoint_epoch.lock().unwrap();
+            let expected_epoch = if success && !is_noop { after_obs.layout_epoch } else { ckpt };
             let hash_drift = before_obs.frame_hash != after_obs.frame_hash && !success;
-            kstore.reconcile_state(ckpt, after_obs.layout_epoch, hash_drift)
+            kstore.reconcile_state(expected_epoch, after_obs.layout_epoch, hash_drift)
         };
 
         // Failure cause diagnosis if needed

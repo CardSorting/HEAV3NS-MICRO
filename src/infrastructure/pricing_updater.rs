@@ -65,10 +65,16 @@ impl ModelPricingRegistry {
         {
             return;
         }
+        struct RefreshInFlightGuard<'a>(&'a AtomicBool);
+        impl Drop for RefreshInFlightGuard<'_> {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::Release);
+            }
+        }
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
+                let _guard = RefreshInFlightGuard(&self.refresh_in_flight);
                 let _ = self.refresh_now().await;
-                self.refresh_in_flight.store(false, Ordering::Release);
             });
         } else {
             self.refresh_in_flight.store(false, Ordering::Release);
@@ -102,10 +108,24 @@ impl ModelPricingRegistry {
             return Err(format!("Model catalog endpoint {url} returned HTTP {}", resp.status().as_u16()));
         }
 
-        let body = resp
-            .text()
+        const MAX_CATALOG_BYTES: usize = 4 * 1024 * 1024;
+        let mut resp = resp;
+        let mut body_bytes = Vec::new();
+        while let Some(chunk) = resp
+            .chunk()
             .await
-            .map_err(|e| format!("Failed reading model catalog payload: {e}"))?;
+            .map_err(|e| format!("Failed reading model catalog payload: {e}"))?
+        {
+            if body_bytes.len().saturating_add(chunk.len()) > MAX_CATALOG_BYTES {
+                return Err(format!(
+                    "Model catalog payload from {url} exceeded {} byte cap",
+                    MAX_CATALOG_BYTES
+                ));
+            }
+            body_bytes.extend_from_slice(&chunk);
+        }
+        let body = String::from_utf8(body_bytes)
+            .map_err(|e| format!("Model catalog payload was not valid UTF-8: {e}"))?;
 
         let refreshed = ModelPricingCatalog::parse_openrouter_models_json(&body, now_ms())?;
         let _ = persist_catalog_atomic(&self.cache_path, &refreshed);
@@ -175,7 +195,7 @@ fn persist_catalog_atomic(path: &Path, catalog: &ModelPricingCatalog) -> Result<
         }
     }
     let serialized = serde_json::to_string(catalog).map_err(|e| format!("Serialize error: {e}"))?;
-    let tmp_path = path.with_extension("json.tmp");
+    let tmp_path = path.with_extension(format!("json.tmp.{}.{}", std::process::id(), now_ms()));
     fs::write(&tmp_path, serialized).map_err(|e| format!("Write temp catalog failed: {e}"))?;
     #[cfg(unix)]
     {

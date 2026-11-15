@@ -5,14 +5,13 @@ use crate::domain::compaction::CompactionPolicy;
 use crate::domain::interfaces::IProjectRunner;
 use crate::domain::swarm::{classify_task_for_legion, SwarmAssignment};
 use crate::domain::types::provider_registry::{canonicalize_provider_id, lookup_provider_descriptor, retired_provider_remediation, ReasoningEffortLevel, PROVIDER_DESCRIPTORS};
-use crate::domain::types::runtime::{CancellationToken, EngineTickInput, ExecutionAuthorityLevel, ExecutionPosture, UserApprovalChoice};
+use crate::domain::types::runtime::{CancellationToken, ExecutionPosture, UserApprovalChoice};
 use crate::plumbing::hash_and_math::{fnv1a_32, lock_unpoison, now_ms};
 use crate::ui::cli_presenter::Heav3nsUserConfig;
 use crate::ui::provider_rpc::handle_account_mutation_rpc;
 use crate::ui::rpc_dispatch::{build_context_history_response, build_context_inspect_response, build_hello_response, build_model_selection, build_prompt_inspect_response, build_spider_check_multi_response, build_state_inspect_response, handle_files_rpc, handle_memory_rpc, sha256_hex};
 use crate::ui::worker_handlers::{build_sovereign_model_catalog_with_recent, build_sovereign_model_discovery, emit_jsonl_line, execute_multiplexed_submit, handle_automation_rpc, handle_posture_and_receipts_rpc, handle_provider_credential_rpc, switch_worker_conversation, WorkerSharedState};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
 use std::io;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -146,8 +145,8 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                         .get(slot)
                         .or_else(|| st.provider_keys.get(&st.active_provider))
                         .cloned();
-                    let empty_ep = BTreeMap::new();
-                    engine.switch_http_provider_with_vault(&st.active_provider, &st.active_model, None, key_override, &st.provider_keys, &empty_ep);
+                    let endpoints = Heav3nsUserConfig::load().map(|c| c.provider_endpoints).unwrap_or_default();
+                    engine.switch_http_provider_with_vault(&st.active_provider, &st.active_model, None, key_override, &st.provider_keys, &endpoints);
                     st.active_model = engine.config_snapshot().model_name;
                     let (rp, rm, rr) = (st.active_provider.clone(), st.active_model.clone(), st.active_reasoning.clone());
                     st.record_recent(&rp, &rm, &rr);

@@ -407,12 +407,9 @@ pub fn handle_memory_rpc(method: &str, params: &Value, default_conv: &str, engin
             let target_id = params.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let found = mem.list_memories().into_iter().find(|e| sha256_hex(&e.key) == target_id || e.key == target_id);
             if let Some(entry) = found {
-                json!({ "conversation": conv, "entry": format_memory_entry(&entry) })
+                json!({ "found": true, "conversation": conv, "entry": format_memory_entry(&entry) })
             } else {
-                let fallback = MemoryEntry { key: "memory".to_string(), value: String::new(), category: "fact".to_string(), timestamp: now_ms() };
-                let mut f_json = format_memory_entry(&fallback);
-                if target_id.len() == 64 { f_json["id"] = json!(target_id); }
-                json!({ "conversation": conv, "entry": f_json })
+                json!({ "found": false, "conversation": conv, "id": target_id, "entry": Value::Null })
             }
         }
         "memory.write" => {

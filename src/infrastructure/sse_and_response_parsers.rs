@@ -259,11 +259,13 @@ impl IncrementalSseAggregator {
                 if raw_val.trim() == "[DONE]" {
                     return self.flush_event();
                 }
-                if self.has_data
-                    && !self.overflowed
-                    && serde_json::from_str::<IgnoredAny>(self.data_buf.trim()).is_ok()
-                {
-                    self.flush_event()?;
+                if self.has_data && !self.overflowed {
+                    let trimmed_buf = self.data_buf.trim();
+                    if (trimmed_buf.ends_with('}') || trimmed_buf.ends_with(']'))
+                        && serde_json::from_str::<IgnoredAny>(trimmed_buf).is_ok()
+                    {
+                        self.flush_event()?;
+                    }
                 }
                 if self.overflowed {
                     return Ok(());
@@ -292,7 +294,14 @@ impl IncrementalSseAggregator {
         self.has_data = false;
         self.overflowed = false;
 
-        if !had_data || overflowed {
+        if overflowed {
+            self.data_buf.clear();
+            return Err(ProviderError::Transport(format!(
+                "SSE event exceeded {} byte frame cap",
+                MAX_SSE_EVENT_DATA_BYTES
+            )));
+        }
+        if !had_data {
             self.data_buf.clear();
             return Ok(());
         }
@@ -504,7 +513,7 @@ impl IncrementalSseAggregator {
             .and_then(|c| c.get("parts"))
             .and_then(Value::as_array)
         {
-            for (idx, part) in parts.iter().enumerate() {
+            for part in parts {
                 let is_thought = part.get("thought").and_then(Value::as_bool) == Some(true);
                 if let Some(t) = part.get("text").and_then(Value::as_str) {
                     if is_thought {
@@ -525,7 +534,7 @@ impl IncrementalSseAggregator {
                         .filter(|s| !s.is_empty())
                         .map(String::from);
                     if !name.is_empty() {
-                        let next_idx = self.tool_map.len() + idx;
+                        let next_idx = self.tool_map.len();
                         self.tool_map.insert(next_idx, (format!("gemini_call_{}", next_idx + 1), name, args, sig));
                     }
                 }

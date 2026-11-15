@@ -76,6 +76,10 @@ pub async fn probe_openai_compatible_models(endpoint: &str, api_key: Option<&str
     } else {
         format!("{base}/models")
     };
+    let has_key = api_key.is_some_and(|s| !s.trim().is_empty());
+    if has_key && is_non_loopback_cleartext_http(endpoint) {
+        return Vec::new();
+    }
     let mut req = client.get(&url);
     if let Some(k) = api_key.filter(|s| !s.trim().is_empty()) {
         req = req.bearer_auth(k);
@@ -269,6 +273,8 @@ impl HttpProvider {
             WireDialect::GoogleGemini => {
                 if trimmed.contains(":generateContent") {
                     trimmed.to_string()
+                } else if let Some((base, q)) = trimmed.split_once('?') {
+                    format!("{}/models/{model}:generateContent?{q}", base.trim_end_matches('/'))
                 } else {
                     format!("{trimmed}/models/{model}:generateContent")
                 }
@@ -548,10 +554,11 @@ impl ILlmProvider for HttpProvider {
                     retry_after_ms: None,
                 });
             }
-            if canon_provider == "codewhale" && is_non_loopback_cleartext_http(&self.endpoint) {
+            let has_key = self.api_key.as_deref().is_some_and(|k| !k.trim().is_empty());
+            if has_key && is_non_loopback_cleartext_http(&self.endpoint) {
                 return Err(ProviderError::HttpStatus {
                     status: 400,
-                    body: "Refusing to transmit CODEWHALE_API_KEY over non-loopback cleartext HTTP; use https://api.codewhale.net/v1.".to_string(),
+                    body: format!("Refusing to transmit API key for '{}' over non-loopback cleartext HTTP; use HTTPS.", self.name),
                     retryable: false,
                     retry_after_ms: None,
                 });
@@ -569,32 +576,28 @@ impl ILlmProvider for HttpProvider {
             };
 
             let has_explicit_sk = self.api_key.as_deref().is_some_and(|k| k.trim().starts_with("sk-"));
-            let codex_oauth = if canon_provider == "openai-codex"
+            let use_codex_oauth = canon_provider == "openai-codex"
                 && !has_explicit_sk
-                && self.endpoint.trim_end_matches('/') == "https://api.openai.com/v1"
-            {
-                CodexAccountStore::default_store()
-                    .get_valid_active_credentials()
-                    .await
-                    .map_err(ProviderError::Transport)?
-            } else {
-                None
-            };
-
-            let builder = if let Some((ref oauth_token, ref account_id)) = codex_oauth {
-                url = format!("{}/responses", resolve_codex_base_url());
-                if let Some(obj) = payload.as_object_mut() {
-                    obj.insert("stream".to_string(), Value::Bool(true));
-                }
-                build_codex_oauth_post(&self.client, &url, oauth_token, account_id.as_deref())
-            } else {
-                self.apply_auth_headers(
-                    self.client.post(&url).header("content-type", "application/json"),
-                    effective_wire,
-                )
-            };
+                && self.endpoint.trim_end_matches('/') == "https://api.openai.com/v1";
 
             let http_fut = async {
+                let codex_oauth = if use_codex_oauth {
+                    CodexAccountStore::default_store().get_valid_active_credentials().await.map_err(ProviderError::Transport)?
+                } else {
+                    None
+                };
+                let builder = if let Some((ref oauth_token, ref account_id)) = codex_oauth {
+                    url = format!("{}/responses", resolve_codex_base_url());
+                    if let Some(obj) = payload.as_object_mut() {
+                        obj.insert("stream".to_string(), Value::Bool(true));
+                    }
+                    build_codex_oauth_post(&self.client, &url, oauth_token, account_id.as_deref())
+                } else {
+                    self.apply_auth_headers(
+                        self.client.post(&url).header("content-type", "application/json"),
+                        effective_wire,
+                    )
+                };
                 let resp = builder
                     .json(&payload)
                     .send()
@@ -663,6 +666,7 @@ impl ILlmProvider for HttpProvider {
                                 let retry_b = build_codex_oauth_post(&self.client, &url, &new_token, new_account_id.as_deref());
                                 if let Ok(retry_resp) = retry_b.json(&payload).send().await {
                                     let retry_status = retry_resp.status().as_u16();
+                                    let retry_ra = parse_retry_after_header(retry_resp.headers());
                                     let retry_ct = retry_resp.headers().get("content-type").and_then(|v| v.to_str().ok()).map(String::from);
                                     if (200..300).contains(&retry_status) && is_event_stream_content_type(retry_ct.as_deref()) {
                                         return stream_incremental_sse_response(retry_resp, &self.name, MAX_HTTP_RESPONSE_BODY_BYTES).await;
@@ -676,6 +680,10 @@ impl ILlmProvider for HttpProvider {
                                             .map_err(|e| ProviderError::Transport(format!("Invalid JSON from provider: {e}")))?;
                                         return parse_responses_json(&json_body, &self.name);
                                     }
+                                    if retry_status == 429 {
+                                        CodexAccountStore::default_store().record_rate_limit(retry_ra);
+                                    }
+                                    return Err(ProviderError::HttpStatus { status: retry_status, body: retry_text, retryable: is_retryable_http_status(retry_status), retry_after_ms: retry_ra });
                                 }
                             }
                         }

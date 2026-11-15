@@ -97,15 +97,28 @@ impl BehavioralKnowledgeStore {
     }
 
     pub fn register_procedure(&mut self, proc: LearnedWorkflowProcedure) {
+        if !self.procedures.contains_key(&proc.procedure_id) && self.procedures.len() >= 128 {
+            if let Some(first_key) = self.procedures.keys().next().cloned() {
+                self.procedures.remove(&first_key);
+            }
+        }
         self.procedures.insert(proc.procedure_id.clone(), proc);
     }
 
     pub fn lookup_procedure(&self, app: &str, goal: &str) -> Option<LearnedWorkflowProcedure> {
-        let lower_goal = goal.to_ascii_lowercase();
+        let lower_goal = goal.trim().to_ascii_lowercase();
+        if lower_goal.is_empty() {
+            return None;
+        }
         for proc in self.procedures.values() {
+            let proc_goal = proc.goal.trim().to_ascii_lowercase();
+            if proc_goal.is_empty() {
+                continue;
+            }
+            let sig_words: Vec<&str> = proc_goal.split_whitespace().filter(|w| w.len() > 3).collect();
+            let keyword_match = !sig_words.is_empty() && sig_words.iter().all(|w| lower_goal.contains(w));
             if (proc.app == "*" || proc.app.eq_ignore_ascii_case(app))
-                && (lower_goal.contains(&proc.goal.to_ascii_lowercase())
-                    || proc.goal.to_ascii_lowercase().split_whitespace().all(|w| w.len() <= 3 || lower_goal.contains(w)))
+                && (lower_goal.contains(&proc_goal) || keyword_match)
             {
                 return Some(proc.clone());
             }
@@ -125,7 +138,15 @@ impl BehavioralKnowledgeStore {
 impl IBehavioralKnowledgeStore for BehavioralKnowledgeStore {
     fn record_outcome(&mut self, pattern_id: &str, app: &str, success: bool, epoch: u64) {
         let timestamp = now_ms();
-        if let Some(pat) = self.patterns.get_mut(pattern_id) {
+        let composite_key = format!("{app}::{pattern_id}");
+        let existing_key = if self.patterns.contains_key(&composite_key) {
+            Some(composite_key.clone())
+        } else if self.patterns.get(pattern_id).is_some_and(|p| p.app_pattern == "*" || p.app_pattern.eq_ignore_ascii_case(app)) {
+            Some(pattern_id.to_string())
+        } else {
+            None
+        };
+        if let Some(pat) = existing_key.as_deref().and_then(|k| self.patterns.get_mut(k)) {
             if success {
                 pat.record_success(epoch, timestamp);
             } else {
@@ -144,12 +165,17 @@ impl IBehavioralKnowledgeStore for BehavioralKnowledgeStore {
             } else {
                 pat.record_failure(epoch, timestamp);
             }
-            self.patterns.insert(pattern_id.to_string(), pat);
+            if self.patterns.len() >= 256 {
+                if let Some(first_key) = self.patterns.keys().next().cloned() {
+                    self.patterns.remove(&first_key);
+                }
+            }
+            self.patterns.insert(composite_key.clone(), pat);
         }
 
         // Mirror high-confidence verified patterns to decoupled memory sink
         if let Some(ref sink) = self.memory_sink {
-            if let Some(pat) = self.patterns.get(pattern_id) {
+            if let Some(pat) = self.patterns.get(&composite_key).or_else(|| self.patterns.get(pattern_id)) {
                 if pat.confidence >= 0.85 && pat.success_count >= 2 {
                     let key = format!("learned_ui_pattern:{app}:{pattern_id}");
                     let payload = serde_json::json!({
@@ -168,8 +194,13 @@ impl IBehavioralKnowledgeStore for BehavioralKnowledgeStore {
     }
 
     fn lookup_pattern(&self, app: &str, trigger: &str) -> Option<LearnedInteractionPattern> {
-        // Direct match by ID
-        if let Some(pat) = self.patterns.get(trigger) {
+        let trimmed = trigger.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        // Direct match by composite key or seeded ID
+        let composite_key = format!("{app}::{trimmed}");
+        if let Some(pat) = self.patterns.get(&composite_key).or_else(|| self.patterns.get(trimmed)) {
             if pat.app_pattern == "*" || pat.app_pattern.eq_ignore_ascii_case(app) {
                 return Some(pat.clone());
             }
@@ -178,7 +209,8 @@ impl IBehavioralKnowledgeStore for BehavioralKnowledgeStore {
         // Heuristic match across registered patterns
         for pat in self.patterns.values() {
             if (pat.app_pattern == "*" || pat.app_pattern.eq_ignore_ascii_case(app))
-                && (pat.ui_trigger.contains(trigger) || trigger.contains(&pat.ui_trigger))
+                && !pat.ui_trigger.trim().is_empty()
+                && (pat.ui_trigger.contains(trimmed) || trimmed.contains(&pat.ui_trigger))
             {
                 return Some(pat.clone());
             }
