@@ -75,7 +75,13 @@ final class AccountClient {
         child.environment = env.merging(["NO_COLOR": "1", "TERM": "dumb"]) { _, value in value }
         child.standardInput = writer; child.standardOutput = reader; child.standardError = FileHandle.nullDevice
         reader.fileHandleForReading.readabilityHandler = { [weak frames] handle in frames?.read(handle) }
-        try child.run(); process = child
+        do {
+            try child.run()
+            process = child
+        } catch {
+            stop(message: error.localizedDescription)
+            throw error
+        }
         try? writer.fileHandleForReading.close(); try? reader.fileHandleForWriting.close()
     }
     private func receive(_ frame: [String: Any]) {

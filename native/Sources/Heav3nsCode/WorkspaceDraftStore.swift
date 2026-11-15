@@ -42,7 +42,7 @@ final class WorkspaceDraftStore {
         guard data.count <= Self.byteLimit else { throw DraftError.tooLarge }
         let draft = try JSONDecoder().decode(WorkspaceDraft.self, from: data)
         guard [1, 2].contains(draft.version), draft.workspace == workspace,
-              draft.submission.map({ !$0.id.isEmpty && $0.id.utf8.count <= 128 && !$0.text.isEmpty && $0.text.utf16.count <= 16_000 }) ?? true else { throw DraftError.invalid }
+              draft.submission.map({ !$0.id.isEmpty && $0.id.utf8.count <= 128 && !$0.text.isEmpty && $0.text.utf16.count <= 65_536 }) ?? true else { throw DraftError.invalid }
         return draft
     }
 
@@ -52,13 +52,17 @@ final class WorkspaceDraftStore {
             catch let error as CocoaError where error.code == .fileNoSuchFile { }
             return
         }
-        // Refuse oversized drafts without truncating either the editor or its last backup.
+        // Refuse oversized or malformed drafts/submissions without truncating either the editor or its last backup.
         guard text.utf8.count <= Self.byteLimit else { throw DraftError.tooLarge }
+        if let submission, !(!submission.id.isEmpty && submission.id.utf8.count <= 128 && !submission.text.isEmpty && submission.text.utf16.count <= 65_536) {
+            throw DraftError.invalid
+        }
         let data = try JSONEncoder().encode(WorkspaceDraft(version: 2, workspace: workspace, text: text, submission: submission, conversation: conversation, conversations: conversations.filter { !$0.value.isEmpty }, attachments: attachments.isEmpty ? nil : attachments))
         guard data.count <= Self.byteLimit else { throw DraftError.tooLarge }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        try data.write(to: file, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        let tmp = root.appendingPathComponent(".draft-\(UUID().uuidString).tmp")
+        guard FileManager.default.createFile(atPath: tmp.path, contents: data, attributes: [.posixPermissions: 0o600]) else { throw DraftError.invalid }
+        _ = try FileManager.default.replaceItemAt(file, withItemAt: tmp)
     }
 
     enum DraftError: LocalizedError {

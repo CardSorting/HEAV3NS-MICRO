@@ -192,7 +192,9 @@ fn persist_catalog_atomic(path: &Path, catalog: &ModelPricingCatalog) -> Result<
         }
     }
     let serialized = serde_json::to_string(catalog).map_err(|e| format!("Serialize error: {e}"))?;
-    let tmp_path = path.with_extension(format!("json.tmp.{}.{}", std::process::id(), now_ms()));
+    static PRICING_TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let seq = PRICING_TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp_path = path.with_extension(format!("json.tmp.{}.{}.{}", std::process::id(), now_ms(), seq));
     fs::write(&tmp_path, serialized).map_err(|e| format!("Write temp catalog failed: {e}"))?;
     #[cfg(unix)]
     {

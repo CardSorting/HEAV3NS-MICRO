@@ -160,6 +160,9 @@ pub fn compute_streaming_arguments_delta(accumulated: &str, incoming: &str) -> (
     if accumulated.is_empty() {
         return (incoming.to_string(), incoming.to_string());
     }
+    if accumulated.trim() == "{}" && incoming.trim_start().starts_with('{') {
+        return (incoming.to_string(), incoming.to_string());
+    }
     if incoming.starts_with(accumulated) && incoming.len() > accumulated.len() {
         return (incoming[accumulated.len()..].to_string(), incoming.to_string());
     }

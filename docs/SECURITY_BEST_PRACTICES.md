@@ -72,3 +72,12 @@ The 16-MiB memory arena enforces a strict physical ceiling on runtime memory con
 ## 3. Reporting a Vulnerability
 
 If you discover a security vulnerability in HEAV3NS-MICRO, please report it via private email to **security@heav3ns.org** rather than opening a public issue. See [`SECURITY.md`](../SECURITY.md) for our coordinated disclosure timeline.
+
+---
+
+## Recursive Hardening Invariants (Waves 8–13)
+
+- **Dangling Symlink & Credential-Scope Containment**: `canonicalize_best_effort` in `src/infrastructure/search_tools.rs` resolves dangling symlinks via `fs::read_link` (bounded to 16 hops) rather than falling back to lexical workspace paths, preventing symlink escapes and `CredentialDenyScope::ModelContext` bypasses.
+- **POSIX Redirection & Terminal Dump Detection**: `ShellCommandGuard` in `src/plumbing/shell_guard.rs` distinguishes POSIX `>&1` / `>&2` / `>&-` fd duplication from file-output redirection so `cat .env >&2` remains blocked under ADR-0016.
+- **Durable Atomic Persistence & Rollback Integrity**: `atomic_write_file`, `store_blob`, and `atomic_write_workspace_file` call `sync_all()` before `fs::rename`; `WorkspaceSnapshotCas::capture_snapshot` fails closed on manifest persistence errors before GC; `TransactionJournal::discard_turn` shifts checkpoint indices; `MemoryStore` caps entries (`128`), field sizes (`2048` bytes), and envelope size (`24,576` bytes), and `format_append_only_context_update` escapes `<`/`>` to block XML fence breakout.
+- **RPC Turn Serialization & Posture Enforcement**: `stdio_worker.rs` bounds `spawned_turns` to `32` (`RUNTIME_QUEUE_FULL`), serializes `task.submit` via `legacy_turn_gate`, rejects mid-turn `conversation.{select,create,delete}` with `TURN_IN_PROGRESS`, and routes `computer.action`, `browser.action`, and `browser.navigate` through `ToolRegistry::execute_single` (blocking `skills.forge` / `skills.lint` mutations in `ExecutionPosture::Plan`).

@@ -196,7 +196,7 @@ final class PodsWindow: NSWindowController, NSWindowDelegate, NSSearchFieldDeleg
             actions.append(WorkspaceAction(title: "Next Request", shortcut: "⌘J", perform: { [weak self] in self?.focusNextRequest() }))
             actions.append(WorkspaceAction(title: "Previous Request", shortcut: "⇧⌘J", perform: { [weak self] in self?.focusNextRequest(backward: true) }))
         }
-        palette?.close()
+        palette?.dispose()
         palette = ActionPalette(actions: actions); palette?.present(for: window)
     }
     func focusNextRequest(backward: Bool = false) {
@@ -222,7 +222,8 @@ final class PodsWindow: NSWindowController, NSWindowDelegate, NSSearchFieldDeleg
         return box
     }
     func windowDidResize(_ notification: Notification) { refresh() }
-    func windowWillClose(_ notification: Notification) { timer?.invalidate(); timer = nil }
+    func windowWillClose(_ notification: Notification) { timer?.invalidate(); timer = nil; palette?.dispose(); palette = nil }
+    func dispose() { timer?.invalidate(); timer = nil; palette?.dispose(); palette = nil }
     var diagnostics: [String: Any] { ["count": order.count, "columns": columns, "summary": summary.stringValue, "visiblePaths": order, "filter": filters.selectedSegment, "query": search.stringValue, "layout": layoutDiagnostics, "pods": snapshots().map { ["path": $0.path, "status": $0.status, "thread": $0.thread, "running": $0.running, "needsReview": $0.needsReview, "queued": $0.queued, "stream": $0.stream, "approvalOperation": $0.approval?.operation ?? "", "canDecide": $0.canDecide, "timing": PodMonitoring.timing($0, now: Date().timeIntervalSince1970 * 1000), "monitoringNote": PodMonitoring.note($0, now: Date().timeIntervalSince1970 * 1000), "canReconnect": $0.canReconnect, "canOpenCheckpoints": $0.canOpenCheckpoints] }] }
 
     /// Native geometry evidence excludes text documents, whose overflow belongs inside clip views.

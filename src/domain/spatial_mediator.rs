@@ -98,7 +98,7 @@ impl SpatialActionMediator {
             );
         }
 
-        if candidates.len() > 1 && contract.som_id.is_none() && !contract.target_selector.as_deref().unwrap_or("").starts_with('s') {
+        if candidates.len() > 1 && contract.som_id.is_none() {
             let candidate_ids: Vec<String> = candidates.iter().map(|c| c.id.clone()).collect();
             return SpatialGroundingResult::ambiguous(candidate_ids);
         }

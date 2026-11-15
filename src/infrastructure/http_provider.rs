@@ -16,7 +16,7 @@ const MAX_DISCOVERY_BODY_BYTES: usize = 2 * 1024 * 1024;
 
 async fn read_bounded_response_text(mut resp: reqwest::Response, max_bytes: usize) -> Result<String, ProviderError> {
     let mut buf = Vec::new();
-    while let Some(chunk) = resp.chunk().await.map_err(|e| ProviderError::Transport(e.to_string()))? {
+    while let Some(chunk) = resp.chunk().await.map_err(|e| ProviderError::Transport(e.without_url().to_string()))? {
         if buf.len().saturating_add(chunk.len()) > max_bytes {
             return Err(ProviderError::Transport(format!(
                 "HTTP response body exceeded {max_bytes}-byte safety cap"
@@ -181,7 +181,7 @@ async fn stream_incremental_sse_response(
     max_bytes: usize,
 ) -> Result<ProviderResponse, ProviderError> {
     let mut agg = IncrementalSseAggregator::new(provider_label, extract_openai_usage, max_bytes);
-    while let Some(chunk) = resp.chunk().await.map_err(|e| ProviderError::Transport(e.to_string()))? {
+    while let Some(chunk) = resp.chunk().await.map_err(|e| ProviderError::Transport(e.without_url().to_string()))? {
         agg.push_bytes(&chunk)?;
     }
     agg.finish()
@@ -336,7 +336,7 @@ impl HttpProvider {
                 .header("HTTP-Referer", "https://github.com/heav3ns/heav3ns-micro")
                 .header("X-Title", "HEAV3NS-MICRO");
         }
-        let Some(ref key) = self.api_key else {
+        let Some(key) = self.api_key.as_deref().map(str::trim).filter(|k| !k.is_empty()) else {
             return builder;
         };
         match dialect {
@@ -345,7 +345,7 @@ impl HttpProvider {
                 if canon == "codewhale" {
                     return builder.bearer_auth(key);
                 }
-                let is_oauth = canon.contains("subscription") || key.starts_with("sk-ant-oat");
+                let is_oauth = key.starts_with("sk-ant-oat") || (canon.contains("subscription") && !key.starts_with("sk-ant-api"));
                 if is_oauth {
                     builder = builder
                         .bearer_auth(key)
@@ -602,7 +602,7 @@ impl ILlmProvider for HttpProvider {
                     .json(&payload)
                     .send()
                     .await
-                    .map_err(|e| ProviderError::Transport(e.to_string()))?;
+                    .map_err(|e| ProviderError::Transport(e.without_url().to_string()))?;
                 let status = resp.status().as_u16();
                 let retry_after_ms = parse_retry_after_header(resp.headers());
                 let content_type = resp.headers().get("content-type").and_then(|v| v.to_str().ok()).map(String::from);
@@ -640,6 +640,7 @@ impl ILlmProvider for HttpProvider {
                             );
                             if let Ok(retry_resp) = retry_builder.json(&healed_payload).send().await {
                                 let retry_status = retry_resp.status().as_u16();
+                                let retry_ra = parse_retry_after_header(retry_resp.headers());
                                 let retry_ct = retry_resp.headers().get("content-type").and_then(|v| v.to_str().ok()).map(String::from);
                                 if (200..300).contains(&retry_status) && is_event_stream_content_type(retry_ct.as_deref()) {
                                     return stream_incremental_sse_response(retry_resp, &self.name, MAX_HTTP_RESPONSE_BODY_BYTES).await;
@@ -653,6 +654,7 @@ impl ILlmProvider for HttpProvider {
                                         .map_err(|e| ProviderError::Transport(format!("Invalid JSON from provider: {e}")))?;
                                     return Self::parse_openai_response(&json_body);
                                 }
+                                return Err(ProviderError::HttpStatus { status: retry_status, body: retry_text, retryable: is_retryable_http_status(retry_status), retry_after_ms: retry_ra });
                             }
                         }
                     }

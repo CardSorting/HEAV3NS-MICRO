@@ -71,6 +71,24 @@ impl AgentEngine {
     ) -> SwarmFormationResult {
         let started_ms = now_ms();
         let objective = objective.into();
+        let mut seen_ids = std::collections::BTreeSet::new();
+        for a in &assignments {
+            if !seen_ids.insert(a.id.clone()) {
+                return SwarmFormationResult {
+                    objective,
+                    outcome: EngineTickOutcome::Failed,
+                    waves: 0,
+                    reports: vec![SwarmItemReport {
+                        id: a.id.clone(),
+                        role: a.role.clone(),
+                        outcome: EngineTickOutcome::Failed,
+                        response: format!("Duplicate SwarmAssignment id '{}'", a.id),
+                        duration_ms: 0,
+                    }],
+                    duration_ms: now_ms().saturating_sub(started_ms),
+                };
+            }
+        }
         let mut pending: BTreeMap<String, SwarmAssignment> =
             assignments.into_iter().map(|a| (a.id.clone(), a)).collect();
         let mut completed: BTreeMap<String, SwarmItemReport> = BTreeMap::new();
@@ -178,6 +196,8 @@ impl AgentEngine {
             }
 
             let wave_results = futures::future::join_all(wave_futs).await;
+            self.tools().cache.lock().unwrap().clear();
+            self.tools().read_tracker.lock().unwrap().reset_stamps();
             let mut any_failed = false;
             for rep in wave_results {
                 if rep.outcome != EngineTickOutcome::Completed {
@@ -387,7 +407,12 @@ impl AgentEngine {
                 }
             }
             "/commit" => match self.vfs().lock().unwrap().commit_all() {
-                Ok(paths) => format!("Committed {} staged file(s): {:?}", paths.len(), paths),
+                Ok(paths) => {
+                    let path_bufs: Vec<std::path::PathBuf> = paths.iter().map(|p| self.workspace_root().join(p)).collect();
+                    self.tools().cache.lock().unwrap().invalidate_paths(&path_bufs);
+                    self.tools().read_tracker.lock().unwrap().reset_stamps();
+                    format!("Committed {} staged file(s): {:?}", paths.len(), paths)
+                }
                 Err(e) => format!("VFS commit failed: {e}"),
             },
             "/discard" => {

@@ -56,12 +56,15 @@ extension WorkspaceWindow {
     }
 
     func applyPosture(_ stop: ExecutionPostureStop, syncRemote: Bool = true) {
+        postureGeneration &+= 1
+        let gen = postureGeneration
         activePosture = stop
         refreshPostureControl()
         updateStatus()
         guard syncRemote, client.isReady, !closing else { return }
-        client.request("posture.set", params: ["posture": stop.rawValue]) { [weak self] result in
-            guard let self else { return }
+        let source = client
+        source.request("posture.set", params: ["posture": stop.rawValue]) { [weak self, weak source] result in
+            guard let self, let source, self.client === source, self.postureGeneration == gen else { return }
             if case .success(let data) = result,
                let remoteSlug = data["posture"] as? String,
                let parsed = ExecutionPostureStop.parse(remoteSlug),
@@ -92,8 +95,14 @@ extension WorkspaceWindow {
             showNotice("Finish or stop active work before undoing the last turn.")
             return
         }
-        client.request("turn.undo", params: ["force": false]) { [weak self] result in
-            guard let self else { return }
+        guard !undoPending else { return }
+        undoPending = true
+        let source = client
+        let conversation = currentConversation
+        source.request("turn.undo", params: ["force": false]) { [weak self, weak source] result in
+            guard let self, let source, self.client === source else { return }
+            self.undoPending = false
+            guard self.currentConversation == conversation, !self.closing else { return }
             switch result {
             case .success(let data):
                 if let err = data["error"] as? String, !err.isEmpty {

@@ -283,6 +283,14 @@ pub fn dispatch_fs_tool(
             let dst_raw = args.get("target").and_then(|v| v.as_str()).ok_or("Missing 'target'")?;
             let src = resolve_and_verify_workspace_path(cwd, src_raw)?;
             let dst = resolve_and_verify_workspace_path(cwd, dst_raw)?;
+            if let Ok(canon_cwd) = cwd.canonicalize() {
+                if src == canon_cwd {
+                    return Err("Cannot move the workspace root directory".to_string());
+                }
+            }
+            if src.is_dir() {
+                return Err(format!("Refusing move_file on directory '{}' because directory renames cannot be atomically journaled", src.display()));
+            }
             if let Ok(mut j) = journal.lock() {
                 j.record_mutation("move_file", &src);
                 j.record_mutation("move_file", &dst);

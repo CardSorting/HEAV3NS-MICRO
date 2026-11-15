@@ -273,7 +273,9 @@ impl ToolRegistry {
                 let disp = self.display_state.lock().map_err(|_| "Display lock poisoned")?;
                 let fresh = SpatialInteractionEngine::extract_scene_from_display(&disp);
                 let mut med = self.spatial_engine.mediator.lock().map_err(|_| "Mediator lock poisoned")?;
-                med.update_scene(fresh);
+                if med.layout_epoch == 0 || med.active_scene.frame_seq != fresh.frame_seq || med.active_scene.targets.is_empty() {
+                    med.update_scene(fresh);
+                }
                 let out = if action == "ground" {
                     serde_json::to_value(med.ground_action(&contract)).unwrap_or(Value::Null)
                 } else {

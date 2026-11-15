@@ -190,7 +190,17 @@ impl SpatialInteractionEngine {
             med.update_scene(scrolled_scene.clone());
             let mut reground_contract = contract.clone();
             reground_contract.expected_epoch = None;
-            if let Some(regrounded) = med.ground_action(&reground_contract).grounded {
+            let reground = med.ground_action(&reground_contract);
+            if !reground.success {
+                return Ok(json!({
+                    "success": false,
+                    "phase": "post_scroll_grounding_failed",
+                    "error": reground.error.map(|e| e.to_string()).unwrap_or_else(|| "Post-scroll grounding failed".to_string()),
+                    "candidates": reground.ambiguity_candidates,
+                    "verdict": "target_not_grounded_after_scroll"
+                }));
+            }
+            if let Some(regrounded) = reground.grounded {
                 grounded = regrounded;
                 auto_scrolled = true;
                 before_scene = scrolled_scene;
@@ -278,6 +288,16 @@ impl SpatialInteractionEngine {
             let mut med = self.mediator.lock().unwrap();
             if med.layout_epoch == 0 || med.active_scene.frame_seq != fresh.frame_seq || med.active_scene.targets.is_empty() {
                 med.update_scene(fresh);
+            }
+            if let Some(expected) = contract.expected_epoch {
+                if expected != med.layout_epoch {
+                    return Ok(json!({
+                        "success": false,
+                        "phase": "grounding_failed",
+                        "error": format!("Stale layout epoch: expected {expected}, active {}", med.layout_epoch),
+                        "verdict": "stale_epoch"
+                    }));
+                }
             }
             med.plan_action(contract)
         };

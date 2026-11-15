@@ -124,10 +124,11 @@ extension WorkspaceWindow {
         }
         guard attachmentBar.urls.isEmpty else { showNotice("Remove attachments before compacting context. Your draft is preserved."); return }
         let id = UUID().uuidString
+        let source = client
         pendingRequest = id; updateStatus()
-        client.request("context.compact", params: ["conversation": conversation], id: id) { [weak self] result in
-            guard let self else { return }
-            self.pendingRequest = nil
+        source.request("context.compact", params: ["conversation": conversation], id: id) { [weak self, weak source] result in
+            guard let self, let source, self.client === source else { return }
+            if self.pendingRequest == id { self.pendingRequest = nil }
             switch result {
             case .success(let report):
                 if self.currentConversation == conversation && self.composer.string.trimmingCharacters(in: .whitespacesAndNewlines) == "/compact" { self.composer.string = "" }
@@ -183,8 +184,10 @@ extension WorkspaceWindow {
         if client.capabilities.contains("conversations"), let currentConversation { parameters["conversation"] = currentConversation }
         if let continuation { parameters["continueFrom"] = ["run": continuation.run, "revision": continuation.revision] }
         if let repairLaunch { parameters["repairProject"] = ["launch": repairLaunch] }
-        client.request("task.submit", params: parameters, id: id) { [weak self] result in
-            guard let self else { return }; self.pendingRequest = nil
+        let source = client
+        source.request("task.submit", params: parameters, id: id) { [weak self, weak source] result in
+            guard let self, let source, self.client === source else { return }
+            if self.pendingRequest == id { self.pendingRequest = nil }
             switch result {
             case .success(let data):
                 self.recoverySubmission = nil
@@ -362,7 +365,14 @@ extension WorkspaceWindow {
             for run in runs where !terminalStates.contains(run["state"] as? String ?? "") {
                 if let id = run["id"] as? String { client.request("task.cancel", params: ["run": id]) { [weak self] result in
                     guard let self, self.client === source, self.cancellationToken == token else { return }
-                    if case .failure(let error) = result { self.showNotice(error.localizedDescription); self.stopThenSend = nil }
+                    if case .failure(let error) = result {
+                        self.showNotice(error.localizedDescription); self.stopThenSend = nil
+                        if source.isReady {
+                            self.cancelRequested = false; self.cancellationToken = nil; self.stopAcknowledged = true
+                            self.forceAvailable = false; self.stopButton.title = "Stop"
+                        }
+                        self.updateStatus()
+                    }
                 } }
             }
         }
@@ -432,8 +442,11 @@ extension WorkspaceWindow {
     func editQueued(_ entry: QueuedInstruction) {
         guard client.isReady, !cancelRequested, !closing, window?.attachedSheet == nil else { return }
         queuePopover.close()
-        client.request("history.read", params: ["run": entry.id]) { [weak self] result in
-            guard let self, let window = self.window, window.attachedSheet == nil else { return }
+        let source = client; let conversation = currentConversation
+        source.request("history.read", params: ["run": entry.id]) { [weak self, weak source] result in
+            guard let self, let source, self.client === source, self.currentConversation == conversation,
+                  !self.switchingConversation, !self.cancelRequested, !self.closing,
+                  let window = self.window, window.attachedSheet == nil else { return }
             switch result {
             case .failure(let error): self.showNotice(error.localizedDescription)
             case .success(let data):
@@ -442,13 +455,17 @@ extension WorkspaceWindow {
                 }
                 self.mergeRun(run)
                 self.editingQueued = QueuedInstruction(id: entry.id, text: text, revision: revision)
-                self.queueEditor = QueuedInstructionEditor(text: text, limit: self.client.instructionLimit) { [weak self] text, complete in
-                    guard let self, self.client.isReady, !self.cancelRequested, !self.closing else { complete(.failure(BridgeError.message("Connect to LUMI and wait for cancellation to finish before saving."))); return }
-                    self.client.request("task.edit", params: ["run": entry.id, "text": text, "revision": revision]) { [weak self] result in
+                self.queueEditor = QueuedInstructionEditor(text: text, limit: source.instructionLimit) { [weak self, weak source] text, complete in
+                    guard let self, let source, self.client === source, self.currentConversation == conversation,
+                          source.isReady, !self.cancelRequested, !self.closing else { complete(.failure(BridgeError.message("Connect to LUMI and wait for cancellation to finish before saving."))); return }
+                    source.request("task.edit", params: ["run": entry.id, "text": text, "revision": revision]) { [weak self, weak source] result in
+                        guard let self, let source, self.client === source, self.currentConversation == conversation else {
+                            complete(.failure(BridgeError.message("Conversation changed before the edit completed."))); return
+                        }
                         switch result {
-                        case .failure(let error): complete(.failure(error)); self?.client.requestSnapshot()
+                        case .failure(let error): complete(.failure(error)); self.client.requestSnapshot()
                         case .success(let data):
-                            if let run = data["run"] as? [String: Any] { self?.mergeRun(run); self?.rebuildRows() }
+                            if let run = data["run"] as? [String: Any] { self.mergeRun(run); self.rebuildRows() }
                             complete(.success(()))
                         }
                     }
@@ -486,7 +503,13 @@ extension WorkspaceWindow {
                 else { self.approvalFailure = "Decision outcome unknown. Reconnect to recover recorded state before deciding again." }
                 self.showNotice(self.approvalFailure ?? error.localizedDescription)
             }
-            if source.isReady { source.requestSnapshot(afterPending: true) }
+            if source.isReady {
+                source.requestSnapshot(afterPending: true) { [weak self] in
+                    guard let self, self.client === source, self.decidingApproval == attempt else { return }
+                    self.decidingApproval = nil
+                    self.updateStatus()
+                }
+            }
             self.updateStatus()
         }
         return decidingApproval == attempt

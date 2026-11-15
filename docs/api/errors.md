@@ -93,3 +93,5 @@ When communicating with the AppKit Native Desktop client via `--stdio --desktop-
 | `-32004` | `SUBMISSION_UNCONFIRMED` | Runtime was interrupted before task acceptance. | Enables "Check Status" button; prevents replay. |
 | `-32005` | `TASK_LOOKUP_TIMEOUT` | Querying unconfirmed task status exceeded 200ms. | Keeps draft preserved; allows manual status check. |
 | `-32006` | `APPROVAL_REQUIRED` | Tool requires user verification before execution. | Docked approval bar displays operation details. |
+| `—` | `TURN_IN_PROGRESS` | Attempted `conversation.{select,create,delete}` while a turn holds `legacy_turn_gate`. | Rejects switch cleanly; preserves active conversation and transcript. |
+| `—` | `RUNTIME_QUEUE_FULL` | Pending `task.submit` tasks reached the `32`-task worker cap. | Displays queue capacity notice; prevents unbounded task allocation. |

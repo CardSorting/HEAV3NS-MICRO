@@ -55,6 +55,7 @@ pub struct ToolRegistry {
     pub constitution: Mutex<Option<RepoConstitution>>,
     pub approval_gate: Mutex<Option<ApprovalGateCallback>>,
     pub turn_approvals: Mutex<Vec<String>>,
+    pub forbid_swarm: std::sync::atomic::AtomicBool,
     pub max_concurrency: usize,
 }
 
@@ -99,6 +100,7 @@ impl ToolRegistry {
             constitution: Mutex::new(None),
             approval_gate: Mutex::new(None),
             turn_approvals: Mutex::new(Vec::new()),
+            forbid_swarm: std::sync::atomic::AtomicBool::new(false),
             max_concurrency: 8,
         };
         for spec in builtin_tool_specs() {
@@ -260,7 +262,7 @@ impl ToolRegistry {
         for key in ["path", "filePath", "file_path", "source", "target", "cwd", "file", "targetFile", "targetPath", "filename", "from", "to", "dest", "destination"] {
             if let Some(Value::String(s)) = obj.get(key) {
                 if !s.trim().is_empty() && !s.contains('\n') {
-                    let p = resolve_workspace_path(cwd, s);
+                    let p = crate::core::tool_governor::normalize_tracker_key(&resolve_workspace_path(cwd, s));
                     if !paths.contains(&p) { paths.push(p); }
                 }
             }
@@ -268,7 +270,7 @@ impl ToolRegistry {
         if canonical == "apply_unified_diff" {
             if let Some(diff_txt) = obj.get("diff").or_else(|| obj.get("patch")).and_then(Value::as_str) {
                 for op in crate::plumbing::fuzzy_patch::DeterministicPatchEngine::parse(diff_txt) {
-                    let p = resolve_workspace_path(cwd, &op.file_path);
+                    let p = crate::core::tool_governor::normalize_tracker_key(&resolve_workspace_path(cwd, &op.file_path));
                     if !paths.contains(&p) { paths.push(p); }
                 }
             }
@@ -304,7 +306,7 @@ impl ToolRegistry {
             let resources = self.extract_target_resources(call, cwd);
 
             if !is_mutating {
-                let conflict = current_has_mutations && resources.iter().any(|r| current_resources.contains(r));
+                let conflict = current_has_mutations && (resources.is_empty() || resources.iter().any(|r| current_resources.contains(r)));
                 if conflict || current_wave.len() >= self.max_concurrency {
                     if !current_wave.is_empty() {
                         waves.push(std::mem::take(&mut current_wave));
@@ -639,7 +641,8 @@ impl ToolRegistry {
             "tool_search" => {
                 let query = args.get("query").and_then(Value::as_str).unwrap_or("");
                 let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(4) as usize;
-                Ok((self.search_and_unlock_tools(query, limit, false), false))
+                let forbid = self.forbid_swarm.load(std::sync::atomic::Ordering::Relaxed);
+                Ok((self.search_and_unlock_tools(query, limit, forbid), false))
             }
             "execute_tools" => {
                 let calls = args.get("calls").ok_or("Missing 'calls' array")?;
@@ -697,11 +700,13 @@ impl ToolRegistry {
             "save_memory" => {
                 let key = args.get("key").and_then(|v| v.as_str()).ok_or("Missing 'key'")?;
                 let value = args.get("value").and_then(|v| v.as_str()).ok_or("Missing 'value'")?;
-                let threats = SafetyPolicy::scan_for_threats(value, "all");
+                let category = args.get("category").and_then(|v| v.as_str()).unwrap_or("fact");
+                let mut threats = SafetyPolicy::scan_for_threats(value, "all");
+                threats.extend(SafetyPolicy::scan_for_threats(key, "all"));
+                threats.extend(SafetyPolicy::scan_for_threats(category, "all"));
                 if !threats.is_empty() {
                     return Err(format!("Blocked memory write containing security threats: {:?}", threats));
                 }
-                let category = args.get("category").and_then(|v| v.as_str()).unwrap_or("fact");
                 let mut mem = self.memory_store.lock().map_err(|_| "Memory lock poisoned")?;
                 let entry = mem.save_memory(key, value, category);
                 Ok((json!({ "success": true, "entry": entry }), false))

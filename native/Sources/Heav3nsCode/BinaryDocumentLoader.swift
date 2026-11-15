@@ -13,15 +13,18 @@ final class BinaryDocumentLoader {
     private var expectedSize: Int?
     private var cancelled = false
     private var finished = false
+    private var started = false
     var onProgress: ((Int, Int) -> Void)?
     var onComplete: ((Result<Data, Error>) -> Void)?
 
     init(path: String, request: @escaping Request) { self.path = path; self.request = request }
-    func start() { guard !finished, !cancelled, revision == nil else { return }; readNext() }
+    func start() { guard !finished, !cancelled, !started, revision == nil else { return }; started = true; readNext() }
     func cancel() { cancelled = true; bytes.removeAll(); onComplete = nil; onProgress = nil }
     private func fail(_ message: String) {
         guard !cancelled, !finished else { return }
-        finished = true; bytes.removeAll(); onComplete?(.failure(BridgeError.message(message)))
+        finished = true; bytes.removeAll()
+        let cb = onComplete; onComplete = nil; onProgress = nil
+        cb?(.failure(BridgeError.message(message)))
     }
     private func readNext() {
         guard !cancelled, !finished else { return }
@@ -47,7 +50,11 @@ final class BinaryDocumentLoader {
                 }
                 self.revision = token; self.expectedSize = size; self.bytes.append(data); self.onProgress?(end, size)
                 if more { self.readNext() }
-                else { self.finished = true; let result = self.bytes; self.bytes.removeAll(); self.onComplete?(.success(result)) }
+                else {
+                    self.finished = true; let result = self.bytes; self.bytes.removeAll()
+                    let cb = self.onComplete; self.onComplete = nil; self.onProgress = nil
+                    cb?(.success(result))
+                }
             }
         }
     }

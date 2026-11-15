@@ -5,9 +5,10 @@ import Foundation
 extension WorkspaceWindow {
     @objc func toggleAgentDefer() {
         let method = swarmDeferred ? "task.resume" : "task.defer"
-        client.request(method, params: [:]) { [weak self] result in
+        let source = client
+        source.request(method, params: [:]) { [weak self, weak source] result in
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self, let source, self.client === source, !self.closing else { return }
                 switch result {
                 case .success(let payload):
                     self.swarmDeferred = method == "task.defer"
@@ -33,9 +34,10 @@ extension WorkspaceWindow {
         objective.frame = NSRect(x: 0, y: 0, width: 360, height: 28); alert.accessoryView = objective
         guard alert.runModal() == .alertFirstButtonReturn, !objective.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let task = objective.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        client.request("agentSwarm.classify", params: ["objective": task]) { [weak self] result in
+        let source = client
+        source.request("agentSwarm.classify", params: ["objective": task]) { [weak self, weak source] result in
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self, let source, self.client === source, !self.closing else { return }
                 switch result {
                 case .success(let plan): self.confirmSpecialistPlan(task, plan: plan)
                 case .failure(let error): self.showNotice(error.localizedDescription)
@@ -89,9 +91,10 @@ extension WorkspaceWindow {
         confirm.informativeText = "Your request\n\(objective.prefix(700))\n\n\(intentNames[plan["intent"] as? String ?? ""] ?? "General request") · \(strategyNames[plan["strategy"] as? String ?? ""] ?? "Adaptive team") · \(assignments.count) specialists\n\nTeam plan\n\(steps)\n\nStarting gives specialists access to workspace tools. They may edit files or run commands. Review their activity and reports, then inspect the workspace changes."
         confirm.addButton(withTitle: "Start Team"); confirm.addButton(withTitle: "Cancel")
         guard confirm.runModal() == .alertFirstButtonReturn else { return }
-        client.request("agentSwarm.form", params: ["objective": objective, "assignments": assignments]) { [weak self] result in
+        let source = client
+        source.request("agentSwarm.form", params: ["objective": objective, "assignments": assignments]) { [weak self, weak source] result in
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self, let source, self.client === source, !self.closing else { return }
                 switch result {
                 case .success(let report):
                     let deferred = report["status"] as? String == "deferred"
@@ -205,9 +208,10 @@ extension WorkspaceWindow {
     }
 
     @objc func showFormationStatus() {
-        client.request("agentSwarm.formStatus", params: [:]) { [weak self] result in
+        let source = client
+        source.request("agentSwarm.formStatus", params: [:]) { [weak self, weak source] result in
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self, let source, self.client === source, !self.closing else { return }
                 let alert = NSAlert(); alert.messageText = "Specialist Formation Status"
                 var formationId: String?
                 var isAutomaticFormation = false
@@ -289,9 +293,10 @@ extension WorkspaceWindow {
                 self.showNotice("Reconciliation was not submitted. Confirm the stopped and reviewed checkbox and add at least 20 characters describing your review.")
                 return
             }
-            self.client.request("agentSwarm.formReconcile", params: ["formationId": formationId, "confirmation": note, "confirmedStopped": true, "decisions": decisions]) { [weak self] result in
+            let source = self.client
+            source.request("agentSwarm.formReconcile", params: ["formationId": formationId, "confirmation": note, "confirmedStopped": true, "decisions": decisions]) { [weak self, weak source] result in
                 DispatchQueue.main.async {
-                    guard let self else { return }
+                    guard let self, let source, self.client === source, !self.closing else { return }
                     switch result {
                     case .success(let receipt):
                         let isAutomatic = receipt["automatic"] as? Bool == true
@@ -388,9 +393,10 @@ extension WorkspaceWindow {
         alert.accessoryView = picker
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let choice = choices[min(max(picker.indexOfSelectedItem, 0), choices.count - 1)]
-        client.request("agentSwarm.formStream", params: ["formationId": formationId, "specialistId": choice.id]) { [weak self] result in
+        let source = client
+        source.request("agentSwarm.formStream", params: ["formationId": formationId, "specialistId": choice.id]) { [weak self, weak source] result in
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self, let source, self.client === source, !self.closing else { return }
                 switch result {
                 case .success(let stream):
                     let excerpt = stream["excerpt"] as? String ?? "No transcript excerpt was saved."
@@ -409,18 +415,19 @@ extension WorkspaceWindow {
     }
 
     func resumeFormation(_ formationId: String, automatic: Bool) {
-        client.request("agentSwarm.settings", params: ["action": "get"]) { [weak self] settingsResult in
+        let source = client
+        source.request("agentSwarm.settings", params: ["action": "get"]) { [weak self, weak source] settingsResult in
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self, let source, self.client === source, !self.closing else { return }
                 guard case .success(let settings) = settingsResult else {
                     if case .failure(let error) = settingsResult { self.showNotice(error.localizedDescription) }
                     return
                 }
-                let resumeFormationWork = { [weak self] in
-                    guard let self else { return }
-                    self.client.request("agentSwarm.formResume", params: ["formationId": formationId]) { [weak self] result in
+                let resumeFormationWork = { [weak self, weak source] in
+                    guard let self, let source, self.client === source, !self.closing else { return }
+                    source.request("agentSwarm.formResume", params: ["formationId": formationId]) { [weak self, weak source] result in
                         DispatchQueue.main.async {
-                            guard let self else { return }
+                            guard let self, let source, self.client === source, !self.closing else { return }
                             switch result {
                             case .success(let report): self.showNotice("Formation resumed.\n\n\(self.formationRoadmapText(report))")
                             case .failure(let error): self.showNotice(error.localizedDescription)
@@ -429,9 +436,9 @@ extension WorkspaceWindow {
                     }
                 }
                 if automatic || self.swarmDeferred || settings["enabled"] as? Bool == true || settings["hierarchicalDefer"] as? Bool == true {
-                    self.client.request("task.resume", params: [:]) { [weak self] resumed in
+                    source.request("task.resume", params: [:]) { [weak self, weak source] resumed in
                         DispatchQueue.main.async {
-                            guard let self else { return }
+                            guard let self, let source, self.client === source, !self.closing else { return }
                             guard case .success = resumed else {
                                 if case .failure(let error) = resumed { self.showNotice(error.localizedDescription) }
                                 return
@@ -448,9 +455,10 @@ extension WorkspaceWindow {
     }
 
     @objc func showFormationHistory() {
-        client.request("agentSwarm.formHistory", params: ["limit": 20]) { [weak self] result in
+        let source = client
+        source.request("agentSwarm.formHistory", params: ["limit": 20]) { [weak self, weak source] result in
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self, let source, self.client === source, !self.closing else { return }
                 switch result {
                 case .success(let history):
                     let entries = history["formations"] as? [[String: Any]] ?? []
@@ -507,9 +515,10 @@ extension WorkspaceWindow {
     }
 
     @objc func showLatestSpecialistStream() {
-        client.request("agentSwarm.formStatus", params: [:]) { [weak self] result in
+        let source = client
+        source.request("agentSwarm.formStatus", params: [:]) { [weak self, weak source] result in
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self, let source, self.client === source, !self.closing else { return }
                 guard case .success(let status) = result else { self.showNotice("Could not load specialist formation status."); return }
                 let currentStatus = status["status"] as? String ?? "none"
                 let formationId = status["id"] as? String
@@ -526,9 +535,9 @@ extension WorkspaceWindow {
                     self.showNotice("The latest formation has no saved specialist stream to inspect.")
                     return
                 }
-                self.client.request("agentSwarm.formStream", params: ["formationId": formationId, "specialistId": specialistId]) { [weak self] streamResult in
+                source.request("agentSwarm.formStream", params: ["formationId": formationId, "specialistId": specialistId]) { [weak self, weak source] streamResult in
                     DispatchQueue.main.async {
-                        guard let self else { return }
+                        guard let self, let source, self.client === source, !self.closing else { return }
                         switch streamResult {
                         case .success(let stream):
                             let excerpt = stream["excerpt"] as? String ?? "No transcript excerpt was saved."

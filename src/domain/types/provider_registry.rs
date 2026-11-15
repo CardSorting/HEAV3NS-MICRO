@@ -82,8 +82,11 @@ impl IProviderRouteResolver for ProviderChain {
 
 impl ProviderChain {
     pub fn new(primary: &str, fallbacks: &[String]) -> Self {
-        let canon_primary = canonicalize_provider_id(primary);
-        let mut providers = vec![canon_primary];
+        let mut providers = Vec::new();
+        let raw_prim = primary.trim();
+        if !raw_prim.is_empty() && !is_retired_provider(raw_prim) {
+            providers.push(canonicalize_provider_id(raw_prim));
+        }
         for fb in fallbacks {
             let trimmed = fb.trim();
             if trimmed.is_empty() {
@@ -97,6 +100,9 @@ impl ProviderChain {
             if !providers.iter().any(|existing| existing == &canon) {
                 providers.push(canon);
             }
+        }
+        if providers.is_empty() {
+            providers.push("openai".to_string());
         }
         Self { providers, cursor: 0 }
     }
@@ -183,8 +189,9 @@ where
         .filter(|s| !s.is_empty())
         .map(String::from)
         .or_else(|| desc.and_then(|d| d.endpoint_env).and_then(&env_lookup).filter(|s| !s.trim().is_empty()))
-        .or_else(|| saved_endpoints.get(&provider_id).or_else(|| saved_endpoints.get(&secret_slot)).cloned().filter(|s| !s.trim().is_empty()))
+        .or_else(|| saved_endpoints.get(&provider_id).cloned().filter(|s| !s.trim().is_empty()))
         .or_else(|| desc.map(|d| d.default_endpoint.to_string()))
+        .or_else(|| saved_endpoints.get(&secret_slot).cloned().filter(|s| !s.trim().is_empty()))
         .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
 
     let raw_model = explicit_model

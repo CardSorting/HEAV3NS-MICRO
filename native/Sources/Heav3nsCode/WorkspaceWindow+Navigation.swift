@@ -50,11 +50,12 @@ extension WorkspaceWindow {
     func switchConversation(_ id: String?, deleting: Bool = false) {
         guard canSwitchConversation, saveDraft() else { return }
         switchingConversation = true; expectedConversation = nil; podContextID = UUID()
-        navigationGeneration += 1; inspectionGeneration += 1; conversationGeneration += 1
+        navigationGeneration += 1; inspectionGeneration += 1; conversationGeneration += 1; conversationSwitchGeneration += 1
         walkthroughLoadGeneration += 1; quickOpen?.dismiss()
         updateStatus()
+        let switchGen = conversationSwitchGeneration
         client.request(deleting ? "conversation.delete" : (id == nil ? "conversation.create" : "conversation.select"), params: id.map { ["id": $0] } ?? [:]) { [weak self] result in
-            guard let self else { return }
+            guard let self, self.conversationSwitchGeneration == switchGen else { return }
             switch result {
             case .success(let data):
                 if deleting, let id {
@@ -64,8 +65,9 @@ extension WorkspaceWindow {
                 }
                 self.expectedConversation = data["conversation"] as? String
                 self.client.requestSnapshot(afterPending: true) { [weak self] in
-                    guard let self else { return }
+                    guard let self, self.conversationSwitchGeneration == switchGen else { return }
                     guard self.currentConversation == self.expectedConversation else {
+                        self.switchingConversation = false; self.expectedConversation = nil; self.updateStatus()
                         self.showNotice("The conversation could not be confirmed. Reconnect before sending.")
                         self.client.closeInput(); return
                     }
@@ -89,13 +91,18 @@ extension WorkspaceWindow {
 
     func adoptConversation(_ id: String) {
         guard id != currentConversation else { return }
+        let hadConversation = currentConversation != nil
         if let previous = currentConversation {
             draftByConversation[previous] = composer.string
-            composer.string = draftByConversation[id] ?? ""
+        } else if !composer.string.isEmpty, (draftByConversation[id] ?? "").isEmpty {
+            draftByConversation[id] = composer.string
         }
+        composer.string = draftByConversation[id] ?? ""
         currentConversation = id; podContextID = UUID()
         runs = []; active = nil; expandedActions.removeAll()
         resetConversationInspection()
+        if hadConversation { attachmentBar.clear() }
+        receiptBar.isHidden = true
         walkthrough.reset(); walkthroughLoaded = nil; walkthroughLoadGeneration += 1
         savedDraftText = "\u{0}"
         saveDraft()
@@ -152,7 +159,12 @@ extension WorkspaceWindow {
         navigate(.changes)
     }
 
-    @objc func showSessions() { loadConversations(); navigation.select(.sessions) }
+    @objc func showSessions() {
+        loadConversations()
+        conversations.isHidden = true; navigation.isHidden = false
+        sidebarPreferred = true; compactSidebarRevealed = true
+        navigation.select(.sessions); adapt()
+    }
 
     @objc func switchNavigatorTab() {
         switch navigatorTabs.selectedSegment {

@@ -69,14 +69,17 @@ impl RuntimeRequestQueue {
     }
 
     pub fn try_acquire(self: &Arc<Self>, prompt_bytes: usize) -> Result<QueuePermit, String> {
-        let mut st = self.state.lock().unwrap();
+        let mut st = match self.state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
         if prompt_bytes > st.max_prompt_bytes {
             return Err(format!(
                 "RUNTIME_REQUEST_TOO_LARGE: prompt is {} bytes (max {} bytes)",
                 prompt_bytes, st.max_prompt_bytes
             ));
         }
-        if st.pending_count >= st.max_pending || st.pending_bytes + prompt_bytes > st.max_total_bytes {
+        if st.pending_count >= st.max_pending || st.pending_bytes.saturating_add(prompt_bytes) > st.max_total_bytes {
             return Err(format!(
                 "RUNTIME_QUEUE_FULL: {} pending requests ({} bytes queued)",
                 st.pending_count, st.pending_bytes
@@ -84,7 +87,7 @@ impl RuntimeRequestQueue {
         }
         st.active = true;
         st.pending_count += 1;
-        st.pending_bytes += prompt_bytes;
+        st.pending_bytes = st.pending_bytes.saturating_add(prompt_bytes);
         Ok(QueuePermit {
             queue: Arc::clone(self),
             bytes: prompt_bytes,
@@ -92,7 +95,10 @@ impl RuntimeRequestQueue {
     }
 
     pub extern "Rust" fn snapshot(&self) -> QueueState {
-        self.state.lock().unwrap().clone()
+        match self.state.lock() {
+            Ok(g) => g.clone(),
+            Err(p) => p.into_inner().clone(),
+        }
     }
 }
 

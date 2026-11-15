@@ -43,7 +43,7 @@ impl SessionCompactor {
 
     #[inline]
     pub fn is_checkpoint(msg: &SessionMessage) -> bool {
-        msg.role == Role::Assistant && msg.content.starts_with(CONTEXT_CHECKPOINT_PREFIX)
+        (msg.role == Role::User || msg.role == Role::Assistant) && msg.content.starts_with(CONTEXT_CHECKPOINT_PREFIX)
     }
 
     pub fn group_turns(conversation: &[SessionMessage]) -> Vec<Vec<SessionMessage>> {
@@ -86,22 +86,16 @@ impl SessionCompactor {
             );
         }
 
-        let retained_checkpoints: Vec<SessionMessage> = source_transcript
-            .iter()
-            .filter(|m| Self::is_checkpoint(m))
-            .cloned()
-            .collect();
         let canonical: Vec<SessionMessage> = source_transcript
             .iter()
             .filter(|m| !Self::is_checkpoint(m))
             .cloned()
             .collect();
-        let mut system_messages: Vec<SessionMessage> = canonical
+        let system_messages: Vec<SessionMessage> = canonical
             .iter()
             .filter(|m| m.role == Role::System)
             .cloned()
             .collect();
-        system_messages.extend(retained_checkpoints);
 
         let conversation: Vec<SessionMessage> = canonical.into_iter().filter(|m| m.role != Role::System).collect();
         let turns = Self::group_turns(&conversation);
@@ -123,7 +117,7 @@ impl SessionCompactor {
         let preserve_recent = if policy.preserve_recent_turns > 0 {
             policy.preserve_recent_turns
         } else {
-            self.preserve_recent_turns
+            self.preserve_recent_turns.max(1)
         };
         let summary_max = if policy.summary_max_tokens > 0 {
             policy.summary_max_tokens
@@ -161,7 +155,7 @@ impl SessionCompactor {
         (
             selected,
             CompactionReport {
-                compacted: true,
+                compacted: selected_checkpoint_id.is_some(),
                 input_message_count: messages.len(),
                 output_message_count: out_len,
                 input_tokens,
@@ -214,7 +208,7 @@ impl SessionCompactor {
             "{CONTEXT_CHECKPOINT_PREFIX}\n{}",
             serde_json::to_string(&payload).unwrap_or_default()
         );
-        (SessionMessage::new(Role::Assistant, content), checkpoint_id)
+        (SessionMessage::new(Role::User, content), checkpoint_id)
     }
 
     pub fn truncate_to_token_budget(
@@ -263,7 +257,7 @@ impl SessionCompactor {
             }
         }
         kept_rev.reverse();
-        while kept_rev.first().is_some_and(|m| m.role == Role::Tool) {
+        while kept_rev.first().is_some_and(|m| m.role != Role::User) {
             kept_rev.remove(0);
         }
         if kept_rev.is_empty() {
@@ -397,7 +391,7 @@ impl SessionStore {
             }
             let msg: SessionMessage = serde_json::from_str(trimmed)
                 .map_err(|e| format!("Invalid session JSONL syntax at line {}: {e}", idx + 1))?;
-            required_bytes += (msg.content.len() + 3) & !3;
+            required_bytes = required_bytes.saturating_add(msg.content.len().saturating_add(3) & !3);
             parsed.push(msg);
         }
         if required_bytes > self.arena.capacity_bytes() {

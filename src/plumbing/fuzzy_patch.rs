@@ -145,6 +145,12 @@ pub fn heal_fuzzy_patch(file_content: &str, target_snippet: &str) -> Option<(Str
             if file_content.contains(&matched) {
                 return Some((matched, 0.95));
             }
+            if sep == "\r\n" {
+                let lf_matched = file_lines[i..i + target_lines.len()].join("\n");
+                if file_content.contains(&lf_matched) {
+                    return Some((lf_matched, 0.95));
+                }
+            }
         }
     }
     None
@@ -309,37 +315,49 @@ impl DeterministicPatchEngine {
             cur_hunks.clear();
         };
 
+        let (mut rem_old, mut rem_new) = (0usize, 0usize);
         for line in diff_text.lines() {
-            if let Some(rest) = line.strip_prefix("--- ") {
-                flush(&mut ops, &mut cur_file, &mut cur_type, &mut cur_hunks, &mut cur_hunk);
-                let p = rest.split('\t').next().unwrap_or(rest).trim();
-                is_old_null = p == "/dev/null";
-                old_file = p.strip_prefix("a/").or_else(|| p.strip_prefix("b/")).unwrap_or(p).to_string();
-                continue;
+            if rem_old == 0 && rem_new == 0 {
+                if let Some(rest) = line.strip_prefix("--- ") {
+                    flush(&mut ops, &mut cur_file, &mut cur_type, &mut cur_hunks, &mut cur_hunk);
+                    let p = rest.split('\t').next().unwrap_or(rest).trim();
+                    is_old_null = p == "/dev/null";
+                    old_file = p.strip_prefix("a/").or_else(|| p.strip_prefix("b/")).unwrap_or(p).to_string();
+                    continue;
+                }
+                if let Some(rest) = line.strip_prefix("+++ ") {
+                    let p = rest.split('\t').next().unwrap_or(rest).trim();
+                    let is_new_null = p == "/dev/null";
+                    let new_file = p.strip_prefix("b/").or_else(|| p.strip_prefix("a/")).unwrap_or(p).to_string();
+                    cur_file = if is_new_null { old_file.clone() } else { new_file };
+                    cur_type = if is_old_null {
+                        "add"
+                    } else if is_new_null {
+                        "delete"
+                    } else {
+                        "update"
+                    };
+                    continue;
+                }
             }
-            if let Some(rest) = line.strip_prefix("+++ ") {
-                let p = rest.split('\t').next().unwrap_or(rest).trim();
-                let is_new_null = p == "/dev/null";
-                let new_file = p.strip_prefix("b/").or_else(|| p.strip_prefix("a/")).unwrap_or(p).to_string();
-                cur_file = if is_new_null { old_file.clone() } else { new_file };
-                cur_type = if is_old_null {
-                    "add"
-                } else if is_new_null {
-                    "delete"
-                } else {
-                    "update"
-                };
-                continue;
-            }
-            if line.starts_with("@@ ") {
+            if let Some(rest) = line.strip_prefix("@@ ") {
                 if !cur_hunk.is_empty() {
                     cur_hunks.push(std::mem::take(&mut cur_hunk));
                 }
+                let header = rest.split("@@").next().unwrap_or("");
+                rem_old = header.split_whitespace().find_map(|t| t.strip_prefix('-')).and_then(|s| s.split(',').nth(1)).and_then(|n| n.parse().ok()).unwrap_or(1);
+                rem_new = header.split_whitespace().find_map(|t| t.strip_prefix('+')).and_then(|s| s.split(',').nth(1)).and_then(|n| n.parse().ok()).unwrap_or(1);
                 continue;
             }
             if !cur_file.is_empty() {
                 if let Some(first) = line.chars().next() {
                     if matches!(first, ' ' | '-' | '+') {
+                        match first {
+                            ' ' => { rem_old = rem_old.saturating_sub(1); rem_new = rem_new.saturating_sub(1); }
+                            '-' => { rem_old = rem_old.saturating_sub(1); }
+                            '+' => { rem_new = rem_new.saturating_sub(1); }
+                            _ => {}
+                        }
                         cur_hunk.push(PatchHunkLine {
                             prefix: first,
                             content: line[first.len_utf8()..].to_string(),
@@ -359,8 +377,8 @@ impl DeterministicPatchEngine {
             let replacement_lines: Vec<&str> =
                 hunk.iter().filter(|l| l.prefix != '-').map(|l| l.content.as_str()).collect();
             let target_block = target_lines.join("\n");
-            let replacement_block = replacement_lines.join("\n");
-            if target_block.is_empty() {
+            if target_lines.is_empty() {
+                let replacement_block = replacement_lines.join(if current.contains("\r\n") { "\r\n" } else { "\n" });
                 if current.is_empty() {
                     current.push_str(&replacement_block);
                     continue;
@@ -368,6 +386,8 @@ impl DeterministicPatchEngine {
                 return Err(format!("Hunk #{} contains pure additions without context anchors", idx + 1));
             }
             if let Some((matched, _)) = heal_fuzzy_patch(&current, &target_block) {
+                let rep_sep = if matched.contains("\r\n") { "\r\n" } else { "\n" };
+                let replacement_block = replacement_lines.join(rep_sep);
                 current = current.replacen(&matched, &replacement_block, 1);
             } else {
                 return Err(format!("Hunk #{} failed to match in target file", idx + 1));

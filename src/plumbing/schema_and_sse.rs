@@ -20,12 +20,16 @@ pub fn parse_sse_events(raw_sse: &str) -> Vec<SseEventFrame> {
     let mut data_buf = String::new();
     let mut has_data = false;
     let mut overflowed = false;
+    let (mut json_depth, mut in_str, mut escaped) = (0i32, false, false);
 
     let flush = |frames: &mut Vec<SseEventFrame>,
                  current_event: &mut Option<String>,
                  data_buf: &mut String,
                  has_data: &mut bool,
-                 overflowed: &mut bool| {
+                 overflowed: &mut bool,
+                 json_depth: &mut i32,
+                 in_str: &mut bool,
+                 escaped: &mut bool| {
         if *has_data && !*overflowed {
             let trimmed = data_buf.trim();
             if !trimmed.is_empty() && trimmed != "[DONE]" {
@@ -39,12 +43,15 @@ pub fn parse_sse_events(raw_sse: &str) -> Vec<SseEventFrame> {
         data_buf.clear();
         *has_data = false;
         *overflowed = false;
+        *json_depth = 0;
+        *in_str = false;
+        *escaped = false;
     };
 
     for raw_line in raw_sse.split('\n') {
         let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
         if line.is_empty() {
-            flush(&mut frames, &mut current_event, &mut data_buf, &mut has_data, &mut overflowed);
+            flush(&mut frames, &mut current_event, &mut data_buf, &mut has_data, &mut overflowed, &mut json_depth, &mut in_str, &mut escaped);
             continue;
         }
         if line.starts_with(':') {
@@ -57,22 +64,24 @@ pub fn parse_sse_events(raw_sse: &str) -> Vec<SseEventFrame> {
         match field {
             "event" => {
                 if has_data || overflowed {
-                    flush(&mut frames, &mut current_event, &mut data_buf, &mut has_data, &mut overflowed);
+                    flush(&mut frames, &mut current_event, &mut data_buf, &mut has_data, &mut overflowed, &mut json_depth, &mut in_str, &mut escaped);
                 }
                 current_event = Some(raw_val.trim().to_string());
             }
             "data" => {
                 if raw_val.trim() == "[DONE]" {
-                    flush(&mut frames, &mut current_event, &mut data_buf, &mut has_data, &mut overflowed);
+                    flush(&mut frames, &mut current_event, &mut data_buf, &mut has_data, &mut overflowed, &mut json_depth, &mut in_str, &mut escaped);
                     continue;
                 }
                 let trimmed_buf = data_buf.trim();
                 if has_data
                     && !overflowed
+                    && json_depth == 0
+                    && !in_str
                     && (trimmed_buf.ends_with('}') || trimmed_buf.ends_with(']'))
                     && serde_json::from_str::<IgnoredAny>(trimmed_buf).is_ok()
                 {
-                    flush(&mut frames, &mut current_event, &mut data_buf, &mut has_data, &mut overflowed);
+                    flush(&mut frames, &mut current_event, &mut data_buf, &mut has_data, &mut overflowed, &mut json_depth, &mut in_str, &mut escaped);
                 }
                 if overflowed {
                     continue;
@@ -86,13 +95,31 @@ pub fn parse_sse_events(raw_sse: &str) -> Vec<SseEventFrame> {
                 if has_data {
                     data_buf.push('\n');
                 }
+                for ch in raw_val.chars() {
+                    if escaped {
+                        escaped = false;
+                    } else if in_str {
+                        match ch {
+                            '\\' => escaped = true,
+                            '"' => in_str = false,
+                            _ => {}
+                        }
+                    } else {
+                        match ch {
+                            '"' => in_str = true,
+                            '{' | '[' => json_depth += 1,
+                            '}' | ']' => json_depth = (json_depth - 1).max(0),
+                            _ => {}
+                        }
+                    }
+                }
                 data_buf.push_str(raw_val);
                 has_data = true;
             }
             _ => {}
         }
     }
-    flush(&mut frames, &mut current_event, &mut data_buf, &mut has_data, &mut overflowed);
+    flush(&mut frames, &mut current_event, &mut data_buf, &mut has_data, &mut overflowed, &mut json_depth, &mut in_str, &mut escaped);
     frames
 }
 
@@ -254,6 +281,12 @@ pub fn sanitize_tool_schema_for_responses(schema: &mut Value) {
                 .unwrap_or_default();
             common_required = Some(match common_required {
                 None => branch_req,
+                Some(mut prev) if root_union == "allOf" => {
+                    for k in branch_req {
+                        if !prev.contains(&k) { prev.push(k); }
+                    }
+                    prev
+                }
                 Some(prev) => prev.into_iter().filter(|k| branch_req.contains(k)).collect(),
             });
         }
@@ -283,6 +316,17 @@ pub fn sanitize_tool_schema_for_responses(schema: &mut Value) {
     }
     if !map.contains_key("properties") {
         map.insert("properties".to_string(), Value::Object(Map::new()));
+    }
+    if let Some(Value::Array(req)) = map.get("required").cloned() {
+        let valid: Vec<Value> = req
+            .into_iter()
+            .filter(|v| v.as_str().is_some_and(|k| map.get("properties").and_then(Value::as_object).is_some_and(|p| p.contains_key(k))))
+            .collect();
+        if valid.is_empty() {
+            map.remove("required");
+        } else {
+            map.insert("required".to_string(), Value::Array(valid));
+        }
     }
 }
 

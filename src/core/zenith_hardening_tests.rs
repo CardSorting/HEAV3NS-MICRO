@@ -724,3 +724,76 @@ async fn test_zenith_wave7_comprehensive_hardening() {
     assert_eq!(r_mem["saved"], json!(false));
     let _ = std::fs::remove_dir_all(&ws);
 }
+
+#[test]
+fn test_zenith_wave8_providers_compaction_and_session_hardening() {
+    use crate::domain::interfaces::ISessionPersistence;
+    use crate::domain::types::tick_result::ProviderRequest;
+    use crate::domain::types::provider_registry::resolve_provider_route;
+    use crate::infrastructure::vfs_store::FileSessionPersistence;
+    use crate::infrastructure::wire_dialects::{build_anthropic_messages_payload, build_chat_completions_payload};
+    use std::collections::BTreeMap;
+
+    // 1. Shared secret_slot saved endpoint must not hijack sibling provider's default_endpoint
+    let mut saved_eps = BTreeMap::new();
+    saved_eps.insert("deepseek".to_string(), "https://custom.deepseek.proxy/v1".to_string());
+    let route = resolve_provider_route("deepseek-anthropic", None, None, None, None, None, None, &BTreeMap::new(), &saved_eps, |_| None);
+    assert_eq!(route.api_endpoint, "https://api.deepseek.com/anthropic/v1");
+
+    // 2. Wire dialects: third-party "solar-pro" gets max_tokens; claude-sonnet-4-6 gets adaptive thinking
+    let req_solar = ProviderRequest { model: "upstage/solar-pro".into(), messages: vec![], temperature: 0.2, max_tokens: 1024, tools: vec![], reasoning_effort: None };
+    let p_solar = build_chat_completions_payload("openrouter", &req_solar);
+    assert!(p_solar.get("max_tokens").is_some() && p_solar.get("max_completion_tokens").is_none());
+
+    let req_claude = ProviderRequest { model: "claude-sonnet-4-6".into(), messages: vec![], temperature: 0.2, max_tokens: 4096, tools: vec![], reasoning_effort: Some("medium".into()) };
+    let p_claude = build_anthropic_messages_payload("anthropic", "https://api.anthropic.com/v1", &req_claude);
+    assert_eq!(p_claude["thinking"]["type"], json!("adaptive"));
+
+    // 3. truncate_to_token_budget preserves User-first ordering when Assistant+Tool exceed budget
+    let msgs = vec![
+        SessionMessage::new(Role::System, "sys"),
+        SessionMessage::new(Role::User, "first user"),
+        SessionMessage::new(Role::Assistant, "long assistant reply ".repeat(40)),
+        SessionMessage::new(Role::User, "latest user"),
+    ];
+    let truncated = SessionCompactor::truncate_to_token_budget(&msgs, 30);
+    assert!(truncated.iter().filter(|m| m.role != Role::System).next().is_some_and(|m| m.role == Role::User));
+
+    // 4. FileSessionPersistence rejects symlink targets
+    let ws = std::env::temp_dir().join(format!("heav3ns_w8_{}", now_ms()));
+    std::fs::create_dir_all(&ws).unwrap();
+    let real_f = ws.join("real.jsonl");
+    let link_f = ws.join("link.jsonl");
+    std::fs::write(&real_f, "{}").unwrap();
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&real_f, &link_f).unwrap();
+        assert!(FileSessionPersistence.load_jsonl(&link_f).is_err());
+        assert!(FileSessionPersistence.save_jsonl(&link_f, "{}").is_err());
+    }
+    let _ = std::fs::remove_dir_all(&ws);
+}
+
+#[tokio::test]
+async fn test_zenith_wave9_cas_worker_and_orchestrator_hardening() {
+    use crate::core::engine::AgentEngine;
+    use crate::core::spatial_engine::SpatialInteractionEngine;
+    use crate::core::tool_governor::ToolOutputGovernor;
+    use crate::domain::computer_use::VirtualDisplayState;
+    use crate::domain::swarm::SwarmAssignment;
+    use crate::domain::types::runtime::{AgentConfig, EngineTickOutcome};
+    use crate::domain::types::spatial_types::SpatialActionContract;
+    use crate::infrastructure::scripted_provider::ScriptedProvider;
+    let mut gov = ToolOutputGovernor::new();
+    let spilled = gov.govern(&json!("line\n".repeat(300)));
+    if let Some(sid) = spilled.spill_id { assert!(gov.retrieve_spill(&sid, usize::MAX, None).is_some()); }
+    let ws = std::env::temp_dir().join(format!("heav3ns_w9_{}", now_ms()));
+    std::fs::create_dir_all(&ws).unwrap();
+    let engine = AgentEngine::new(ws.clone(), AgentConfig::default(), ScriptedProvider::new(vec![]));
+    let dup = vec![SwarmAssignment { id: "a".into(), role: "r1".into(), objective: "o1".into(), assigned_files: vec![], depends_on: vec![] }, SwarmAssignment { id: "a".into(), role: "r2".into(), objective: "o2".into(), assigned_files: vec![], depends_on: vec![] }];
+    assert_eq!(engine.run_swarm("obj", dup, None, None).await.outcome, EngineTickOutcome::Failed);
+    let sp = SpatialInteractionEngine::new(Arc::new(Mutex::new(VirtualDisplayState::default())));
+    let plan_err = sp.execute_plan(&SpatialActionContract { action_name: "click".into(), expected_epoch: Some(999), ..Default::default() }).unwrap();
+    assert_eq!(plan_err["verdict"], json!("stale_epoch"));
+    let _ = std::fs::remove_dir_all(&ws);
+}

@@ -409,7 +409,8 @@ fn is_blocked_ipv4(v4: std::net::Ipv4Addr) -> bool {
 }
 
 fn is_blocked_ssrf_host(host: &str) -> bool {
-    if matches!(host, "localhost" | "metadata.google.internal" | "metadata.goog") || host.ends_with(".localhost") || host.ends_with(".internal") {
+    let host = host.trim_end_matches('.');
+    if host.is_empty() || matches!(host, "localhost" | "metadata.google.internal" | "metadata.goog") || host.ends_with(".localhost") || host.ends_with(".internal") {
         return true;
     }
     if let Ok(ip) = host.parse::<std::net::IpAddr>() {
@@ -460,10 +461,12 @@ pub fn redact_cdp_url(url: &str) -> String {
     for key in ["token", "api_key", "apikey", "secret", "password", "access_token", "session_key", "auth"] {
         for sep in ["?", "&"] {
             let pat = format!("{}{}=", sep, key);
-            if let Some(pos) = out.to_ascii_lowercase().find(&pat) {
-                let val_start = pos + pat.len();
+            let mut search_from = 0usize;
+            while let Some(rel_pos) = out[search_from..].to_ascii_lowercase().find(&pat) {
+                let val_start = search_from + rel_pos + pat.len();
                 let val_end = out[val_start..].find(|c| c == '&' || c == '#').map(|i| val_start + i).unwrap_or(out.len());
                 out.replace_range(val_start..val_end, "[REDACTED]");
+                search_from = val_start + "[REDACTED]".len();
             }
         }
     }

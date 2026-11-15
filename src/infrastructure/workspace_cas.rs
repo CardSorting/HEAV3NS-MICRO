@@ -143,10 +143,19 @@ impl WorkspaceSnapshotCas {
         let hash = Self::sha256_hex(bytes);
         let dest = self.blob_path(&hash);
         if !dest.exists() {
+            use std::io::Write;
             static CAS_BLOB_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
             let seq = CAS_BLOB_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let tmp = dest.with_extension(format!("tmp.{}.{}.{}", std::process::id(), now_ms(), seq));
-            fs::write(&tmp, bytes).map_err(|e| format!("CAS blob write failed: {e}"))?;
+            let write_res = (|| -> std::io::Result<()> {
+                let mut f = fs::File::create(&tmp)?;
+                f.write_all(bytes)?;
+                f.sync_all()
+            })();
+            if let Err(e) = write_res {
+                let _ = fs::remove_file(&tmp);
+                return Err(format!("CAS blob write failed: {e}"));
+            }
             if let Err(e) = fs::rename(&tmp, &dest) {
                 let _ = fs::remove_file(&tmp);
                 return Err(format!("CAS blob commit failed: {e}"));
@@ -232,7 +241,19 @@ impl WorkspaceSnapshotCas {
         if p.is_absolute() || p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
             return Err(format!("Refusing unsafe CAS relative path '{rel_path}'"));
         }
+        let mut cur = self.workspace_root.clone();
+        if let Some(parent_rel) = p.parent() {
+            for comp in parent_rel.components() {
+                cur.push(comp);
+                if fs::symlink_metadata(&cur).is_ok_and(|m| m.file_type().is_symlink()) {
+                    return Err(format!("Refusing to traverse symlink parent in '{rel_path}'"));
+                }
+            }
+        }
         let target = self.workspace_root.join(p);
+        if fs::symlink_metadata(&target).is_ok_and(|m| m.file_type().is_symlink()) {
+            return Err(format!("Refusing to overwrite symlink '{rel_path}'"));
+        }
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).map_err(|e| format!("mkdir failed for '{}': {e}", parent.display()))?;
         }
@@ -240,7 +261,16 @@ impl WorkspaceSnapshotCas {
         static CAS_WRITE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let seq = CAS_WRITE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let tmp = target.with_extension(format!("heav3ns-cas-tmp-{}-{}-{}", std::process::id(), now_ms(), seq));
-        fs::write(&tmp, bytes).map_err(|e| format!("temp write failed for '{rel_path}': {e}"))?;
+        let write_res = (|| -> std::io::Result<()> {
+            use std::io::Write;
+            let mut f = fs::File::create(&tmp)?;
+            f.write_all(bytes)?;
+            f.sync_all()
+        })();
+        if let Err(e) = write_res {
+            let _ = fs::remove_file(&tmp);
+            return Err(format!("temp write failed for '{rel_path}': {e}"));
+        }
         if let Some(perms) = existing_perms {
             let _ = fs::set_permissions(&tmp, perms);
         }
@@ -307,8 +337,16 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
             files,
         };
         let manifest_path = self.cas_root.join("manifests").join(format!("{ts}_{id}.json"));
-        if let Ok(serialized) = serde_json::to_string(&manifest) {
-            let _ = fs::write(&manifest_path, serialized);
+        let serialized = serde_json::to_string(&manifest)
+            .map_err(|e| format!("CAS manifest serialization failed: {e}"))?;
+        let tmp_manifest = self.cas_root.join("manifests").join(format!(".tmp_{ts}_{id}.json"));
+        if let Err(e) = fs::write(&tmp_manifest, serialized) {
+            let _ = fs::remove_file(&tmp_manifest);
+            return Err(format!("CAS manifest write failed: {e}"));
+        }
+        if let Err(e) = fs::rename(&tmp_manifest, &manifest_path) {
+            let _ = fs::remove_file(&tmp_manifest);
+            return Err(format!("CAS manifest commit failed: {e}"));
         }
         self.snapshots.push(manifest);
         let mut evicted_any = false;
@@ -435,7 +473,19 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
         // Codewhale SHA-256 post-turn collision preflight (`WouldBlock`)
         if !force {
             for rel in &touched_paths {
+                let mut cur = self.workspace_root.clone();
+                if let Some(parent_rel) = Path::new(rel).parent() {
+                    for comp in parent_rel.components() {
+                        cur.push(comp);
+                        if fs::symlink_metadata(&cur).is_ok_and(|m| m.file_type().is_symlink()) {
+                            return Err(format!("WouldBlock: '{rel}' traverses a symlink parent; refusing CAS undo."));
+                        }
+                    }
+                }
                 let disk_path = self.workspace_root.join(rel);
+                if fs::symlink_metadata(&disk_path).is_ok_and(|m| m.file_type().is_symlink()) {
+                    return Err(format!("WouldBlock: '{rel}' is a symlink; refusing CAS undo."));
+                }
                 match (post.files.get(rel), fs::read(&disk_path).ok()) {
                     (Some(expected), Some(actual_bytes)) => {
                         let actual_sha = Self::sha256_hex(&actual_bytes);
@@ -476,7 +526,10 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
                     return Err(format!("Refusing unsafe CAS undo path '{rel}'"));
                 }
                 let disk_path = self.workspace_root.join(rel_p);
-                if disk_path.exists() {
+                if let Ok(meta) = fs::symlink_metadata(&disk_path) {
+                    if meta.file_type().is_symlink() {
+                        return Err(format!("Refusing to remove symlink '{rel}' during CAS undo"));
+                    }
                     fs::remove_file(&disk_path).map_err(|e| format!("Failed to remove '{rel}': {e}"))?;
                     self.prune_empty_parents(&rel);
                 }
@@ -518,8 +571,8 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
                     continue;
                 }
                 let disk_path = self.workspace_root.join(p);
-                if disk_path.exists() {
-                    let _ = fs::remove_file(&disk_path);
+                if fs::symlink_metadata(&disk_path).is_ok_and(|m| !m.file_type().is_symlink()) {
+                    fs::remove_file(&disk_path).map_err(|e| format!("Failed to remove '{rel}': {e}"))?;
                     self.prune_empty_parents(rel);
                     actions.push(format!("[Removed] {rel}"));
                 }

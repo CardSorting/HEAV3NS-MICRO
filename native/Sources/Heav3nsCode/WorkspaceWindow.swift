@@ -83,12 +83,15 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
     var switchingConversation = false
     var expectedConversation: String?
     var conversationGeneration = 0
+    var conversationSwitchGeneration = 0
     var draftByConversation = [String: String]()
     let approval = NSStackView()
     let approvalText = NSTextView()
     let reviewApprovalButton = NSButton(title: "Review Request…", target: nil, action: nil)
     let denyButton = NSButton(title: "Deny", target: nil, action: nil); let allowSessionButton = NSButton(title: "Allow for Session", target: nil, action: nil); let allowButton = NSButton(title: "Allow Once", target: nil, action: nil)
     var activePosture: ExecutionPostureStop = .autoReview
+    var postureGeneration = 0
+    var undoPending = false
     let postureButton = NSButton(title: "Posture: Auto-Review", target: nil, action: nil)
     let receiptBar = TurnReceiptSummaryBar()
     var pendingLineJump: (line: Int, column: Int)?
@@ -527,6 +530,7 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         composerBottomBar.addArrangedSubview(queueButton)
         queuePopover.behavior = .transient; queuePopover.contentViewController = queueContent
         queueContent.onRemove = { [weak self] in self?.removeQueued($0) }
+        queueContent.onEdit = { [weak self] in self?.editQueued($0) }
         sendButton.target = self; sendButton.action = #selector(submit); sendButton.bezelStyle = .rounded
         sendButton.bezelColor = .controlAccentColor
         sendButton.keyEquivalent = "\r"

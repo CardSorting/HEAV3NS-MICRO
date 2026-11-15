@@ -312,6 +312,7 @@ impl AgentEngine {
                 if !receipt.file_changes.is_empty() {
                     let actions = self.cas.lock().unwrap().undo_turn_changes(before, after, force)?;
                     self.turn_receipts.lock().unwrap().pop();
+                    self.tools().journal.lock().unwrap().discard_turn(&receipt.turn_id);
                     self.tools().cache.lock().unwrap().clear();
                     self.tools().read_tracker.lock().unwrap().reset_stamps();
                     return Ok(json!({
@@ -601,7 +602,11 @@ impl AgentEngine {
                         Err(ProviderError::Cancelled) => {
                             return Err((ProviderError::Cancelled, None));
                         }
-                        Err(_) => {}
+                        Err(_) => {
+                            if cancel_token.as_ref().is_some_and(|t| t.is_cancelled()) {
+                                return Err((ProviderError::Cancelled, None));
+                            }
+                        }
                     }
                 }
             }

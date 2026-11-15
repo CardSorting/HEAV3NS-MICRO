@@ -5,6 +5,7 @@ import Foundation
 extension WorkspaceWindow {
     func configureClient() {
         viewportBranchGeneration += 1; viewportBranchCheckPending = false; viewportBranchCheckFailureShown = false; sideQuestionPending = nil
+        postureGeneration &+= 1; undoPending = false
         let source = client
         projectTaskRevision = -1; projectTaskDisplayedRevision = -1; projectTaskOffset = 0; projectTaskPreviousOffsets = []; projectTaskMovePending = false; projectTasksLoading = false; projectTasksRefreshPending = false
         client.onNotice = { [weak self, weak source] message in
@@ -44,8 +45,10 @@ extension WorkspaceWindow {
                     }
                 }
                 if self.client.capabilities.contains("posture-dial-v1") {
+                    self.postureGeneration &+= 1
+                    let gen = self.postureGeneration
                     source.request("posture.get", params: [:]) { [weak self, weak source] result in
-                        guard let self, self.client === source else { return }
+                        guard let self, self.client === source, self.postureGeneration == gen else { return }
                         if case .success(let data) = result, let slug = data["posture"] as? String, let parsed = ExecutionPostureStop.parse(slug) {
                             self.activePosture = parsed; self.refreshPostureControl(); self.updateStatus()
                         }
@@ -459,7 +462,11 @@ extension WorkspaceWindow {
             if let conversation = payload["conversation"] as? String { adoptConversation(conversation) }
             if let data = payload["modelSelection"] as? [String: Any], let selection = WorkspaceModelSelection(data) { updateModel(selection); modelPicker?.receive(data) }
             sequence = payload["seq"] as? Int ?? 0
-            let incoming = payload["runs"] as? [[String: Any]] ?? []
+            let conv = self.currentConversation
+            let incoming = (payload["runs"] as? [[String: Any]] ?? []).filter { run in
+                guard let runConv = run["conversation"] as? String else { return true }
+                return runConv == conv
+            }
             let previous = Dictionary(runs.compactMap { run in (run["id"] as? String).map { ($0, run) } }, uniquingKeysWith: { _, newest in newest })
             runs = incoming.map { run in previous[run["id"] as? String ?? ""].map { WalkthroughProjection.merged($0, run) } ?? WalkthroughProjection.bounded(run) }
             trimRecordedRuns()

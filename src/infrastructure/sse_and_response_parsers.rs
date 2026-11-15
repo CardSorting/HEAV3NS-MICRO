@@ -558,6 +558,18 @@ impl IncrementalSseAggregator {
                 });
             }
             return Ok(());
+        } else if let Some(cand) = chunk.get("candidates").and_then(Value::as_array).and_then(|a| a.first()) {
+            if let Some(reason) = cand.get("finishReason").and_then(Value::as_str) {
+                if !matches!(reason, "STOP" | "MAX_TOKENS") {
+                    return Err(ProviderError::HttpStatus {
+                        status: 200,
+                        body: format!("Gemini candidate blocked: finishReason = {reason}"),
+                        retryable: false,
+                        retry_after_ms: None,
+                    });
+                }
+            }
+            return Ok(());
         }
 
         // 4. OpenAI Chat Completions SSE (`choices[0].delta`)

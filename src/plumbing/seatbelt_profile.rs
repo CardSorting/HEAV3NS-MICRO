@@ -187,10 +187,19 @@ pub fn inspect_command_security(cmd: &str) -> CommandSecurityVerdict {
                 let mut saw_c_flag = false;
                 for idx in 0..args.len() {
                     if args[idx] == "-c" || (args[idx].starts_with('-') && !args[idx].starts_with("--") && args[idx].contains('c')) {
-                        let cmd_arg = match args.get(idx + 1).map(String::as_str) {
-                            Some("--") => args.get(idx + 2),
-                            _ => args.get(idx + 1),
-                        };
+                        let mut cmd_arg = None;
+                        let mut scan = idx + 1;
+                        while scan < args.len() {
+                            if args[scan] == "--" {
+                                cmd_arg = args.get(scan + 1);
+                                break;
+                            }
+                            if !args[scan].starts_with('-') {
+                                cmd_arg = Some(&args[scan]);
+                                break;
+                            }
+                            scan += 1;
+                        }
                         if let Some(sub_cmd) = cmd_arg {
                             saw_c_flag = true;
                             match inspect_command_security(sub_cmd) {

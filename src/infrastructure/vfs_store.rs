@@ -14,16 +14,20 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 impl VfsDiskBaseline {
-    pub fn capture(path: &Path) -> Self {
-        if let Ok(bytes) = fs::read(path) {
-            Self::from_bytes(Some(&bytes))
-        } else {
-            Self::from_bytes(None)
+    pub fn capture_checked(path: &Path) -> Result<Self, String> {
+        match fs::read(path) {
+            Ok(bytes) => Ok(Self::from_bytes(Some(&bytes))),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::from_bytes(None)),
+            Err(e) => Err(format!("Failed to inspect staged target '{}': {e}", path.display())),
         }
     }
 
+    pub fn capture(path: &Path) -> Self {
+        Self::capture_checked(path).unwrap_or_else(|_| Self::from_bytes(None))
+    }
+
     pub fn verify(&self, path: &Path) -> Result<(), String> {
-        let current = Self::capture(path);
+        let current = Self::capture_checked(path)?;
         if !self.matches(&current) {
             return Err(format!(
                 "Staged file changed on disk since review: {}. The staged change was preserved.",
@@ -179,6 +183,9 @@ impl SkillsIngestor {
                 } else {
                     continue
                 };
+                if fs::symlink_metadata(&skill_md).map(|m| m.file_type().is_symlink()).unwrap_or(true) {
+                    continue;
+                }
                 if let Ok(raw) = fs::read_to_string(&skill_md) {
                     let folder_name = p.file_name().and_then(|n| n.to_str()).unwrap_or("skill");
                     manifests.push(Self::parse_skill_md(folder_name, &skill_md, &raw));
@@ -264,7 +271,10 @@ impl SkillsIngestor {
             let p = entry.path();
                 if p.is_dir() {
                     let skill_md = p.join("SKILL.md");
-                    if let Ok(raw) = fs::read_to_string(&skill_md) {
+                    if fs::symlink_metadata(&skill_md).map(|m| m.file_type().is_symlink()).unwrap_or(true) {
+                    continue;
+                }
+                if let Ok(raw) = fs::read_to_string(&skill_md) {
                         let fname = p.file_name().and_then(|n| n.to_str()).unwrap_or("skill.md").to_string();
                         files.push((fname, raw));
                     }
@@ -347,11 +357,17 @@ pub struct FileSessionPersistence;
 
 impl ISessionPersistence for FileSessionPersistence {
     fn save_jsonl(&self, path: &Path, payload: &str) -> Result<bool, String> {
+        if fs::symlink_metadata(path).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+            return Err("Refusing symlink session persistence target".to_string());
+        }
         crate::infrastructure::search_tools::atomic_write_file(path, payload.as_bytes())?;
         Ok(true)
     }
 
     fn load_jsonl(&self, path: &Path) -> Result<String, String> {
+        if fs::symlink_metadata(path).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+            return Err("Refusing symlink session persistence source".to_string());
+        }
         fs::read_to_string(path).map_err(|e| e.to_string())
     }
 }
@@ -423,6 +439,9 @@ impl WorkspacePromptProbe {
         let mut warnings = Vec::new();
         for name in &candidates {
             let p = workspace_root.join(name);
+            if fs::symlink_metadata(&p).map(|m| m.file_type().is_symlink()).unwrap_or(true) {
+                continue;
+            }
             let Ok(raw) = fs::read_to_string(&p) else { continue };
             let clean = sanitize_trojan_unicode(&raw);
             let threats = SafetyPolicy::scan_for_threats(&clean, "context");

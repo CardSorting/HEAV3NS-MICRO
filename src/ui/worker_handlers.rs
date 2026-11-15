@@ -105,6 +105,72 @@ pub fn emit_jsonl_line(stdout_lock: &Arc<Mutex<io::Stdout>>, payload: &Value) {
     let _ = out.flush();
 }
 
+/// Allocates `event_seq` while holding `stdout_lock` so concurrent JSONL events emit in monotonic `seq` order.
+pub fn emit_seq_event(stdout_lock: &Arc<Mutex<io::Stdout>>, event_seq: &AtomicI64, mut event: Value) {
+    let mut out = lock_unpoison(stdout_lock);
+    let seq = event_seq.fetch_add(1, Ordering::SeqCst) + 1;
+    event["seq"] = json!(seq);
+    let _ = writeln!(out, "{event}");
+    let _ = out.flush();
+}
+
+/// Resolves a recorded worker run by exact `id` or by the 64-hex `state.inspect` digest (`sha256("<id>:<rev_idx>")`).
+pub fn resolve_worker_run<'a>(runs: &'a [Value], id_or_hash: &str) -> Option<&'a Value> {
+    if let Some(found) = runs.iter().find(|r| r.get("id").and_then(|s| s.as_str()) == Some(id_or_hash)) {
+        return Some(found);
+    }
+    if id_or_hash.len() == 64 && id_or_hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        for (idx, r) in runs.iter().rev().take(20).enumerate() {
+            let raw_id = r.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            if sha256_hex_ui(&format!("{raw_id}:{idx}")) == id_or_hash {
+                return Some(r);
+            }
+        }
+    }
+    None
+}
+
+pub fn sha256_hex_ui(input: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(input.as_bytes());
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Paginates UTF-8 text on char boundaries with SHA-256 revision stamping.
+pub fn paginate_text_response(text: &str, rev_prefix: &str, offset: usize, limit: usize) -> Value {
+    let total = text.len();
+    let mut safe_offset = offset.min(total);
+    while safe_offset > 0 && !text.is_char_boundary(safe_offset) {
+        safe_offset -= 1;
+    }
+    let mut end = safe_offset.saturating_add(limit).min(total);
+    while end > safe_offset && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let rev = format!("{rev_prefix}-{}", &sha256_hex_ui(text)[..12]);
+    json!({
+        "text": &text[safe_offset..end],
+        "binary": false,
+        "revision": rev,
+        "offset": safe_offset,
+        "nextOffset": end,
+        "size": total,
+        "more": end < total
+    })
+}
+
+/// Builds a paginated `artifact.read` response from a recorded `run` output when `params["run"]` is present.
+pub fn build_artifact_run_response(runs: &[Value], params: &Value) -> Option<Value> {
+    let run_id = params.get("run").and_then(|v| v.as_str())?;
+    let text = resolve_worker_run(runs, run_id)
+        .and_then(|r| r.get("response").or_else(|| r.get("error")).or_else(|| r.get("text")).and_then(|v| v.as_str()))
+        .unwrap_or("");
+    let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(65536) as usize;
+    Some(paginate_text_response(text, "artifact", offset, limit))
+}
+
 /// Switches the active conversation thread while snapshotting and restoring per-thread `SessionStore` history.
 pub fn switch_worker_conversation(state: &mut WorkerSharedState, engine: &AgentEngine, next_id: &str) {
     let prev_id = state.current_conversation.clone();
@@ -147,7 +213,17 @@ pub async fn handle_automation_rpc(method: &str, req_id: &str, params: &Value, e
             if method == "computer.health" && req.get("action").is_none() {
                 req["action"] = json!("audit_health");
             }
-            lock_unpoison(&engine.tools().display_state).execute_action(&req).unwrap_or_else(|e| json!({"error": e}))
+            if method == "computer.action" {
+                let call = crate::domain::types::tool_schedule::ScheduledToolCall {
+                    id: format!("req-{req_id}"),
+                    name: "computer_use".into(),
+                    args: req,
+                };
+                let res = engine.tools().execute_single(&call, engine.workspace_root(), ExecutionAuthorityLevel::Autonomous, None).await;
+                if res.success { res.output } else { json!({"error": res.error}) }
+            } else {
+                lock_unpoison(&engine.tools().display_state).execute_action(&req).unwrap_or_else(|e| json!({"error": e}))
+            }
         }
         "computer.observe" | "computer.interpret" | "computer.consult" | "computer.orchestrate" => {
             let action = match method {
@@ -178,7 +254,17 @@ pub async fn handle_automation_rpc(method: &str, req_id: &str, params: &Value, e
             if method == "browser.navigate" && req.get("action").is_none() {
                 req["action"] = json!("navigate");
             }
-            lock_unpoison(&engine.tools().display_state).execute_browser_action(&req).unwrap_or_else(|e| json!({"error": e}))
+            if method == "browser.snapshot" {
+                lock_unpoison(&engine.tools().display_state).execute_browser_action(&req).unwrap_or_else(|e| json!({"error": e}))
+            } else {
+                let call = crate::domain::types::tool_schedule::ScheduledToolCall {
+                    id: format!("req-{req_id}"),
+                    name: "browser_action".into(),
+                    args: req,
+                };
+                let res = engine.tools().execute_single(&call, engine.workspace_root(), ExecutionAuthorityLevel::Autonomous, None).await;
+                if res.success { res.output } else { json!({"error": res.error}) }
+            }
         }
         "spatial.ground" | "spatial.execute" | "spatial.health" | "spatial.query" => {
             let action = match method {
@@ -198,6 +284,11 @@ pub async fn handle_automation_rpc(method: &str, req_id: &str, params: &Value, e
             if res.success { res.output } else { json!({"error": res.error}) }
         }
         _ => {
+            let mutating = method == "skills.forge"
+                || (method == "skills.lint" && params.get("autofix").and_then(|v| v.as_bool()).unwrap_or(false));
+            if mutating && engine.current_posture() == ExecutionPosture::Plan {
+                return json!({ "error": "ExecutionPosture::Plan forbids skill mutations." });
+            }
             let mut cat = lock_unpoison(&engine.tools().skill_catalog);
             match method {
                 "skills.forge" => cat.forge_skill(params).unwrap_or_else(|e| json!({"error": e})),
@@ -331,18 +422,20 @@ pub async fn execute_multiplexed_submit(
     prompt: String,
     posture_override: Option<ExecutionPosture>,
     interactive_approval: bool,
+    turn_gate: Arc<tokio::sync::Mutex<()>>,
 ) {
     let effective_posture = posture_override.unwrap_or_else(|| engine.current_posture());
-    let before_snap = engine.create_snapshot();
     let seq_start = event_seq.fetch_add(1, Ordering::SeqCst) + 1;
     let run_id = format!("run_{}_{}", now_ms(), seq_start);
-    let now = now_ms() as f64;
     let token = CancellationToken::new();
     let conv_id = {
         let mut guard = lock_unpoison(&state);
         guard.active_cancels.insert(run_id.clone(), token.clone());
         guard.current_conversation.clone()
     };
+    let _turn_guard = turn_gate.lock().await;
+    let before_snap = engine.create_snapshot();
+    let now = now_ms() as f64;
 
     let run_rev = Arc::new(AtomicI64::new(1));
     let mut run_obj = json!({
@@ -374,7 +467,7 @@ pub async fn execute_multiplexed_submit(
 
     if is_rpc {
         emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "accepted": true, "run": run_obj } }));
-        emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id, "runtime": "heav3ns-micro", "seq": seq_start, "type": "run.state", "payload": run_obj }));
+        emit_seq_event(&stdout_lock, &event_seq, json!({ "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id, "runtime": "heav3ns-micro", "type": "run.state", "payload": run_obj }));
     }
 
     let mut input = EngineTickInput::new(prompt.clone());
@@ -414,16 +507,15 @@ pub async fn execute_multiplexed_submit(
                     *existing = waiting_run.clone();
                 }
             }
-            let s = seq_approve.fetch_add(1, Ordering::SeqCst) + 1;
-            emit_jsonl_line(
+            emit_seq_event(
                 &out_approve,
-                &json!({
+                &seq_approve,
+                json!({
                     "v": 1,
                     "kind": "event",
                     "workspace": ws_a,
                     "session": sess_a,
                     "runtime": "heav3ns-micro",
-                    "seq": s,
                     "type": "approval.requested",
                     "run": run_a,
                     "payload": waiting_run
@@ -497,15 +589,18 @@ pub async fn execute_multiplexed_submit(
             }
         }
         if is_rpc {
-            let s = seq_cb.fetch_add(1, Ordering::SeqCst) + 1;
-            emit_jsonl_line(&out_prog, &json!({ "v": 1, "kind": "event", "workspace": ws_p, "session": sess_p, "runtime": "heav3ns-micro", "seq": s, "type": "activity", "run": run_p, "payload": act }));
+            emit_seq_event(&out_prog, &seq_cb, json!({ "v": 1, "kind": "event", "workspace": ws_p, "session": sess_p, "runtime": "heav3ns-micro", "type": "activity", "run": run_p, "payload": act }));
         } else {
             emit_jsonl_line(&out_prog, &json!({ "v": 1, "id": req_id_prog, "type": "progress", "event": ev }));
         }
     }));
 
     let result = engine.tick(input).await;
-    let after_snap = engine.create_snapshot();
+    let after_snap = if result.outcome == EngineTickOutcome::Failed && result.receipt.is_none() {
+        before_snap.clone()
+    } else {
+        engine.create_snapshot()
+    };
     let finish_now = now_ms() as f64;
     let unsent_auth = result.outcome == EngineTickOutcome::Failed
         && result.response.contains(CREDENTIAL_REJECTED_UNSENT_CODE);
@@ -591,12 +686,24 @@ pub async fn execute_multiplexed_submit(
 
     if is_rpc {
         if let Some(cat_payload) = changed_catalog {
-            let s_cat = event_seq.fetch_add(1, Ordering::SeqCst) + 1;
-            emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id, "runtime": "heav3ns-micro", "seq": s_cat, "type": "models.changed", "payload": cat_payload }));
+            emit_seq_event(&stdout_lock, &event_seq, json!({ "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id, "runtime": "heav3ns-micro", "type": "models.changed", "payload": cat_payload }));
         }
-        let s_end = event_seq.fetch_add(1, Ordering::SeqCst) + 1;
-        emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id, "runtime": "heav3ns-micro", "seq": s_end, "type": "run.state", "payload": run_obj }));
+        emit_seq_event(&stdout_lock, &event_seq, json!({ "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id, "runtime": "heav3ns-micro", "type": "run.state", "payload": run_obj }));
     } else {
         emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "id": req_id, "type": "result", "result": result }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_wave10_worker_artifact_read_and_hash_run_resolution() {
+        let runs = vec![json!({ "id": "run_abc", "response": "artifact-body-123" })];
+        let hash_id = sha256_hex_ui("run_abc:0");
+        assert_eq!(resolve_worker_run(&runs, &hash_id).and_then(|r| r["id"].as_str()), Some("run_abc"));
+        let art = build_artifact_run_response(&runs, &json!({ "run": "run_abc", "offset": 0 })).unwrap();
+        assert_eq!(art["text"], json!("artifact-body-123"));
     }
 }

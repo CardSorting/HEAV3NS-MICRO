@@ -534,10 +534,11 @@ fn parse_stage(stage: &str) -> ParsedStage {
             let (_, end) = extract_redir_target(stage, i + op_len);
             i = end;
         } else if c == b'>' {
-            let is_dup = next == b'&' && (cur == "1" || cur == "2");
             let is_append = next == b'>';
             let op_len = if next == b'&' || is_append { 2 } else { 1 };
-            let is_err_fd = cur == "2";
+            let (target, end) = extract_redir_target(stage, i + op_len);
+            let is_dup = next == b'&' && (cur == "1" || cur == "2" || (cur.is_empty() && matches!(target.as_str(), "1" | "2" | "-")));
+            let is_err_fd = cur == "2" || (next == b'&' && cur.is_empty() && target == "2");
             if is_err_fd || cur == "1" {
                 cur.clear();
             } else if !cur.is_empty() {
@@ -546,7 +547,6 @@ fn parse_stage(stage: &str) -> ParsedStage {
             if !is_err_fd && !is_dup {
                 ps.has_redirect_out = true;
             }
-            let (_, end) = extract_redir_target(stage, i + op_len);
             i = end;
         } else if c == b'<' {
             if cur == "0" {

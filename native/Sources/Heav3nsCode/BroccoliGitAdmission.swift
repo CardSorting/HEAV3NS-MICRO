@@ -12,6 +12,7 @@ enum BroccoliGitAdmission {
     static let workspaceBytes = 128 * 1024 * 1024
     static let applicationBytes = 512 * 1024 * 1024
     struct Reservation { let identity: String; let token: String; let bytes: Int }
+    private static let lock = NSLock()
     private static var active = Set<String>()
 
     private static func saved(_ defaults: UserDefaults) -> [String: [String: Any]]? {
@@ -34,10 +35,19 @@ enum BroccoliGitAdmission {
     }
 
     static func reserve(_ folder: URL, defaults: UserDefaults = .standard) -> Reservation? {
+        lock.lock(); defer { lock.unlock() }
         guard active.count < 4, var entries = saved(defaults) else { return nil }
         let identity = SHA256.hash(data: Data(folder.resolvingSymlinksInPath().standardizedFileURL.path.utf8))
             .map { String(format: "%02x", $0) }.joined()
         if let token = entries[identity]?["token"] as? String, active.contains(token) { return nil }
+        if entries[identity] == nil && entries.count >= 128 {
+            if let evictKey = entries.first(where: { entry in
+                guard let tok = entry.value["token"] as? String else { return true }
+                return !active.contains(tok)
+            })?.key {
+                entries.removeValue(forKey: evictKey)
+            }
+        }
         guard entries[identity] != nil || entries.count < 128 else { return nil }
         let others = entries.filter { $0.key != identity }.reduce(0) { $0 + (($1.value["bytes"] as? NSNumber)?.intValue ?? 0) }
         let available = min(workspaceBytes, applicationBytes - others)
@@ -51,6 +61,7 @@ enum BroccoliGitAdmission {
     }
 
     static func finish(_ reservation: Reservation, chargedBytes: Int?, cleanExit: Bool, defaults: UserDefaults = .standard) {
+        lock.lock(); defer { lock.unlock() }
         active.remove(reservation.token)
         guard cleanExit, let chargedBytes, (0...reservation.bytes).contains(chargedBytes),
               var entries = saved(defaults), entries[reservation.identity]?["token"] as? String == reservation.token else { return }

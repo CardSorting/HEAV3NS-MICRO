@@ -10,7 +10,7 @@ use crate::plumbing::hash_and_math::{fnv1a_32, lock_unpoison, now_ms};
 use crate::ui::cli_presenter::Heav3nsUserConfig;
 use crate::ui::provider_rpc::handle_account_mutation_rpc;
 use crate::ui::rpc_dispatch::{build_context_history_response, build_context_inspect_response, build_hello_response, build_model_selection, build_prompt_inspect_response, build_spider_check_multi_response, build_state_inspect_response, handle_files_rpc, handle_memory_rpc, sha256_hex};
-use crate::ui::worker_handlers::{build_sovereign_model_catalog_with_recent, build_sovereign_model_discovery, emit_jsonl_line, execute_multiplexed_submit, handle_automation_rpc, handle_posture_and_receipts_rpc, handle_provider_credential_rpc, switch_worker_conversation, WorkerSharedState};
+use crate::ui::worker_handlers::{build_artifact_run_response, build_sovereign_model_catalog_with_recent, build_sovereign_model_discovery, emit_jsonl_line, emit_seq_event, execute_multiplexed_submit, handle_automation_rpc, handle_posture_and_receipts_rpc, handle_provider_credential_rpc, resolve_worker_run, switch_worker_conversation, WorkerSharedState};
 use serde_json::{json, Value};
 use std::io;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -90,7 +90,7 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                         "conversation": st.current_conversation,
                         "posture": engine.current_posture().slug(),
                         "seq": event_seq.load(Ordering::SeqCst),
-                        "runs": st.session_runs,
+                        "runs": st.session_runs.iter().filter(|r| r.get("conversation").and_then(|v| v.as_str()).is_none_or(|c| c == st.current_conversation)).cloned().collect::<Vec<_>>(),
                         "modelSelection": build_model_selection(&st.active_provider, &st.active_model, &st.active_reasoning, st.model_revision),
                         "active": active_id,
                         "queued": []
@@ -159,8 +159,7 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                     build_sovereign_model_catalog_with_recent(&st.active_provider, &st.active_model, &st.active_reasoning, st.model_revision, &local_ollama, &st.recent_selections)
                 };
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": catalog }));
-                let seq = event_seq.fetch_add(1, Ordering::SeqCst) + 1;
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id, "runtime": "heav3ns-micro", "seq": seq, "type": "models.changed", "payload": catalog }));
+                emit_seq_event(&stdout_lock, &event_seq, json!({ "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id, "runtime": "heav3ns-micro", "type": "models.changed", "payload": catalog }));
             }
             "models.discover" | "models.refresh" => {
                 let want_live = method == "models.refresh" || params.get("refresh").and_then(|v| v.as_bool()) == Some(true);
@@ -180,31 +179,30 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": build_sovereign_model_discovery(&prov, &live_models) }));
             }
             "providers.list" => {
-                let items: Vec<Value> = PROVIDER_DESCRIPTORS
-                    .iter()
-                    .filter(|d| !d.retired)
-                    .map(|d| json!({
-                        "id": d.id,
-                        "label": d.display_name,
-                        "wireDialect": d.wire_dialect.as_str(),
-                        "defaultModel": d.default_model,
-                        "requiresApiKey": d.requires_api_key,
-                        "envVars": d.env_vars,
-                        "credentialUrl": d.credential_url
-                    }))
-                    .collect();
+                let items: Vec<Value> = PROVIDER_DESCRIPTORS.iter().filter(|d| !d.retired).map(|d| json!({
+                    "id": d.id, "label": d.display_name, "wireDialect": d.wire_dialect.as_str(),
+                    "defaultModel": d.default_model, "requiresApiKey": d.requires_api_key, "envVars": d.env_vars, "credentialUrl": d.credential_url
+                })).collect();
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "count": items.len(), "providers": items } }));
             }
             "posture.get" | "posture.set" | "posture.step" | "receipts.list" | "turn.undo" | "request.preview" => {
                 let resp = handle_posture_and_receipts_rpc(method, &params, &engine);
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
             }
-            "workspace.branch" | "files.list" | "files.search" | "files.read" | "artifact.read" | "files.readBinary" | "changes.list" | "changes.read" => {
+            "artifact.read" => {
+                let resp = build_artifact_run_response(&lock_unpoison(&state).session_runs, &params).unwrap_or_else(|| handle_files_rpc("files.read", &params, &engine));
+                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
+            }
+            "workspace.branch" | "files.list" | "files.search" | "files.read" | "files.readBinary" | "changes.list" | "changes.read" => {
                 let resp = handle_files_rpc(method, &params, &engine);
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
             }
             "task.submit" => {
                 spawned_turns.retain(|h| !h.is_finished());
+                if spawned_turns.len() >= 32 {
+                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending turns." } }));
+                    continue;
+                }
                 let prompt = params.get("text").or_else(|| parsed.get("prompt")).and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let posture_override = params
                     .get("posture")
@@ -212,12 +210,9 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                     .and_then(|v| v.as_str())
                     .and_then(ExecutionPosture::parse_label);
                 let interactive_approval = params.get("interactiveApproval").and_then(|v| v.as_bool()).unwrap_or(true);
-                let eng = Arc::clone(&engine);
-                let st = Arc::clone(&state);
-                let out = Arc::clone(&stdout_lock);
-                let seq = Arc::clone(&event_seq);
+                let (eng, st, out, seq, gate) = (Arc::clone(&engine), Arc::clone(&state), Arc::clone(&stdout_lock), Arc::clone(&event_seq), Arc::clone(&legacy_turn_gate));
                 let handle = tokio::spawn(async move {
-                    execute_multiplexed_submit(eng, st, out, seq, req_id, ws_id, sess_id, is_rpc, prompt, posture_override, interactive_approval).await;
+                    execute_multiplexed_submit(eng, st, out, seq, req_id, ws_id, sess_id, is_rpc, prompt, posture_override, interactive_approval, gate).await;
                 });
                 spawned_turns.push(handle);
             }
@@ -294,7 +289,7 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
             "history.read" => {
                 let h_id = params.get("id").or_else(|| params.get("run")).and_then(|v| v.as_str()).unwrap_or("");
                 let st = lock_unpoison(&state);
-                if let Some(r) = st.session_runs.iter().find(|r| r.get("id").and_then(|s| s.as_str()) == Some(h_id)) {
+                if let Some(r) = resolve_worker_run(&st.session_runs, h_id) {
                     emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "run": r, "outputAvailable": true } }));
                 } else {
                     let fallback = json!({ "id": if h_id.is_empty() { "run_0" } else { h_id }, "text": "", "session": sess_id, "state": "completed", "createdAt": now_ms() as f64 });
@@ -306,6 +301,7 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "conversations": convs } }));
             }
             "conversation.select" | "conversation.create" => {
+                if legacy_turn_gate.try_lock().is_err() { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "TURN_IN_PROGRESS", "message": "Cannot switch conversations while a turn is active." } })); continue; }
                 let cid = params
                     .get("id")
                     .or_else(|| params.get("conversation"))
@@ -323,6 +319,7 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "id": st.current_conversation, "conversation": st.current_conversation } }));
             }
             "conversation.delete" => {
+                if legacy_turn_gate.try_lock().is_err() { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "TURN_IN_PROGRESS", "message": "Cannot delete conversations while a turn is active." } })); continue; }
                 let del_opt = params
                     .get("id")
                     .or_else(|| params.get("conversation"))
@@ -337,6 +334,9 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                     st.conversations.push(json!({ "id": "default-conv", "title": "Main Session" }));
                 }
                 let next_conv = st.conversations[0].get("id").and_then(|v| v.as_str()).unwrap_or("default-conv").to_string();
+                if del_opt.as_deref() == Some(st.current_conversation.as_str()) && next_conv == st.current_conversation {
+                    st.current_conversation.clear();
+                }
                 switch_worker_conversation(&mut st, &engine, &next_conv);
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "id": st.current_conversation, "conversation": st.current_conversation } }));
             }
@@ -396,13 +396,13 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                 let snaps = engine.snapshots_list();
                 if let Some(idx) = snaps.iter().position(|s| s.snapshot_id == cid) {
                     if let Err(e) = engine.rewind_to_snapshot(idx) {
-                        emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "error", "id": req_id, "error": { "code": "REWIND_FAILED", "message": e } }));
+                        emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "REWIND_FAILED", "message": e } }));
                     } else {
                         let conv = lock_unpoison(&state).current_conversation.clone();
                         emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "conversation": conv } }));
                     }
                 } else {
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "error", "id": req_id, "error": { "code": "NOT_FOUND", "message": format!("Checkpoint '{cid}' not found") } }));
+                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "NOT_FOUND", "message": format!("Checkpoint '{cid}' not found") } }));
                 }
             }
             "checkpoint.flag" => {
@@ -753,10 +753,9 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
             // Deprecated legacy turn methods: migrated onto `execute_multiplexed_submit` with strict FIFO response ordering.
             "tick" | "chat" | "slash" => {
                 spawned_turns.retain(|h| !h.is_finished());
-                let seq_dep = event_seq.fetch_add(1, Ordering::SeqCst) + 1;
-                emit_jsonl_line(&stdout_lock, &json!({
+                emit_seq_event(&stdout_lock, &event_seq, json!({
                     "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id,
-                    "runtime": "heav3ns-micro", "seq": seq_dep, "type": "deprecation.notice",
+                    "runtime": "heav3ns-micro", "type": "deprecation.notice",
                     "payload": { "method": method, "replacement": "task.submit", "message": format!("Method '{method}' is deprecated; migrate to 'task.submit'.") }
                 }));
                 let prompt = parsed.get("prompt").or_else(|| parsed.get("command")).and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -766,8 +765,7 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                 let out = Arc::clone(&stdout_lock);
                 let seq = Arc::clone(&event_seq);
                 let handle = tokio::spawn(async move {
-                    let _guard = gate.lock().await;
-                    execute_multiplexed_submit(eng, st, out, seq, req_id, ws_id, sess_id, is_rpc, prompt, None, false).await;
+                    execute_multiplexed_submit(eng, st, out, seq, req_id, ws_id, sess_id, is_rpc, prompt, None, false, gate).await;
                 });
                 spawned_turns.push(handle);
             }

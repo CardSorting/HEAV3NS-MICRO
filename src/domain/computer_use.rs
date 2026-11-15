@@ -523,8 +523,8 @@ impl VirtualDisplayState {
             "window_resize" | "resize_window" => {
                 self.assert_agent_may_act(args)?;
                 let win_id = args.get("window_id").and_then(|v| v.as_str()).unwrap_or(&self.active_window_id);
-                let nw = args.get("width").and_then(|v| v.as_i64()).unwrap_or(800).max(1) as i32;
-                let nh = args.get("height").and_then(|v| v.as_i64()).unwrap_or(600).max(1) as i32;
+                let nw = args.get("width").and_then(|v| v.as_i64()).unwrap_or(800).clamp(1, i32::MAX as i64) as i32;
+                let nh = args.get("height").and_then(|v| v.as_i64()).unwrap_or(600).clamp(1, i32::MAX as i64) as i32;
                 if let Some(win) = self.windows.iter_mut().find(|w| w.id == win_id) { win.bounds[2] = nw; win.bounds[3] = nh; }
                 self.record_action("window_resize", "success", 1, json!({"windowId": win_id, "bounds": [nw, nh]}));
                 Ok(self.capture_frame())

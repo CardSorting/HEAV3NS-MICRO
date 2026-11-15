@@ -30,6 +30,30 @@ impl TransactionJournal {
         self.current_turn_id = turn_id.into();
     }
 
+    pub fn clear(&mut self) {
+        self.transactions.clear();
+        self.checkpoints.clear();
+    }
+
+    pub fn discard_turn(&mut self, turn_id: &str) {
+        let mut remaining = Vec::with_capacity(self.transactions.len());
+        let mut removed_before = Vec::new();
+        for (i, tx) in self.transactions.drain(..).enumerate() {
+            if tx.turn_id == turn_id {
+                removed_before.push(i);
+            } else {
+                remaining.push(tx);
+            }
+        }
+        self.transactions = remaining;
+        if !removed_before.is_empty() {
+            for idx in self.checkpoints.values_mut() {
+                let shift = removed_before.iter().filter(|&&r| r < *idx).count();
+                *idx = idx.saturating_sub(shift);
+            }
+        }
+    }
+
     pub fn current_turn_id(&self) -> &str {
         if self.current_turn_id.is_empty() {
             "turn_0"
@@ -216,6 +240,8 @@ impl TransactionJournal {
                 Ok(_) => restored.push(format!("[Restored] {}", tx.target_path.display())),
                 Err(e) => errors.push(format!("Failed to restore {}: {e}", tx.target_path.display())),
             }
+        } else {
+            errors.push(format!("Cannot restore {}: prior content was not recorded", tx.target_path.display()));
         }
     }
 }

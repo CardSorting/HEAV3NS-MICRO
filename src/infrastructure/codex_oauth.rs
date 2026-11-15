@@ -230,7 +230,7 @@ impl CodexAccountStore {
 
     async fn refresh_account(&self, id: &str, rejected_token: Option<&str>) -> Result<(String, Option<String>), String> {
         let _guard = refresh_flight_lock().lock().await;
-        let mut data = self.load_accounts_store();
+        let data = self.load_accounts_store();
         let current = data
             .accounts
             .iter()
@@ -253,8 +253,13 @@ impl CodexAccountStore {
 
         let refreshed = refresh_oauth_token(&refresh_tok, &current).await?;
         let result = (refreshed.access_token.clone(), refreshed.account_id.clone());
+        let mut data = self.load_accounts_store();
         if let Some(slot) = data.accounts.iter_mut().find(|a| a.id == id) {
-            *slot = refreshed;
+            slot.access_token = refreshed.access_token;
+            slot.refresh_token = refreshed.refresh_token;
+            slot.id_token = refreshed.id_token;
+            slot.expires_at_ms = refreshed.expires_at_ms;
+            slot.account_id = refreshed.account_id; slot.email = refreshed.email; slot.plan_type = refreshed.plan_type; slot.updated_at_ms = refreshed.updated_at_ms;
         }
         self.save_accounts_store(&data)?;
         Ok(result)
@@ -433,14 +438,14 @@ async fn wait_for_oauth_callback(
         }
         let query = target.split_once('?').map(|(_, q)| q).unwrap_or("");
         let params = parse_query_params(query);
+        if params.get("state").map(String::as_str) != Some(expected_state) {
+            let _ = write_http_html(&mut stream, 400, "Invalid state", "We couldn't verify this sign-in link.").await;
+            continue;
+        }
         if let Some(err) = params.get("error") {
             let desc = params.get("error_description").cloned().unwrap_or_else(|| err.clone());
             let _ = write_http_html(&mut stream, 400, "Sign-in cancelled", &desc).await;
             return Err(format!("ChatGPT sign-in failed: {desc}"));
-        }
-        if params.get("state").map(String::as_str) != Some(expected_state) {
-            let _ = write_http_html(&mut stream, 400, "Invalid state", "We couldn't verify this sign-in link.").await;
-            continue;
         }
         let Some(code) = params.get("code").filter(|s| !s.is_empty()).cloned() else {
             let _ = write_http_html(&mut stream, 400, "Missing code", "Authorization code missing.").await;

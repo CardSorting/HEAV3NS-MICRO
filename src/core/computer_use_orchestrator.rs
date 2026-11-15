@@ -386,6 +386,7 @@ impl ComputerUseOrchestrator {
                     action_name: "click".into(),
                     target_selector: Some(tid.clone()),
                     delivery_mode: "foreground".into(),
+                    expected_epoch: contract.expected_epoch,
                     ..SpatialActionContract::default()
                 };
                 if let Ok(res) = self.spatial_engine.execute_spatially_grounded_action(&focus_click_contract) {
@@ -404,7 +405,23 @@ impl ComputerUseOrchestrator {
         }
 
         // Step 6: ACT (Dispatch via Double-Wrapped Spatial Engine)
-        let execution_result = self.spatial_engine.execute_spatially_grounded_action(&contract)?;
+        let execution_result = match self.spatial_engine.execute_spatially_grounded_action(&contract) {
+            Ok(res) => res,
+            Err(err) => {
+                if let Ok(mut kstore) = self.knowledge_store.lock() {
+                    kstore.record_outcome(&target_key, &before_obs.app_name, false, before_obs.layout_epoch);
+                }
+                if let Ok(mut fc) = self.failure_counts.lock() {
+                    if !fc.contains_key(&target_key) && fc.len() >= 128 {
+                        if let Some(victim) = fc.iter().min_by_key(|(_, v)| *v).map(|(k, _)| k.clone()) {
+                            fc.remove(&victim);
+                        }
+                    }
+                    *fc.entry(target_key.clone()).or_insert(0) += 1;
+                }
+                return Err(err);
+            }
+        };
 
         // Step 7: OBSERVE (Post-execution)
         let after_obs = self.observe();
@@ -467,7 +484,9 @@ impl ComputerUseOrchestrator {
                 kstore.record_outcome(&target_key, &after_obs.app_name, false, after_obs.layout_epoch);
                 let mut fc = self.failure_counts.lock().unwrap();
                 if !fc.contains_key(&target_key) && fc.len() >= 128 {
-                    fc.clear();
+                    if let Some(victim) = fc.iter().min_by_key(|(_, v)| *v).map(|(k, _)| k.clone()) {
+                        fc.remove(&victim);
+                    }
                 }
                 let c = fc.entry(target_key.clone()).or_insert(0);
                 *c += 1;

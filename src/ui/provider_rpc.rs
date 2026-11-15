@@ -83,6 +83,14 @@ pub fn handle_provider_credential_rpc(
         if persist {
             if let Some(mut ucfg) = Heav3nsUserConfig::load() {
                 ucfg.set_provider_key(&slot, String::new());
+                let cfg_matches = ucfg.provider.as_deref().is_some_and(|p| {
+                    lookup_provider_descriptor(p)
+                        .map(|d| d.secret_slot.eq_ignore_ascii_case(&slot))
+                        .unwrap_or_else(|| p.eq_ignore_ascii_case(&slot) || p.eq_ignore_ascii_case(&canon_id))
+                });
+                if cfg_matches {
+                    ucfg.api_key = None;
+                }
                 let _ = ucfg.save();
             }
         }

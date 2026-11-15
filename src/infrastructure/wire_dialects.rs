@@ -58,6 +58,9 @@ pub(crate) fn normalize_transcript_tool_continuity(raw: &[SessionMessage]) -> Ve
                         out.append(&mut deferred_system);
                     }
                 } else {
+                    if !pending_calls.is_empty() {
+                        flush_dangling(&mut out, &mut pending_calls, &mut deferred_system);
+                    }
                     let label = msg.name.as_deref().filter(|s| !s.is_empty()).unwrap_or("tool");
                     out.push(SessionMessage::new(
                         Role::User,
@@ -157,14 +160,12 @@ pub(crate) fn build_chat_completions_payload_with_endpoint(
     let is_o_series = model_lower.starts_with("o1")
         || model_lower.starts_with("o3")
         || model_lower.starts_with("o4");
+    let is_heav3ns_sol = model_lower == "sol" || model_lower.ends_with("-sol") || model_lower.starts_with("gpt-5") || model_lower.starts_with("gpt-6");
     let is_reasoning_or_modern = is_o_series
-        || model_lower.starts_with("gpt-6")
-        || model_lower.starts_with("gpt-5")
+        || is_heav3ns_sol
         || model_lower.contains("terra")
-        || model_lower.contains("sol")
         || model_lower.contains("luna")
-        || model_lower.contains("astra")
-        || model_lower.contains("reasoning");
+        || model_lower.contains("astra");
 
     let mut payload = json!({
         "model": req.model,
@@ -346,8 +347,10 @@ pub(crate) fn build_anthropic_messages_payload(provider_name: &str, endpoint: &s
             }
             Role::User => {
                 conversation_started = true;
-                let text_block = json!({ "type": "text", "text": m.content });
-                push_or_coalesce_anthropic_user_block(&mut messages, text_block);
+                if !m.content.trim().is_empty() {
+                    let text_block = json!({ "type": "text", "text": m.content });
+                    push_or_coalesce_anthropic_user_block(&mut messages, text_block);
+                }
             }
             Role::Assistant => {
                 conversation_started = true;
@@ -542,8 +545,11 @@ fn apply_anthropic_reasoning_shaping(payload: &mut Value, provider_name: &str, e
 
     let is_adaptive_claude = (ep_low.contains("api.anthropic.com") || prov_low == "anthropic" || prov_low.contains("claude"))
         && (model_low.contains("4.6")
+            || model_low.contains("4-6")
             || model_low.contains("4.7")
+            || model_low.contains("4-7")
             || model_low.contains("4.8")
+            || model_low.contains("4-8")
             || model_low.contains("-5")
             || model_low.contains("fable"));
     if is_adaptive_claude {
@@ -664,8 +670,8 @@ pub(crate) fn build_google_gemini_payload(req: &ProviderRequest) -> Value {
     });
     if let Some(raw_eff) = req.reasoning_effort.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         let eff = raw_eff.to_ascii_lowercase();
+        let model_low = req.model.to_ascii_lowercase();
         if matches!(eff.as_str(), "off" | "none" | "disabled") {
-            let model_low = req.model.to_ascii_lowercase();
             if !model_low.contains("2.5-pro") && !model_low.starts_with("gemini-3") {
                 gen_cfg["thinkingConfig"] = json!({ "thinkingBudget": 0 });
             }

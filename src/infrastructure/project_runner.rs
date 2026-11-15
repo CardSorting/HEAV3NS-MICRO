@@ -168,7 +168,11 @@ impl IProjectRunner for ProjectRunner {
         let snap = {
             let mut st = lock_unpoison(&self.inner);
             if st.state == "stopping" {
+                if let Some(p) = pid {
+                    signal_process_group(p, "-KILL");
+                }
                 let _ = child.start_kill();
+                tokio::spawn(async move { let _ = child.wait().await; });
                 st.child_pid = None;
                 st.state = "stopped".to_string();
                 st.revision = st.revision.saturating_add(1);
@@ -304,6 +308,20 @@ fn resolve_safe_cwd(workspace_root: &Path, rel_cwd: &str) -> Result<PathBuf, Str
     Ok(canon)
 }
 
+async fn push_bounded_run_output(inner: &Arc<Mutex<ProjectRunState>>, chunk: &str) {
+    let mut st = lock_unpoison(inner);
+    st.output.push_str(chunk);
+    if st.output.len() > MAX_RUN_OUTPUT_BYTES {
+        let excess = st.output.len() - MAX_RUN_OUTPUT_BYTES;
+        let mut cut = excess;
+        while cut < st.output.len() && !st.output.is_char_boundary(cut) {
+            cut += 1;
+        }
+        st.output.drain(..cut);
+    }
+    st.revision = st.revision.saturating_add(1);
+}
+
 async fn drain_stream<R: tokio::io::AsyncRead + Unpin>(mut reader: R, inner: Arc<Mutex<ProjectRunState>>) {
     use tokio::io::AsyncReadExt;
     let mut buf = [0u8; 4096];
@@ -312,32 +330,37 @@ async fn drain_stream<R: tokio::io::AsyncRead + Unpin>(mut reader: R, inner: Arc
         if n == 0 {
             if !pending.is_empty() {
                 let chunk = String::from_utf8_lossy(&pending);
-                let mut st = lock_unpoison(&inner);
-                st.output.push_str(&chunk);
-                st.revision = st.revision.saturating_add(1);
+                push_bounded_run_output(&inner, &chunk).await;
             }
             break;
         }
         pending.extend_from_slice(&buf[..n]);
-        let valid_up_to = match std::str::from_utf8(&pending) {
-            Ok(_) => pending.len(),
-            Err(e) => e.valid_up_to(),
-        };
-        if valid_up_to > 0 {
-            if let Ok(s) = std::str::from_utf8(&pending[..valid_up_to]) {
-                let mut st = lock_unpoison(&inner);
-                st.output.push_str(s);
-                if st.output.len() > MAX_RUN_OUTPUT_BYTES {
-                    let excess = st.output.len() - MAX_RUN_OUTPUT_BYTES;
-                    let mut cut = excess;
-                    while cut < st.output.len() && !st.output.is_char_boundary(cut) {
-                        cut += 1;
+        loop {
+            match std::str::from_utf8(&pending) {
+                Ok(s) => {
+                    if !s.is_empty() {
+                        push_bounded_run_output(&inner, s).await;
                     }
-                    st.output.drain(..cut);
+                    pending.clear();
+                    break;
                 }
-                st.revision = st.revision.saturating_add(1);
+                Err(e) => {
+                    let valid = e.valid_up_to();
+                    if valid > 0 {
+                        if let Ok(s) = std::str::from_utf8(&pending[..valid]) {
+                            push_bounded_run_output(&inner, s).await;
+                        }
+                        pending.drain(..valid);
+                    }
+                    if let Some(err_len) = e.error_len() {
+                        let bad = err_len.min(pending.len());
+                        push_bounded_run_output(&inner, "\u{FFFD}").await;
+                        pending.drain(..bad);
+                    } else {
+                        break;
+                    }
+                }
             }
-            pending.drain(..valid_up_to);
         }
     }
 }

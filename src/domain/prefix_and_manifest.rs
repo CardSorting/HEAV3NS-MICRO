@@ -130,7 +130,8 @@ pub fn format_append_only_context_update(memory_envelope: Option<&str>, posture:
     if let Some(mem) = memory_envelope {
         let trimmed = mem.trim();
         if !trimmed.is_empty() {
-            blocks.push(trimmed.to_string());
+            let escaped = trimmed.replace('<', "&lt;").replace('>', "&gt;");
+            blocks.push(escaped);
         }
     }
     if blocks.len() <= 1 && posture == ExecutionPosture::AcceptEdits {

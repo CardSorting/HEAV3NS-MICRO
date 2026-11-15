@@ -239,7 +239,11 @@ enum WalkthroughProjection {
         var entries = [String: [String: Any]]()
         for value in (previous["activities"] as? [[String: Any]] ?? []) + (incoming["activities"] as? [[String: Any]] ?? []) {
             guard let item = WalkthroughActivity(value) else { continue }
-            if (entries[item.id]?["sequence"] as? Int ?? -1) < item.sequence { entries[item.id] = item.retainedValue }
+            if (entries[item.id]?["sequence"] as? Int ?? -1) < item.sequence {
+                var updated = item.retainedValue
+                if updated["startedSequence"] == nil, let started = entries[item.id]?["startedSequence"] { updated["startedSequence"] = started }
+                entries[item.id] = updated
+            }
         }
         result["activities"] = retained(Array(entries.values))
         result["activitySequence"] = max(previous["activitySequence"] as? Int ?? 0, incoming["activitySequence"] as? Int ?? 0, entries.values.compactMap { $0["sequence"] as? Int }.max() ?? 0)

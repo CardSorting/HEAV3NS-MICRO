@@ -425,7 +425,9 @@ final class ProjectRunView: NSStackView, NSTextFieldDelegate {
         inAppPreviewButton.title = inAppPreviewEnabled ? "Hide Preview" : "In-App Preview"
         inAppPreview.isHidden = !inAppPreviewEnabled
         if inAppPreviewEnabled {
-            inAppPreview.load(url: url)
+            if inAppPreview.currentURL != url {
+                inAppPreview.load(url: url)
+            }
         } else {
             inAppPreview.clear()
         }

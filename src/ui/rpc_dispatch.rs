@@ -351,15 +351,15 @@ pub fn build_context_history_response(conversation: &str, offset: usize, engine:
     let rev_uuid = uuid_from_seed(&full_text);
     let bytes = full_text.as_bytes();
     let total = bytes.len();
-    let mut safe_offset = offset.min(total);
-    while safe_offset > 0 && !full_text.is_char_boundary(safe_offset) {
-        safe_offset -= 1;
-    }
-    let mut end = (safe_offset + 16 * 1024).min(total);
-    while end > safe_offset && !full_text.is_char_boundary(end) {
-        end -= 1;
-    }
-    let slice = &full_text[safe_offset..end];
+    let (slice, end, more) = if offset < total && full_text.is_char_boundary(offset) {
+        let mut end = offset.saturating_add(16 * 1024).min(total);
+        while end > offset && !full_text.is_char_boundary(end) {
+            end -= 1;
+        }
+        (&full_text[offset..end], end, end < total)
+    } else {
+        ("", offset.min(total), false)
+    };
     json!({
         "conversation": conversation,
         "revision": rev_uuid,
@@ -367,7 +367,7 @@ pub fn build_context_history_response(conversation: &str, offset: usize, engine:
         "text": slice,
         "size": total,
         "nextOffset": end,
-        "more": end < total
+        "more": more
     })
 }
 
@@ -533,7 +533,7 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
                 "scope": "workspace"
             })
         }
-        "files.read" | "artifact.read" => {
+        "files.read" => {
             let path = params.get("path").or_else(|| params.get("id")).and_then(|v| v.as_str()).unwrap_or("README.md");
             let Some(full_path) = validate_rpc_read_path(root, path) else {
                 return json!({ "text": "", "revision": "rev-blocked", "offset": 0, "nextOffset": 0, "size": 0, "more": false });
@@ -545,25 +545,7 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
             } else {
                 String::new()
             };
-            let total = text_content.len();
-            let mut safe_offset = offset.min(total);
-            while safe_offset > 0 && !text_content.is_char_boundary(safe_offset) {
-                safe_offset -= 1;
-            }
-            let mut end = safe_offset.saturating_add(limit).min(total);
-            while end > safe_offset && !text_content.is_char_boundary(end) {
-                end -= 1;
-            }
-            let rev = format!("rev-{}", &sha256_hex(&text_content)[..12]);
-            json!({
-                "text": &text_content[safe_offset..end],
-                "binary": false,
-                "revision": rev,
-                "offset": safe_offset,
-                "nextOffset": end,
-                "size": total,
-                "more": end < total
-            })
+            crate::ui::worker_handlers::paginate_text_response(&text_content, "rev", offset, limit)
         }
         "files.readBinary" => {
             let path = params.get("path").and_then(|v| v.as_str()).unwrap_or("");
@@ -620,25 +602,23 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
         }
         "changes.read" => {
             let path = params.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            let staged = lock_unpoison(&engine.vfs()).export_staged();
+            let want_staged = params.get("staged").and_then(|v| v.as_bool());
+            let staged = if want_staged != Some(false) { lock_unpoison(&engine.vfs()).export_staged() } else { Vec::new() };
             let diff = if let Some(f) = staged.into_iter().find(|f| f.path == path) {
                 let old = validate_rpc_read_path(root, path).and_then(|p| fs::read_to_string(p).ok()).unwrap_or_default();
-                let new = if f.is_deleted { String::new() } else { f.content };
-                render_unified_diff(path, &old, &new)
-            } else if let Some(last) = engine.latest_receipt() {
-                if let (Some(b), Some(a)) = (&last.snapshot_before, &last.snapshot_after) {
-                    engine
-                        .cas_diff_between(b, Some(a.as_str()))
-                        .map(|(_, full_diff)| filter_unified_diff_for_path(&full_diff, path))
-                        .unwrap_or_default()
-                } else {
-                    String::new()
-                }
+                render_unified_diff(path, &old, if f.is_deleted { "" } else { &f.content })
+            } else if want_staged != Some(true) {
+                engine.latest_receipt()
+                    .and_then(|last| last.snapshot_before.zip(last.snapshot_after))
+                    .and_then(|(b, a)| engine.cas_diff_between(&b, Some(a.as_str())).ok())
+                    .map(|(_, full_diff)| filter_unified_diff_for_path(&full_diff, path))
+                    .unwrap_or_default()
             } else {
                 String::new()
             };
-            let size = diff.len();
-            json!({ "text": diff, "revision": format!("diff-{size}"), "offset": 0, "nextOffset": size, "size": size, "more": false })
+            let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(65536) as usize;
+            crate::ui::worker_handlers::paginate_text_response(&diff, "diff", offset, limit)
         }
         _ => json!({ "entries": [] }),
     }

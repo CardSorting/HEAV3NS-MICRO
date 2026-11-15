@@ -104,6 +104,7 @@ impl AgentEngine {
 
     pub fn without_swarm_delegation(mut self) -> Self {
         self.forbid_swarm_delegation = true;
+        self.tools.forbid_swarm.store(true, std::sync::atomic::Ordering::Relaxed);
         self
     }
 
@@ -213,10 +214,13 @@ impl AgentEngine {
                 .ok_or_else(|| format!("Snapshot #{index} not found (total: {})", snaps.len()))?
         };
         if let Some(cas_id) = self.snapshot_cas_map.lock().unwrap().get(&index).cloned() {
-            let _ = self.cas.lock().unwrap().restore_full_snapshot(&cas_id);
-            self.tools.cache.lock().unwrap().clear();
-            self.tools.read_tracker.lock().unwrap().reset_stamps();
+            self.cas.lock().unwrap().restore_full_snapshot(&cas_id)?;
         }
+        self.tools.cache.lock().unwrap().clear();
+        self.tools.read_tracker.lock().unwrap().reset_stamps();
+        self.tools.journal.lock().unwrap().clear();
+        let future_cas: std::collections::HashSet<String> = self.snapshot_cas_map.lock().unwrap().iter().filter(|(&k, _)| k > index).map(|(_, v)| v.clone()).collect();
+        self.turn_receipts.lock().unwrap().retain(|r| index > 0 && r.snapshot_after.as_ref().is_none_or(|a| !future_cas.contains(a)));
         let mut session = self.session.lock().unwrap();
         let mut vfs = self.vfs.lock().unwrap();
         let mut memory = self.memory.lock().unwrap();
@@ -470,14 +474,14 @@ impl AgentEngine {
                 };
             }
 
-            let unlocked_before = self.tools.unlocked_tools.lock().unwrap().len();
+            let unlocked_before: Vec<&str> = self.tools.unlocked_tools.lock().unwrap().iter().copied().collect();
             let routing_hint = {
                 let sess = self.session.lock().unwrap();
                 let tail = sess.messages().last().map(|m| m.content.as_str()).unwrap_or("");
                 format!("{}\n{}", input.prompt, tail)
             };
             let openai_tools = self.tools.select_tool_schemas_for(&routing_hint, self.forbid_swarm_delegation);
-            let unlocked_after = self.tools.unlocked_tools.lock().unwrap().len();
+            let unlocked_after: Vec<&str> = self.tools.unlocked_tools.lock().unwrap().iter().copied().collect();
             if unlocked_after != unlocked_before {
                 self.prefix_tracker.lock().unwrap().declare_repin("tool_schema_unlock");
             }

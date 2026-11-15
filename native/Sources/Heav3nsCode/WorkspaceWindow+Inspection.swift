@@ -568,10 +568,16 @@ extension WorkspaceWindow {
             self.projectTasksLoading = false
             switch result {
             case .success(let data):
-                if let snapshot = ProjectTaskSnapshot(data), snapshot.revision >= self.projectTaskRevision, offset == self.projectTaskOffset, filters == self.projectTaskFilters {
-                    self.projectTaskRevision = snapshot.revision; self.projectTaskDisplayedRevision = snapshot.revision; self.walkthrough.showProjectTasks(snapshot)
-                    self.walkthrough.setProjectTaskMovesEnabled(source.capabilities.contains("project-tasks-move-v1") && !self.projectTaskMovePending)
-                } else { self.projectTasksRefreshPending = true }
+                if offset != self.projectTaskOffset || filters != self.projectTaskFilters {
+                    self.projectTasksRefreshPending = true
+                } else if let snapshot = ProjectTaskSnapshot(data) {
+                    if snapshot.revision >= self.projectTaskRevision {
+                        self.projectTaskRevision = snapshot.revision; self.projectTaskDisplayedRevision = snapshot.revision; self.walkthrough.showProjectTasks(snapshot)
+                        self.walkthrough.setProjectTaskMovesEnabled(source.capabilities.contains("project-tasks-move-v1") && !self.projectTaskMovePending)
+                    }
+                } else {
+                    self.walkthrough.projectTasksUnavailable("Project tasks could not be read.")
+                }
             case .failure(let error): self.walkthrough.projectTasksUnavailable(error.localizedDescription)
             }
             if self.projectTasksRefreshPending { self.refreshProjectTasks() }

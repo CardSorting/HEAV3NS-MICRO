@@ -28,19 +28,22 @@ fn is_macos_seatbelt_available() -> bool {
     })
 }
 
-fn kill_process_tree(pid: Option<u32>) {
+async fn kill_process_tree(pid: Option<u32>) {
     #[cfg(unix)]
     if let Some(p) = pid {
-        let _ = std::process::Command::new("/bin/kill")
+        let _ = tokio::process::Command::new("/bin/kill")
             .args(["-TERM", "--", &format!("-{p}")])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .status();
-        let _ = std::process::Command::new("/bin/kill")
+            .status()
+            .await;
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        let _ = tokio::process::Command::new("/bin/kill")
             .args(["-KILL", "--", &format!("-{p}")])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .status();
+            .status()
+            .await;
     }
     #[cfg(not(unix))]
     let _ = pid;
@@ -117,69 +120,81 @@ pub async fn execute_shell_command_sandboxed(
         .map_err(|e| format!("Failed to spawn shell command: {e}"))?;
 
     let child_pid = child.id();
-    let stdout_pipe = child.stdout.take();
-    let stderr_pipe = child.stderr.take();
+    let mut stdout_pipe = child.stdout.take();
+    let mut stderr_pipe = child.stderr.take();
+    Box::pin(async move {
+        let pipes_fut = async {
+            tokio::join!(
+                drain_pipe_bounded(stdout_pipe.take(), MAX_PIPE_CAPTURE_BYTES),
+                drain_pipe_bounded(stderr_pipe.take(), MAX_PIPE_CAPTURE_BYTES),
+            )
+        };
 
-    let read_fut = async {
-        let (out_buf, err_buf) = tokio::join!(
-            drain_pipe_bounded(stdout_pipe, MAX_PIPE_CAPTURE_BYTES),
-            drain_pipe_bounded(stderr_pipe, MAX_PIPE_CAPTURE_BYTES),
-        );
-        let status = child.wait().await;
-        (status, out_buf, err_buf)
-    };
+        let timeout_dur = Duration::from_millis(timeout_ms.clamp(100, 600_000));
+        let outcome = if let Some(tok) = cancel_token {
+            tokio::select! {
+                biased;
+                _ = tok.cancelled() => {
+                    Box::pin(kill_process_tree(child_pid)).await;
+                    let _ = child.wait().await;
+                    return Err("Command execution cancelled by user".to_string());
+                }
+                res = tokio::time::timeout(timeout_dur, async {
+                    let (out_buf, err_buf) = pipes_fut.await;
+                    let status = child.wait().await;
+                    (status, out_buf, err_buf)
+                }) => res,
+            }
+        } else {
+            tokio::time::timeout(timeout_dur, async {
+                let (out_buf, err_buf) = pipes_fut.await;
+                let status = child.wait().await;
+                (status, out_buf, err_buf)
+            })
+            .await
+        };
 
-    let timeout_dur = Duration::from_millis(timeout_ms.clamp(100, 600_000));
-    let outcome = if let Some(tok) = cancel_token {
-        tokio::select! {
-            biased;
-            _ = tok.cancelled() => {
-                kill_process_tree(child_pid);
-                return Err("Command execution cancelled by user".to_string());
+        match outcome {
+            Ok((Ok(status), out_bytes, err_bytes)) => {
+                let exit_code = status.code().unwrap_or(-1);
+                let (cleaned_out, _pty_replies) = SafetyPolicy::strip_and_respond_pty_queries(&out_bytes, 24, 80);
+                let stdout = String::from_utf8_lossy(&cleaned_out).into_owned();
+                let stderr = String::from_utf8_lossy(&err_bytes).into_owned();
+                let mut advisories = Vec::new();
+                if let Some(adv) = SafetyPolicy::detect_heredoc_file_redirection(cmd_str) {
+                    advisories.push(adv);
+                }
+                if let Some(adv) = SafetyPolicy::detect_terminal_file_read(cmd_str) {
+                    advisories.push(adv);
+                }
+                if let Some(adv) = SafetyPolicy::detect_foreground_background_guidance(cmd_str) {
+                    advisories.push(adv);
+                }
+                let mut payload = json!({
+                    "exitCode": exit_code,
+                    "success": status.success(),
+                    "sandboxed": sandboxed,
+                    "stdout": stdout,
+                    "stderr": stderr
+                });
+                if !advisories.is_empty() {
+                    payload["ergonomicAdvisories"] = json!(advisories);
+                }
+                Ok((payload, false))
             }
-            res = tokio::time::timeout(timeout_dur, read_fut) => res,
+            Ok((Err(e), _, _)) => {
+                Box::pin(kill_process_tree(child_pid)).await;
+                let _ = child.wait().await;
+                Err(format!("Command execution failed: {e}"))
+            }
+            Err(_) => {
+                Box::pin(kill_process_tree(child_pid)).await;
+                let _ = child.wait().await;
+                Err(format!("Command timed out after {timeout_ms}ms"))
+            }
         }
-    } else {
-        tokio::time::timeout(timeout_dur, read_fut).await
-    };
-
-    match outcome {
-        Ok((Ok(status), out_bytes, err_bytes)) => {
-            let exit_code = status.code().unwrap_or(-1);
-            let (cleaned_out, _pty_replies) = SafetyPolicy::strip_and_respond_pty_queries(&out_bytes, 24, 80);
-            let stdout = String::from_utf8_lossy(&cleaned_out).into_owned();
-            let stderr = String::from_utf8_lossy(&err_bytes).into_owned();
-            let mut advisories = Vec::new();
-            if let Some(adv) = SafetyPolicy::detect_heredoc_file_redirection(cmd_str) {
-                advisories.push(adv);
-            }
-            if let Some(adv) = SafetyPolicy::detect_terminal_file_read(cmd_str) {
-                advisories.push(adv);
-            }
-            if let Some(adv) = SafetyPolicy::detect_foreground_background_guidance(cmd_str) {
-                advisories.push(adv);
-            }
-            let mut payload = json!({
-                "exitCode": exit_code,
-                "success": status.success(),
-                "sandboxed": sandboxed,
-                "stdout": stdout,
-                "stderr": stderr
-            });
-            if !advisories.is_empty() {
-                payload["ergonomicAdvisories"] = json!(advisories);
-            }
-            Ok((payload, false))
-        }
-        Ok((Err(e), _, _)) => {
-            kill_process_tree(child_pid);
-            Err(format!("Command execution failed: {e}"))
-        }
-        Err(_) => {
-            kill_process_tree(child_pid);
-            Err(format!("Command timed out after {timeout_ms}ms"))
-        }
-    }
+    })
+    .await
 }
 
 /// Executes a child shell command without OS Seatbelt restriction (backwards-compatible entry point).

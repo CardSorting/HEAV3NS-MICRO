@@ -44,14 +44,15 @@ impl RepoConstitution {
                 invalid_error: Some("Malformed constitution JSON (fail-closed: all writes require human approval)".to_string()),
             };
         };
-        let version = val.get("version").and_then(Value::as_u64).unwrap_or(1) as u32;
-        if version != 1 {
+        let raw_version = val.get("version").and_then(Value::as_u64).unwrap_or(1);
+        if raw_version != 1 {
             return Self {
-                version,
+                version: u32::try_from(raw_version).unwrap_or(u32::MAX),
                 rules: Vec::new(),
-                invalid_error: Some(format!("Unsupported constitution schema version {version} (expected 1; fail-closed)")),
+                invalid_error: Some(format!("Unsupported constitution schema version {raw_version} (expected 1; fail-closed)")),
             };
         }
+        let version = 1u32;
         let mut rules = Vec::new();
         if let Some(arr) = val.get("rules").or_else(|| val.get("invariants")).and_then(Value::as_array) {
             for item in arr {
@@ -280,7 +281,7 @@ pub fn evaluate_tool_posture(
 
     // Protected `.git/hooks`, `.git/config`, and `../` write guard outside FullAccess
     for p in &target_paths {
-        let norm = p.replace('\\', "/").to_ascii_lowercase();
+        let norm = normalize_rel_path(p).to_ascii_lowercase();
         if posture != ExecutionPosture::FullAccess
             && (norm.contains(".git/hooks") || norm.ends_with(".git/config") || norm.contains("../") || norm.ends_with("/..") || norm == "..")
         {
@@ -369,9 +370,11 @@ fn extract_all_paths(canonical: &str, args: &Value) -> Vec<String> {
                     let p = rest.split('\t').next().unwrap_or(rest).trim();
                     Some(p.strip_prefix("a/").or_else(|| p.strip_prefix("b/")).unwrap_or(p))
                 } else if let Some(rest) = line
-                    .strip_prefix("*** Update File: ")
-                    .or_else(|| line.strip_prefix("*** Add File: "))
-                    .or_else(|| line.strip_prefix("*** Delete File: "))
+                    .trim()
+                    .strip_prefix("*** Update File:")
+                    .or_else(|| line.trim().strip_prefix("*** File:"))
+                    .or_else(|| line.trim().strip_prefix("*** Add File:"))
+                    .or_else(|| line.trim().strip_prefix("*** Delete File:"))
                 {
                     Some(rest)
                 } else {

@@ -615,5 +615,11 @@ final class WalkthroughView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     var diagnostics: [String: Any] {
         ["progressSummary": progressSummary.stringValue, "filter": selectedFilter.rawValue, "coverage": coverage.stringValue, "selectedRun": selectedID ?? "", "pinnedRun": pinnedID ?? "", "stage": stage, "animating": isAnimating, "visibleActivities": visibleActivities.count, "expandedActivities": expanded.count, "reduceMotion": reduceMotionOverride ?? NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, "continuationVisible": !resume.isHidden, "continuationEnabled": resume.isEnabled, "continuationTitle": resume.title]
     }
-    func dispose() {}
+    func dispose() {
+        if let preferenceObserver { NSWorkspace.shared.notificationCenter.removeObserver(preferenceObserver); self.preferenceObserver = nil }
+        if let scrollObserver { NotificationCenter.default.removeObserver(scrollObserver); self.scrollObserver = nil }
+        onSelection = nil; onOpenFile = nil; onChanges = nil; onOutput = nil; onReview = nil
+        onRetryLoad = nil; onContinue = nil; onMoveProjectTask = nil; onPreviousTaskPage = nil
+        onNextTaskPage = nil; onProjectTaskFilters = nil
+    }
 }

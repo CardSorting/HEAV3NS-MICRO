@@ -153,6 +153,9 @@ impl ToolCallArgParser {
                 let found = args
                     .keys()
                     .find(|k| {
+                        if schema.iter().any(|(p, _)| p.eq_ignore_ascii_case(k)) {
+                            return false;
+                        }
                         let kl = k.to_lowercase();
                         kl == lower
                             || (kl.len() >= 8 && lower.len() >= 8 && levenshtein(&kl, &lower) <= 2)

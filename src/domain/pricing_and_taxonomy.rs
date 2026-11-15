@@ -308,15 +308,17 @@ pub fn resolve_compatible_fallback_model_with_catalog(
     }
     if let Some(fb) = configured_fallback {
         let fb_low = fb.to_ascii_lowercase();
-        let cross_provider_mismatch = (p.contains("anthropic") && !fb_low.contains("claude"))
-            || ((p.contains("gemini") || p == "google") && !fb_low.contains("gemini"))
-            || (p == "deepseek" && !fb_low.contains("deepseek"))
-            || ((p == "xai" || p == "x-ai") && !fb_low.contains("grok"))
-            || (!p.contains("openai")
-                && !p.contains("codex")
-                && !p.contains("azure")
-                && !p.contains("openrouter")
-                && (fb_low.starts_with("gpt-") || fb_low.starts_with("o1") || fb_low.starts_with("o3") || fb_low.starts_with("o4")));
+        let vendor = ModelPricingCatalog::canonical_vendor_prefix(provider);
+        let is_gateway = matches!(p.as_str(), "openrouter" | "orcarouter" | "edenai" | "zenmux" | "codewhale" | "cline-pass" | "bedrock" | "azure");
+        let cross_provider_mismatch = !is_gateway && match vendor {
+            "anthropic" => !fb_low.contains("claude"),
+            "google" => !fb_low.contains("gemini"),
+            "deepseek" => !fb_low.contains("deepseek"),
+            "x-ai" => !fb_low.contains("grok"),
+            "openai" => fb_low.contains("claude") || fb_low.contains("gemini") || fb_low.contains("grok") || fb_low.contains("deepseek"),
+            v if !v.is_empty() => fb_low.contains("claude") || fb_low.contains("gemini") || fb_low.contains("grok") || fb_low.starts_with("gpt-") || fb_low.starts_with("o1") || fb_low.starts_with("o3") || fb_low.starts_with("o4"),
+            _ => false,
+        };
         if !cross_provider_mismatch && fb != primary_model {
             return Some(fb.to_string());
         }

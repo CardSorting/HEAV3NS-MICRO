@@ -70,11 +70,16 @@ final class WorkspaceViewportStore {
         entries.append(viewport)
         entries.sort { $0.updatedAt > $1.updatedAt }
         entries = Array(entries.prefix(Self.entryLimit))
-        let data = try JSONEncoder().encode(Archive(version: 1, workspace: workspace, entries: entries))
+        var data = try JSONEncoder().encode(Archive(version: 1, workspace: workspace, entries: entries))
+        while data.count > Self.byteLimit && entries.count > 1 {
+            entries.removeLast()
+            data = try JSONEncoder().encode(Archive(version: 1, workspace: workspace, entries: entries))
+        }
         guard data.count <= Self.byteLimit else { throw ViewportError.invalid }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        try data.write(to: file, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        let tmp = root.appendingPathComponent(".viewport-\(UUID().uuidString).tmp")
+        guard FileManager.default.createFile(atPath: tmp.path, contents: data, attributes: [.posixPermissions: 0o600]) else { throw ViewportError.invalid }
+        _ = try FileManager.default.replaceItemAt(file, withItemAt: tmp)
     }
     enum ViewportError: LocalizedError {
         case invalid

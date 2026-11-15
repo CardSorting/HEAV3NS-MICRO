@@ -9,6 +9,7 @@ use crate::domain::pricing_and_taxonomy::{select_auto_routed_model, BillingMeter
 use crate::domain::prompt_spec::{ModelPromptFamily, PromptProfile, SystemPromptSpec};
 use crate::domain::types::messages::{estimate_messages_tokens, Role, SessionMessage};
 use crate::domain::types::provider_registry::{infer_wire_dialect_from_endpoint, lookup_provider_descriptor, resolve_model_aware_wire_and_model, retired_provider_remediation, suggest_provider_slug, ProviderBillingClass, ReasoningEffortLevel, WireDialect, PROVIDER_DESCRIPTORS};
+use crate::domain::types::posture_types::ExecutionPosture;
 use crate::domain::types::runtime::ExecutionAuthorityLevel;
 use crate::infrastructure::vfs_store::WorkspacePromptProbe;
 use crate::plumbing::schema_and_sse::redact_endpoint_for_display;
@@ -64,7 +65,14 @@ impl AgentEngine {
         let cfg = self.config_snapshot();
         let posture = self.current_posture();
         let soul = Some(self.tools().skill_catalog.lock().unwrap().active_soul.clone());
-        let spec = SystemPromptSpec::for_turn(&cfg, ExecutionAuthorityLevel::Autonomous, soul);
+        let authority = if matches!(posture, ExecutionPosture::AutoReview | ExecutionPosture::FullAccess) {
+            ExecutionAuthorityLevel::Autonomous
+        } else if matches!(posture, ExecutionPosture::Plan) {
+            ExecutionAuthorityLevel::Strict
+        } else {
+            ExecutionAuthorityLevel::Interactive
+        };
+        let spec = SystemPromptSpec::for_turn(&cfg, authority, soul);
         let facts = WorkspacePromptProbe::probe_cached(self.workspace_root());
         let skills = discover_skills_cached(self.workspace_root());
 
@@ -185,17 +193,18 @@ impl AgentEngine {
         let cfg = self.config_snapshot();
         let posture = self.current_posture();
         let soul = Some(self.tools().skill_catalog.lock().unwrap().active_soul.clone());
-        let spec = SystemPromptSpec::for_turn(&cfg, ExecutionAuthorityLevel::Autonomous, soul);
+        let authority = if matches!(posture, ExecutionPosture::AutoReview | ExecutionPosture::FullAccess) {
+            ExecutionAuthorityLevel::Autonomous
+        } else if matches!(posture, ExecutionPosture::Plan) {
+            ExecutionAuthorityLevel::Strict
+        } else {
+            ExecutionAuthorityLevel::Interactive
+        };
+        let spec = SystemPromptSpec::for_turn(&cfg, authority, soul);
 
         // Read-only tool schema projection (does not mutate unlocked_lru)
-        let unlocked = self.tools().unlocked_tools.lock().unwrap().clone();
-        let tools_wire: Vec<Value> = self
-            .tools()
-            .list_specs()
-            .into_iter()
-            .filter(|s| (!self.forbids_swarm_delegation() || s.name != "engage_swarm") && (s.is_core || unlocked.contains(s.name)))
-            .map(|s| s.to_openai_tool())
-            .collect();
+        let probe = if sample_prompt.trim().is_empty() { "inspect workspace" } else { sample_prompt };
+        let tools_wire = self.tools().peek_tool_schemas_for(probe, self.forbids_swarm_delegation());
         let tool_toks = estimate_text_tokens(&Value::Array(tools_wire.clone()).to_string());
         let pinned = self.pinned_system_prompt.lock().unwrap().clone();
 

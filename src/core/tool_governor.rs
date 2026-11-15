@@ -99,7 +99,7 @@ impl FileReadTracker {
     }
 }
 
-fn normalize_tracker_key(path: &Path) -> PathBuf {
+pub(crate) fn normalize_tracker_key(path: &Path) -> PathBuf {
     if let Ok(c) = fs::canonicalize(path) {
         c
     } else if let (Some(parent), Some(file_name)) = (path.parent(), path.file_name()) {
@@ -265,7 +265,7 @@ impl ToolOutputGovernor {
         let lines = self.spills.get(spill_id)?;
         let total = lines.len();
         let start = start_line.max(1);
-        let end = end_line.unwrap_or(start + 150).min(total);
+        let end = end_line.unwrap_or(start.saturating_add(150)).min(total);
         let slice = if start <= total && start <= end && total > 0 {
             lines[start - 1..end].join("\n")
         } else {

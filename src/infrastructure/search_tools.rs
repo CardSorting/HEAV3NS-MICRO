@@ -39,26 +39,52 @@ fn canonicalize_best_effort(path: &Path) -> PathBuf {
     if let Ok(c) = path.canonicalize() {
         return c;
     }
-    let mut suffix: Vec<std::ffi::OsString> = Vec::new();
-    let mut cursor = path;
-    while !cursor.exists() {
-        if let Some(name) = cursor.file_name() {
-            suffix.push(name.to_os_string());
-        } else {
-            break;
+    let mut current = normalize_lexical_path(path);
+    for _ in 0..16 {
+        let mut suffix: Vec<std::ffi::OsString> = Vec::new();
+        let mut cursor = current.as_path();
+        while fs::symlink_metadata(cursor).is_err() {
+            if let Some(name) = cursor.file_name() {
+                suffix.push(name.to_os_string());
+            } else {
+                break;
+            }
+            match cursor.parent() {
+                Some(p) => cursor = p,
+                None => break,
+            }
         }
-        match cursor.parent() {
-            Some(p) => cursor = p,
-            None => break,
+        if let Ok(c) = cursor.canonicalize() {
+            let mut base = c;
+            for seg in suffix.into_iter().rev() {
+                base.push(seg);
+            }
+            return normalize_lexical_path(&base);
         }
+        if let Ok(meta) = fs::symlink_metadata(cursor) {
+            if meta.file_type().is_symlink() {
+                if let Ok(target) = fs::read_link(cursor) {
+                    let resolved = if target.is_absolute() {
+                        target
+                    } else {
+                        cursor.parent().unwrap_or_else(|| Path::new("")).join(target)
+                    };
+                    let mut next = normalize_lexical_path(&resolved);
+                    for seg in suffix.into_iter().rev() {
+                        next.push(seg);
+                    }
+                    current = next;
+                    continue;
+                }
+            }
+        }
+        let mut base = normalize_lexical_path(cursor);
+        for seg in suffix.into_iter().rev() {
+            base.push(seg);
+        }
+        return normalize_lexical_path(&base);
     }
-    let mut base = cursor
-        .canonicalize()
-        .unwrap_or_else(|_| normalize_lexical_path(cursor));
-    for seg in suffix.into_iter().rev() {
-        base.push(seg);
-    }
-    normalize_lexical_path(&base)
+    current
 }
 
 /// Resolves `raw` relative to `cwd`, enforces workspace containment (blocking `..` and symlink
@@ -125,7 +151,16 @@ pub fn atomic_write_file(target: &Path, bytes: &[u8]) -> Result<(), String> {
     static FS_TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let seq = FS_TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let tmp_path = target.with_file_name(format!(".{file_name}.heav3ns-tmp-{}-{}-{}", std::process::id(), now_ms(), seq));
-    fs::write(&tmp_path, bytes).map_err(|e| format!("Failed to write temp file for '{}': {e}", target.display()))?;
+    let write_res = (|| -> std::io::Result<()> {
+        use std::io::Write;
+        let mut f = fs::File::create(&tmp_path)?;
+        f.write_all(bytes)?;
+        f.sync_all()
+    })();
+    if let Err(e) = write_res {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(format!("Failed to write temp file for '{}': {e}", target.display()));
+    }
     if let Some(perms) = existing_perms {
         let _ = fs::set_permissions(&tmp_path, perms);
     }
@@ -185,6 +220,9 @@ pub fn walk_find_files(
     let Ok(rd) = fs::read_dir(current) else { return };
     let clean_query = query.trim_matches('*');
     for entry in rd.flatten() {
+        if out.len() >= 1_500 {
+            break;
+        }
         if out.len() >= 500 {
             break;
         }
@@ -267,6 +305,9 @@ fn collect_source_files_bounded(target: &Path, out: &mut Vec<PathBuf>, depth: us
     }
     let Ok(rd) = fs::read_dir(target) else { return };
     for entry in rd.flatten() {
+        if out.len() >= 1_500 {
+            break;
+        }
         let name = entry.file_name().to_string_lossy().into_owned();
         if is_ignored_dir(&name) || name.starts_with('.') {
             continue;

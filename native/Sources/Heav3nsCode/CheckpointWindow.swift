@@ -141,18 +141,18 @@ final class CheckpointWindow: NSWindowController, NSWindowDelegate, NSTableViewD
         switch moment { case "before": return "Before message"; case "after": return "After reply"; case "safety": return "Before restore · Safety copy"; default: return "Checkpoint" }
     }
     @objc private func toggleFlag() {
-        guard let item = selected, let id = item["id"] as? String, !busy, !pendingReload else { return }; setBusy(true)
+        guard let item = selected, let id = item["id"] as? String, !busy, !pendingReload else { return }; let ticket = generation; setBusy(true)
         request("checkpoint.flag", ["id": id, "flagged": item["flagged"] as? Bool != true]) { [weak self] result in
-            guard let self else { return }; self.setBusy(false)
+            guard let self, ticket == self.generation else { return }; self.setBusy(false)
             if self.pendingSelection != nil || self.pendingReload { self.load(); return }
             if case .failure(let error) = result { self.status.stringValue = error.localizedDescription } else { if self.filterValue == "flagged", item["flagged"] as? Bool == true { self.selectedID = nil }; self.load() }
         }
     }
     @objc private func review() {
         guard let item = selected, let id = item["id"] as? String, !busy, !pendingReload, canRestore() else { return }
-        setBusy(true); status.stringValue = "Comparing project files…"
+        let ticket = generation; setBusy(true); status.stringValue = "Comparing project files…"
         request("checkpoint.preview", ["id": id]) { [weak self] result in
-            guard let self else { return }; self.setBusy(false)
+            guard let self, ticket == self.generation else { return }; self.setBusy(false)
             if self.pendingSelection != nil || self.pendingReload { self.load(); return }
             switch result {
             case .failure(let error): self.status.stringValue = error.localizedDescription
@@ -175,9 +175,9 @@ final class CheckpointWindow: NSWindowController, NSWindowDelegate, NSTableViewD
                 self.status.stringValue = "Review the comparison before restoring."
                 alert.addButton(withTitle: "Cancel"); alert.addButton(withTitle: "Restore & Continue")
                 alert.beginSheetModal(for: window) { [weak self] response in
-                    guard response == .alertSecondButtonReturn, let self else { return }; self.setBusy(true); self.status.stringValue = "Restoring project files…"
+                    guard response == .alertSecondButtonReturn, let self, ticket == self.generation else { return }; self.setBusy(true); self.status.stringValue = "Restoring project files…"
                     self.restore(id, token) { [weak self] result in
-                        guard let self else { return }; self.setBusy(false)
+                        guard let self, ticket == self.generation else { return }; self.setBusy(false)
                         if case .failure(let error) = result { self.status.stringValue = error.localizedDescription } else { self.window?.close() }
                     }
                 }
@@ -200,7 +200,8 @@ final class CheckpointWindow: NSWindowController, NSWindowDelegate, NSTableViewD
         title.widthAnchor.constraint(equalTo: text.widthAnchor).isActive = true
         return cell
     }
-    func windowWillClose(_ notification: Notification) { searchTimer?.invalidate(); generation += 1; if let window { window.parent?.removeChildWindow(window) } }
+    func windowWillClose(_ notification: Notification) { searchTimer?.invalidate(); generation += 1; busy = false; loading = false; pendingReload = false; pendingSelection = nil; if let window { window.parent?.removeChildWindow(window) } }
+    deinit { searchTimer?.invalidate() }
     func dispose() {
         searchTimer?.invalidate(); searchTimer = nil
         generation += 1; busy = false; pendingReload = false
