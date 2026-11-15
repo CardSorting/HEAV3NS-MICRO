@@ -45,11 +45,27 @@
   <a href="docs/i18n/README.ca.md">Català</a>
 </p>
 
+<p align="center">
+  <strong>Jump to:</strong>
+  <a href="#start-here-in-60-seconds-the-surgical-cockpit-mental-model">60-Sec Mental Model</a> ·
+  <a href="#your-first-5-minutes-adoption-ladder">Adoption Ladder & Drills</a> ·
+  <a href="#visual-deep-dives-how-key-subsystems-work">Visual Deep-Dives (1–8)</a> ·
+  <a href="#5-zone-joyzoning-architecture-96-rust-modules--343-workspace-files">5-Zone Architecture</a> ·
+  <a href="#hardening--reliability-guarantees-waves-425">5 Security Rings</a> ·
+  <a href="#quick-start--verification">Quick Start</a>
+</p>
+
 ---
 
 ## Start Here in 60 Seconds: The "Surgical Cockpit" Mental Model
 
-If you are opening **HEAV3NS-MICRO** for the first time, think of it not as a single chat wrapper around an LLM, but as a **surgical cockpit** built from seven cooperating subsystems:
+If you are opening **HEAV3NS-MICRO** for the first time, think of it not as a single chat wrapper around an LLM, but as a **surgical cockpit** built from seven cooperating subsystems.
+
+### Three Golden Rules to Internalize in 10 Seconds
+
+1. **Nothing is permanent until you say so:** `Plan` prevents edits, `/vfs` + `/diff` drafts them in pencil, and `/undo` rewinds committed disk & memory state via SHA-256 CAS.
+2. **One runway, many readers:** Read-only tools run in parallel, while writes and turns queue cleanly in FIFO order (`legacy_turn_gate`, max `32` holding) so nothing collides.
+3. **Trust, then verify on screen:** Spatial/GUI actions ground coordinates first (`Wrapper A`) and prove an observable delta afterward (`Wrapper B`).
 
 > [!TIP]
 > **New to the codebase?** Start in `Plan` posture (`Shift+Tab`) and run `cargo run -- --flight` — you can explore every tool, prompt budget, and safety gate offline with zero API calls or disk mutations.
@@ -63,6 +79,13 @@ If you are opening **HEAV3NS-MICRO** for the first time, think of it not as a si
 | **Compiler AST + Browser DevTools** | `SPIDER` ([`environmental_diff.rs`](src/plumbing/environmental_diff.rs)) | Understand code structure, UI affordances, and modal occlusion before acting. |
 | **`chmod` / `sudo` / Seatbelt** | [`ExecutionPosture`](src/domain/types/posture_types.rs) (`Shift+Tab`) + [`seatbelt_profile.rs`](src/plumbing/seatbelt_profile.rs) | Dial autonomy up or down per task; `.heav3ns/constitution.json` rules always win. |
 | **`make -j` Dependency Waves** | [`ToolRegistry`](src/core/tool_registry.rs) Wave Scheduler | Run reads in parallel while serializing file/shell writes to avoid races. |
+
+> [!NOTE]
+> **Plain-English No-Jargon Decoder:**
+> - **KV-Locked Prefix:** The unchanging "instruction header" stays pinned in the LLM's cache so every follow-up turn is faster and cheaper.
+> - **SHA-256 CAS:** A content-addressed vault that stores every file version once by its fingerprint, making `/undo` and `/restore` instant.
+> - **Seatbelt Sandbox:** macOS kernel-level rules (`sandbox-exec`) that stop shell commands from reading secrets or escaping your workspace.
+> - **Joyzoning:** Strict folder-by-folder import boundaries (`PLUMBING` -> `DOMAIN` <- `INFRASTRUCTURE` <- `CORE` <- `UI`) verified automatically by `joy-check`.
 
 | Pillar | Everyday Analogy | What It Actually Does | Core Implementation |
 | :--- | :--- | :--- | :--- |
@@ -110,6 +133,14 @@ flowchart LR
 | **3. Reversible Editing** | *Drafting in pencil first* | Stage edits with `/vfs`, inspect `/diff`, then `/commit` or `/undo` | Every file change is hash-verified against disk baselines and instantly rollable back. |
 | **4. Swarm & Spatial** | *Delegating to a crew* | Use `/legion` for parallel tasks or `/spatial` for GUI automation | Exclusive file locks prevent worker collisions; Double-Wrapped spatial grounding prevents blind clicks. |
 
+### Learn by Doing: 3 Thirty-Second Micro-Drills
+
+| Drill | 1. Try This | 2. Notice This | 3. Concept Internalized |
+| :--- | :--- | :--- | :--- |
+| **Drill A: Safe Recon** | Run `cargo run -- --flight` then `cargo run -- context` | All 5 scenarios pass offline; context budget shows locked prefix + 15 core tools. | **Zero-trust deterministic runtime** (no black-box prompts). |
+| **Drill B: Pencil -> Ink** | In REPL, press `Shift+Tab` to `Plan`, then `AcceptEdits`; try `/vfs`, `/diff`, `/undo` | `Plan` blocks writes; `/diff` previews staged changes before `/commit`; `/undo` restores prior state. | **Reversible editing** (`REWIND` + `ExecutionPosture`). |
+| **Drill C: Runway Queue** | Submit a task, then immediately queue a 2nd task while #1 runs | #2 waits in `HoldingPattern` (`[Edit \| Drop]`) without interrupting #1's disk state. | **Single-runway turn safety** (`RuntimeRequestQueue`). |
+
 ### Choose Your Cockpit (3 Ways to Run)
 
 ```mermaid
@@ -118,6 +149,17 @@ flowchart TD
   WHO -->|"Fast Terminal Loop"| CLI["Terminal Pilot: cargo run (Interactive REPL & Slash Commands)"]
   WHO -->|"Visual Mac Workspace"| IDE["Native Cockpit: HEAV3NS-CODE (native/ AppKit Client)"]
   WHO -->|"Embed in Editor / CI"| RPC["Headless Sidecar: Stdio JSON-RPC v1 (stdio_worker.rs)"]
+```
+
+### A Real 60-Second Bugfix Story (Putting It All Together)
+
+```mermaid
+flowchart LR
+  B1["1. Plan Posture: Read-Only Recon"] --> B2["2. AcceptEdits: Stage Fix in /vfs"]
+  B2 --> B3["3. /diff: Inspect Pencil Draft"]
+  B3 --> B4["4. /commit: Write + Run cargo test"]
+  B4 -->|"Pass"| B5["5. Done (TurnReceipt Saved)"]
+  B4 -->|"Fail"| B6["5. /undo: Instant CAS Rewind"]
 ```
 
 ---
@@ -227,6 +269,38 @@ flowchart LR
 └──────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
+### 7. Clear & Present Queues: Single-Runway Air-Traffic Control
+
+What happens if you type three follow-up instructions while the agent is still mid-turn? **Nothing gets lost, and nothing collides.** Think of [`RuntimeRequestQueue`](src/core/request_queue.rs), [`stdio_worker.rs`](src/ui/stdio_worker.rs), and `QueuedInstructions.swift` as **single-runway air-traffic control**:
+
+```mermaid
+stateDiagram-v2
+  [*] --> HoldingPattern: Submit while turn active (task.submit)
+  HoldingPattern --> ActiveRunway: legacy_turn_gate clears (FIFO)
+  HoldingPattern --> EditedOrCancelled: Edit / Cancel in QueuedInstructions
+  HoldingPattern --> QueueFull: >= 32 pending (RUNTIME_QUEUE_FULL)
+  ActiveRunway --> Completed: Emit TurnReceipt & CAS Snapshot
+  ActiveRunway --> Guarded: Mid-turn switch blocked (TURN_IN_PROGRESS)
+```
+
+```text
+┌─ Instruction Queue (1 Running · 2 Waiting · Cap: 32) ────────────────────────────────┐
+│  ▶ [RUNNING]  turn_0005  "Refactor auth middleware & run cargo test"                 │
+│  ⏳ [QUEUED 1] req_0006   "Update CHANGELOG.md with the auth changes"  [Edit | Drop] │
+│  ⏳ [QUEUED 2] req_0007   "Run joy-check --theme strict"               [Edit | Drop] │
+└──────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 8. Long-Session Context Hygiene: Carry-On Suitcase + Spillover Locker
+
+What happens when a command dumps 10,000 lines or a session runs for 50 turns? **HEAV3NS-MICRO** never silently crashes or forgets your active tool call:
+
+```mermaid
+flowchart LR
+  BIG["Huge Tool Output"] -->|"ToolOutputGovernor"| SPILL["Spillover Locker (spill_id Reference + Head/Tail Preview)"]
+  HIST["Long Chat History"] -->|"SessionCompactor"| CHK["Carry-On Checkpoint (Role::User Summary · Keeps Active Tool Pairs Intact)"]
+```
+
 ---
 
 ## 5-Zone Joyzoning Architecture (`96` Rust Modules · `343` Workspace Files)
@@ -253,6 +327,27 @@ flowchart LR
   CORE --> PLUMB["PLUMBING (Stateless Leaf Primitives · 0 Upward Imports)"]
   INFRA --> PLUMB
 ```
+
+### "Where Does Everything Live?" Folder-to-Kitchen Map
+
+Think of the repository like a well-run restaurant kitchen — every folder has one clear job and never crosses into another station's lane:
+
+```mermaid
+flowchart LR
+  K["src/plumbing/ · The Knives & Prep Tools\n(Stateless text, JSON, SSE, hash & geometry helpers)"] --> R["src/domain/ · The Recipe Book\n(Pure rules, types & 24 I<Name> contracts — 0% I/O)"]
+  S["src/infrastructure/ · The Stove, Fridge & Pantry\n(HTTP, Codex OAuth, Disk CAS, VFS, Journal & Shell)"] --> R
+  C["src/core/ · The Head Chef\n(Orchestrates turns, tools, swarms & queues via recipes)"] --> R
+  C -.->|"Orders ingredients through I<Name> ports"| S
+  D["src/ui/ & native/ · The Dining Room\n(Terminal CLI, Stdio RPC & macOS AppKit Cockpit)"] --> C
+```
+
+| If You Want to Change... | Open This Folder | Kitchen Rule |
+| :--- | :--- | :--- |
+| How text, diffs, JSON, or safety checks work | [`src/plumbing/`](src/plumbing/) | Pure tools only — never reads files, network, or other zones |
+| Core data shapes, budgets, or `I<Name>` contracts | [`src/domain/`](src/domain/) | Zero I/O — recipes only, never talks to disk or network |
+| Provider HTTP dialects, OAuth, CAS, or shell runners | [`src/infrastructure/`](src/infrastructure/) | Implements `src/domain/interfaces/mod.rs` — never touches UI |
+| Turn loop, tool routing, swarms, or queue orchestration | [`src/core/`](src/core/) | Coordinates domain & `I<Name>` ports — never imports UI |
+| Terminal output, JSON-RPC, or the macOS AppKit app | [`src/ui/`](src/ui/) · [`native/`](native/) | Talks to `core` only — never reaches straight into `infrastructure` |
 
 ---
 
@@ -327,6 +422,18 @@ flowchart LR
 
 ---
 
+## Zero-to-Ready in 3 Commands
+
+If you want to go from a fresh clone to your first live session in under a minute, run these three steps in order:
+
+| Step | Plain-English Goal | Command | What Success Looks Like |
+| :---: | :--- | :--- | :--- |
+| **1** | **Verify offline** — prove every safety & replay engine works with zero API keys | `cargo run -- --flight` | 5 deterministic flight scenarios pass locally |
+| **2** | **Plug in a brain** — save your provider API key or sign in with ChatGPT OAuth | `cargo run -- init` | Key/OAuth stored and provider route ready |
+| **3** | **Open the cockpit** — start talking in the terminal or launch the macOS app | `cargo run` *(or `cd native && swift run`)* | Interactive prompt or native macOS IDE opens |
+
+---
+
 ## Quick Start & Verification
 
 | Gate | Command | Current Verified Baseline |
@@ -373,6 +480,15 @@ When **HEAV3NS-MICRO** refuses an action, it is almost always protecting you fro
 | **Edit rejected ("stale read")** | *Editing an outdated Google Doc tab* | `FileReadTracker` detected disk changes since the agent last read the file. | Let the agent re-read the file, or run `/undo` if unexpected. |
 | **Symlink / `..` path refused** | *Locked emergency exit outside building* | Path resolves outside `workspace_root` or exceeds the 16-hop symlink ceiling. | Keep target files inside the active workspace root. |
 | **GUI click returned `SuspectedNoop`** | *Pushing a pull-only door* | `Wrapper B` saw no focus/value/frame change after clicking (e.g., modal occlusion or disabled button). | Inspect the returned `AssuranceReceipt` or enable the prerequisite control. |
+
+### 60-Second Self-Check: Have You Internalized the Cockpit?
+
+| Question | Quick Answer |
+| :--- | :--- |
+| **1. How do I explore a repo with 0% risk of edits?** | Press `Shift+Tab` to select **`Plan`** posture (or run `cargo run -- --flight`). |
+| **2. What is the difference between `/diff` and `/undo`?** | `/diff` previews **pencil-staged** VFS edits *before* `/commit`; `/undo` **rewinds** already-committed CAS changes *after* a turn. |
+| **3. Can I send a new prompt while a turn is running?** | **Yes** — it waits safely in `HoldingPattern` (up to `32` queued) behind `legacy_turn_gate` until the active runway clears. |
+| **4. Where can I add new I/O code without breaking Joyzoning?** | Put the trait in `src/domain/interfaces/mod.rs`, the I/O adapter in `src/infrastructure/`, and wire it into `src/core/`. |
 
 ---
 
