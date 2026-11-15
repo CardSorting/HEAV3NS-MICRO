@@ -297,7 +297,7 @@ impl VirtualDisplayState {
                         continue;
                     }
                     for el in &mut win.elements {
-                        if el.matches_selector(target_elem, som_id, Some(click_xy)) {
+                        if resolved_id.is_empty() && disabled_id.is_empty() && el.matches_selector(target_elem, som_id, Some(click_xy)) {
                             let (pt, ok) = el.apply_click_interaction();
                             click_xy = pt;
                             if ok { resolved_id = el.id.clone(); } else { disabled_id = el.id.clone(); }
@@ -306,7 +306,7 @@ impl VirtualDisplayState {
                         }
                     }
                 }
-                self.cursor = [click_xy[0].clamp(0, self.width as i32), click_xy[1].clamp(0, self.height as i32)];
+                self.cursor = [click_xy[0].clamp(0, self.width.min(i32::MAX as u32) as i32), click_xy[1].clamp(0, self.height.min(i32::MAX as u32) as i32)];
                 self.frame_seq += 1;
                 let verdict = if !disabled_id.is_empty() {
                     json!({"decision": "abort", "effect": "target_disabled", "recommended": "enable_prerequisite_control"})
@@ -503,7 +503,8 @@ impl VirtualDisplayState {
                         switched = true;
                     }
                 }
-                if switched {
+                if switched && win_id == self.active_window_id {
+                    for w in &mut self.windows { w.focused = false; }
                     if let Some(other) = self.windows.iter_mut().find(|w| w.id != win_id) {
                         other.focused = true;
                         other.z_order += 1;
@@ -525,8 +526,14 @@ impl VirtualDisplayState {
             }
             "window_restore" | "restore_window" => {
                 self.assert_agent_may_act(args)?;
-                let win_id = args.get("window_id").and_then(|v| v.as_str()).unwrap_or(&self.active_window_id);
-                if let Some(win) = self.windows.iter_mut().find(|w| w.id == win_id) { win.bounds = [120, 120, 1024, 640]; win.focused = true; }
+                let win_id = args.get("window_id").and_then(|v| v.as_str()).unwrap_or(&self.active_window_id).to_string();
+                for w in &mut self.windows { w.focused = false; }
+                if let Some(win) = self.windows.iter_mut().find(|w| w.id == win_id) {
+                    win.bounds = [120, 120, 1024, 640];
+                    win.focused = true;
+                    self.active_window_id = win.id.clone();
+                    self.last_target_app = win.app.clone();
+                }
                 self.frame_seq += 1;
                 self.record_action("window_restore", "success", 1, json!({"windowId": win_id}));
                 Ok(self.capture_frame())
@@ -600,8 +607,8 @@ impl VirtualDisplayState {
             }
             "search_dsl" | "query" => Ok(self.search_dsl(args.get("query").and_then(|v| v.as_str()).unwrap_or(""))),
             "audit_health" | "health" | "metrics" => Ok(self.audit_health()),
-            "undo" => self.undo(),
-            "redo" => self.redo(),
+            "undo" => { self.assert_agent_may_act(args)?; self.undo() }
+            "redo" => { self.assert_agent_may_act(args)?; self.redo() }
             other => Err(format!("Unsupported computer_use action '{other}'.")),
         }
     }
@@ -625,6 +632,7 @@ impl VirtualDisplayState {
     }
 
     fn execute_annotate_preview(&mut self, args: &Value) -> Result<Value, String> {
+        self.assert_agent_may_act(args)?;
         let op = args.get("sub_action").or_else(|| args.get("op")).and_then(|v| v.as_str()).unwrap_or("add").to_ascii_lowercase();
         let target_ref = args.get("ref").or_else(|| args.get("element_id")).and_then(|v| v.as_str()).unwrap_or("btn-run");
         let note = args.get("note").or_else(|| args.get("text")).and_then(|v| v.as_str()).unwrap_or("");
@@ -675,12 +683,14 @@ impl VirtualDisplayState {
             "click" => self.execute_action(&forward_cua_context(json!({ "action": "click", "element_id": args.get("selector").or_else(|| args.get("element_id")).and_then(|v| v.as_str()).unwrap_or(""), "som_id": args.get("som_id") }), args)),
             "type" | "fill" => self.execute_action(&forward_cua_context(json!({ "action": "set_value", "element_id": args.get("selector").or_else(|| args.get("element_id")).and_then(|v| v.as_str()).unwrap_or(""), "som_id": args.get("som_id"), "text": args.get("text").or_else(|| args.get("value")).and_then(|v| v.as_str()).unwrap_or("") }), args)),
             "dialog" => {
+                self.assert_agent_may_act(args)?;
                 let accept = args.get("accept").and_then(|v| v.as_bool()).unwrap_or(true);
                 let prev = self.pending_dialog.take();
                 self.record_action("browser_dialog", "success", 1, json!({"accepted": accept, "dialog": prev}));
                 Ok(json!({ "handled": true, "accepted": accept, "previousDialog": prev }))
             }
             "eval" | "evaluate" => {
+                self.assert_agent_may_act(args)?;
                 let expr = args.get("expression").or_else(|| args.get("script")).and_then(|v| v.as_str()).unwrap_or("document.title");
                 if let Some(blocked_reason) = expression_targets_blocked_url(expr) {
                     return Err(format!("Blocked unsafe URL literal in browser eval: {blocked_reason}"));

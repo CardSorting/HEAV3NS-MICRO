@@ -113,14 +113,14 @@ flowchart LR
 
 | Gate | Command | Current Verified Baseline |
 | :--- | :--- | :--- |
-| **1. Rust Test Suite** | `cargo test` | **128 passed**, `0` failed (unit, spatial, computer-use, OAuth E2E, Wave 4–21 hardening) |
+| **1. Rust Test Suite** | `cargo test` | **129 passed**, `0` failed (unit, spatial, computer-use, OAuth E2E, Wave 4–25 hardening) |
 | **2. Agent Flight Suite** | `cargo run -- --flight` | **5 scenarios** (`FT-01..FT-05`, `19/19` checks passing) |
 | **3. Native macOS AppKit** | `cd native && swift test` | **323 executed**, `6` skipped, `0` failed |
 | **4. Joyzoning & Doctor** | `joy-check . --theme strict` / `--doctor` | **100% Stability Index**, `343` files, `0` errors, `0` warnings |
 | **5. Documentation Guardrails** | `node bin/docs-check.mjs` | **72** required docs (`16` ADRs, `6` playbooks, `4` wiki, `5` postmortems, `3` KB), `438` verified links |
 
 ```bash
-# 1. Run Rust unit, spatial, computer-use, zenith, codewhale, OAuth & hardening test suites (128 tests)
+# 1. Run Rust unit, spatial, computer-use, zenith, codewhale, OAuth & hardening test suites (129 tests)
 cargo test
 
 # 2. Run Native macOS AppKit test suite (323 tests; 6 skipped)

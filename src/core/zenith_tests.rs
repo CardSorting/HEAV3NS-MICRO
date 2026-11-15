@@ -792,5 +792,7 @@ mod tests {
         assert!(crate::plumbing::secret_redactor::SafetyPolicy::check_command("rm -r -f /").is_err());
         assert_eq!(crate::plumbing::text_tokens::canonical_tool_name("browser_action"), "browser_use");
         assert!(matches!(crate::plumbing::seatbelt_profile::inspect_command_security("git --exec-path=/tmp status"), crate::plumbing::seatbelt_profile::CommandSecurityVerdict::WorkspaceMutating { .. }));
+        let v4a_empty = crate::plumbing::fuzzy_patch::DeterministicPatchEngine::parse_v4a("*** Begin Patch\n*** Add File: empty.txt\n*** End Patch\n");
+        assert_eq!(v4a_empty[0].add_content.as_deref(), Some(""));
     }
 }

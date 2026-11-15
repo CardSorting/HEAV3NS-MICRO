@@ -130,14 +130,23 @@ impl SessionVfs {
         if crate::infrastructure::search_tools::verify_model_path_access(Path::new(&key)).is_err() {
             return None;
         }
-        let original = crate::infrastructure::search_tools::read_text_file_bounded(Path::new(&key), 4 * 1024 * 1024)
-            .unwrap_or_default();
+        let original = crate::infrastructure::search_tools::read_text_file_bounded(Path::new(&key), 4 * 1024 * 1024).unwrap_or_default();
+        let updated = if overlay.is_deleted { "" } else { &overlay.content };
+        Some(render_unified_diff(&key, &original, updated))
+    }
+
+    pub fn generate_diff_in(&self, workspace_root: &Path, path: &str) -> Option<String> {
+        let key = Self::normalize_key(path);
+        let overlay = self.staged.get(&key)?;
+        let resolved = crate::infrastructure::search_tools::resolve_and_verify_workspace_path(workspace_root, &key).ok()?;
+        let original = crate::infrastructure::search_tools::read_text_file_bounded(&resolved, 4 * 1024 * 1024).unwrap_or_default();
         let updated = if overlay.is_deleted { "" } else { &overlay.content };
         Some(render_unified_diff(&key, &original, updated))
     }
 
     pub fn commit_all(&mut self) -> Result<Vec<String>, String> {
         let overlays = self.export_staged();
+        let mut targets = Vec::with_capacity(overlays.len());
         for ov in &overlays {
             let target = Path::new(&ov.path);
             if target.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
@@ -155,24 +164,40 @@ impl SessionVfs {
             if let Some(ref baseline) = ov.disk_baseline {
                 baseline.verify(target)?;
             }
+            targets.push(target.to_path_buf());
         }
+        self.commit_overlays(overlays, targets)
+    }
+
+    pub fn commit_all_in(&mut self, workspace_root: &Path) -> Result<Vec<String>, String> {
+        let overlays = self.export_staged();
+        let mut targets = Vec::with_capacity(overlays.len());
+        for ov in &overlays {
+            let resolved = crate::infrastructure::search_tools::resolve_and_verify_workspace_path(workspace_root, &ov.path)?;
+            if let Some(ref baseline) = ov.disk_baseline {
+                baseline.verify(&resolved)?;
+            }
+            targets.push(resolved);
+        }
+        self.commit_overlays(overlays, targets)
+    }
+
+    fn commit_overlays(&mut self, overlays: Vec<VfsFileOverlay>, targets: Vec<std::path::PathBuf>) -> Result<Vec<String>, String> {
         let mut committed = Vec::with_capacity(overlays.len());
-        for (idx, ov) in overlays.into_iter().enumerate() {
-            let target = Path::new(&ov.path);
+        for (ov, resolved) in overlays.into_iter().zip(targets.into_iter()) {
             let res = if ov.is_deleted {
-                match fs::remove_file(target) {
+                match fs::remove_file(&resolved) {
                     Ok(()) => Ok(()),
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
                     Err(e) => Err(format!("Failed deleting '{}': {e}", ov.path)),
                 }
             } else {
-                crate::infrastructure::search_tools::atomic_write_file(target, ov.content.as_bytes())
+                crate::infrastructure::search_tools::atomic_write_file(&resolved, ov.content.as_bytes())
             };
             if let Err(e) = res {
                 for done in &committed {
                     self.staged.remove(done);
                 }
-                let _ = idx;
                 return Err(e);
             }
             committed.push(ov.path);

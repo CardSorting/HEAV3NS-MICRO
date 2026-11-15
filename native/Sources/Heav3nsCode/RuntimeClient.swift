@@ -171,9 +171,14 @@ final class RuntimeClient {
                 }
             }
         } catch {
-            if process == nil, let reservation = historyReservation {
-                BroccoliGitAdmission.finish(reservation, chargedBytes: nil, cleanExit: false)
-                historyReservation = nil
+            if process == nil {
+                try? input.fileHandleForReading.close()
+                try? output.fileHandleForWriting.close()
+                try? diagnostic.fileHandleForWriting.close()
+                if let reservation = historyReservation {
+                    BroccoliGitAdmission.finish(reservation, chargedBytes: nil, cleanExit: false)
+                    historyReservation = nil
+                }
             }
             fail("Could not start LUMI: \(error.localizedDescription)")
         }

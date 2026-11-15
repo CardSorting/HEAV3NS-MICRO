@@ -109,6 +109,12 @@ impl TransactionJournal {
         id
     }
 
+    pub fn discard_tx(&mut self, id: &str) {
+        if self.transactions.last().is_some_and(|t| t.id == id) {
+            self.transactions.pop();
+        }
+    }
+
     pub fn rollback_last(&mut self) -> RollbackResult {
         let Some(tx) = self.transactions.pop() else {
             return RollbackResult {

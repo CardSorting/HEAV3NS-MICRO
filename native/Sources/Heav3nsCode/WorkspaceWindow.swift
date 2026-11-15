@@ -272,7 +272,7 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         queueEditor?.dispose(); queueEditor = nil
         if queuePopover.isShown { queuePopover.close() }
         memoryWindow?.dismiss(); memoryWindow = nil
-        palette?.cancelOperation(nil); palette = nil
+        palette?.dispose(); palette = nil
         quickOpen?.dispose(); quickOpen = nil
         receiptBar.dispose()
         composer.dispose()

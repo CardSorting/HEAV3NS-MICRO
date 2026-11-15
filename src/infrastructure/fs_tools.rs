@@ -1,5 +1,5 @@
 // [LAYER: INFRASTRUCTURE]
-use crate::infrastructure::search_tools::{atomic_write_file, batch_replace_regex_files, build_directory_tree, collect_source_files, execute_grep_search, extract_workspace_symbols, read_text_file_bounded, resolve_and_verify_workspace_path, suggest_nearby_files, verify_model_path_access, walk_find_files};
+use crate::infrastructure::search_tools::{atomic_write_file, batch_replace_regex_files, build_directory_tree, execute_grep_search, extract_workspace_symbols, read_text_file_bounded, resolve_and_verify_workspace_path, suggest_nearby_files, verify_model_path_access, walk_find_files};
 use crate::infrastructure::transaction_journal::TransactionJournal;
 use crate::infrastructure::vfs_store::SkillsIngestor;
 use crate::plumbing::fuzzy_patch::{heal_fuzzy_patch, maybe_correct_escape_drift, DeterministicPatchEngine};
@@ -208,33 +208,36 @@ pub fn dispatch_fs_tool(
                 };
                 match op.op_type {
                     "delete" => {
-                        if let Ok(mut j) = journal.lock() {
-                            j.record_mutation("apply_unified_diff", &resolved);
-                        }
+                        let tx = journal.lock().ok().map(|mut j| j.record_mutation("apply_unified_diff", &resolved));
                         match fs::remove_file(&resolved) {
                             Ok(_) => modified.push(op.file_path.clone()),
-                            Err(e) => errors.push(format!("Failed to delete '{}': {e}", op.file_path)),
+                            Err(e) => {
+                                if let (Some(id), Ok(mut j)) = (tx, journal.lock()) { j.discard_tx(&id); }
+                                errors.push(format!("Failed to delete '{}': {e}", op.file_path));
+                            }
                         }
                     }
                     "add" => {
                         let content = op.add_content.clone().unwrap_or_default();
-                        if let Ok(mut j) = journal.lock() {
-                            j.record_mutation("apply_unified_diff", &resolved);
-                        }
+                        let tx = journal.lock().ok().map(|mut j| j.record_mutation("apply_unified_diff", &resolved));
                         match atomic_write_file(&resolved, content.as_bytes()) {
                             Ok(_) => modified.push(op.file_path.clone()),
-                            Err(e) => errors.push(format!("Failed to add '{}': {e}", op.file_path)),
+                            Err(e) => {
+                                if let (Some(id), Ok(mut j)) = (tx, journal.lock()) { j.discard_tx(&id); }
+                                errors.push(format!("Failed to add '{}': {e}", op.file_path));
+                            }
                         }
                     }
                     _ => match read_text_file_bounded(&resolved, MAX_FS_TEXT_READ_BYTES) {
                         Ok(orig) => match DeterministicPatchEngine::apply_hunks(&orig, &op.hunks) {
                             Ok(updated) => {
-                                if let Ok(mut j) = journal.lock() {
-                                    j.record_mutation("apply_unified_diff", &resolved);
-                                }
+                                let tx = journal.lock().ok().map(|mut j| j.record_mutation("apply_unified_diff", &resolved));
                                 match atomic_write_file(&resolved, updated.as_bytes()) {
                                     Ok(_) => modified.push(op.file_path.clone()),
-                                    Err(e) => errors.push(format!("Failed to write '{}': {e}", op.file_path)),
+                                    Err(e) => {
+                                        if let (Some(id), Ok(mut j)) = (tx, journal.lock()) { j.discard_tx(&id); }
+                                        errors.push(format!("Failed to write '{}': {e}", op.file_path));
+                                    }
                                 }
                             }
                             Err(e) => errors.push(format!("Patch mismatch in '{}': {e}", op.file_path)),
@@ -263,7 +266,7 @@ pub fn dispatch_fs_tool(
             }
             if resolved.is_dir() {
                 let mut child_files = Vec::new();
-                collect_source_files(&resolved, &mut child_files);
+                collect_all_files_for_delete(&resolved, &mut child_files, 0, 1500)?;
                 if let Ok(mut j) = journal.lock() {
                     for f in &child_files {
                         j.record_mutation("delete_file", f);
@@ -271,10 +274,11 @@ pub fn dispatch_fs_tool(
                 }
                 fs::remove_dir_all(&resolved).map_err(|e| format!("Failed to remove directory: {e}"))?;
             } else {
-                if let Ok(mut j) = journal.lock() {
-                    j.record_mutation("delete_file", &resolved);
+                let tx = journal.lock().ok().map(|mut j| j.record_mutation("delete_file", &resolved));
+                if let Err(e) = fs::remove_file(&resolved) {
+                    if let (Some(id), Ok(mut j)) = (tx, journal.lock()) { j.discard_tx(&id); }
+                    return Err(format!("Failed to delete file: {e}"));
                 }
-                fs::remove_file(&resolved).map_err(|e| format!("Failed to delete file: {e}"))?;
             }
             Ok((json!({ "success": true, "path": resolved.to_string_lossy() }), false))
         }
@@ -291,15 +295,17 @@ pub fn dispatch_fs_tool(
             if src.is_dir() {
                 return Err(format!("Refusing move_file on directory '{}' because directory renames cannot be atomically journaled", src.display()));
             }
-            if let Ok(mut j) = journal.lock() {
-                j.record_mutation("move_file", &src);
-                j.record_mutation("move_file", &dst);
-            }
+            let txs = journal.lock().ok().map(|mut j| (j.record_mutation("move_file", &src), j.record_mutation("move_file", &dst)));
             if let Some(parent) = dst.parent() {
                 let _ = fs::create_dir_all(parent);
             }
-            fs::rename(&src, &dst)
-                .map_err(|e| format!("Failed to move '{}' -> '{}': {e}", src.display(), dst.display()))?;
+            if let Err(e) = fs::rename(&src, &dst) {
+                if let (Some((id1, id2)), Ok(mut j)) = (txs, journal.lock()) {
+                    j.discard_tx(&id2);
+                    j.discard_tx(&id1);
+                }
+                return Err(format!("Failed to move '{}' -> '{}': {e}", src.display(), dst.display()));
+            }
             Ok((
                 json!({
                     "success": true,
@@ -467,4 +473,21 @@ pub fn dispatch_fs_tool(
         }
         other => Err(format!("Unsupported filesystem tool '{other}'")),
     }
+}
+
+fn collect_all_files_for_delete(dir: &Path, out: &mut Vec<std::path::PathBuf>, depth: usize, cap: usize) -> Result<(), String> {
+    if depth > 32 { return Err("Directory nesting exceeds safe delete journaling depth".to_string()); }
+    let entries = fs::read_dir(dir).map_err(|e| format!("Failed reading directory '{}': {e}", dir.display()))?;
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if let Ok(meta) = fs::symlink_metadata(&p) {
+            if meta.is_dir() && !meta.file_type().is_symlink() {
+                collect_all_files_for_delete(&p, out, depth + 1, cap)?;
+            } else {
+                if out.len() >= cap { return Err(format!("Refusing recursive delete exceeding {cap} journaled files")); }
+                out.push(p);
+            }
+        }
+    }
+    Ok(())
 }

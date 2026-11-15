@@ -279,7 +279,7 @@ extension WorkspaceWindow {
             case .success(let data):
                 if let branch = self.viewportBranch {
                     source.request("workspace.branch") { [weak self, weak source] result in
-                        guard let self, let source, self.client === source, self.inspectionGeneration == generation else { return }
+                        guard let self, let source, self.client === source, !self.closing, self.inspectionGeneration == generation else { return }
                         switch result {
                         case .success(let identity) where identity["branch"] as? String == branch:
                             self.presentDocument(data, path: path, kind: kind, saved: saved)

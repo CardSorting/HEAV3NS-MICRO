@@ -61,6 +61,7 @@ impl SpatialInteractionEngine {
                 scene.targets.push(target);
             }
         }
+        let max_non_modal = scene.targets.iter().map(|t| t.z_order).max().unwrap_or(0);
         for win in &display.windows {
             let tl = win.title.to_ascii_lowercase();
             if win.id != display.active_window_id
@@ -78,7 +79,7 @@ impl SpatialInteractionEngine {
                         target.value = el.value.clone();
                         target.enabled = el.enabled;
                         target.focused = el.focused;
-                        target.z_order = win.z_order.max(10);
+                        target.z_order = win.z_order.max(max_non_modal.saturating_add(10));
                         target.provenance = TargetProvenance::SetOfMarks;
                         target.confidence = 1.0;
                         scene.targets.push(target);
@@ -248,12 +249,12 @@ impl SpatialInteractionEngine {
         let duration_ms = crate::plumbing::hash_and_math::now_ms().saturating_sub(start_time).max(1);
 
         // Step 5: WRAPPER B (Post) — Observable Postcondition Verification
-        let (after_scene, receipt) = {
+        let (after_scene, receipt, med_layout_epoch) = {
             let disp = self.display.lock().unwrap_or_else(|e| e.into_inner());
             let after = Self::extract_scene_from_display(&disp);
             let mut med = self.mediator.lock().unwrap_or_else(|e| e.into_inner());
             let rcpt = med.verify_post_execution(&contract.action_name, Some(&grounded), &before_scene, &after, duration_ms);
-            (after, rcpt)
+            (after, rcpt, med.layout_epoch)
         };
 
         Ok(json!({
@@ -275,7 +276,7 @@ impl SpatialInteractionEngine {
             "assuranceReceipt": receipt,
             "rawResult": raw_res,
             "frameSeq": after_scene.frame_seq,
-            "layoutEpoch": after_scene.layout_epoch
+            "layoutEpoch": med_layout_epoch
         }))
     }
 

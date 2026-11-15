@@ -313,7 +313,9 @@ impl SpatialActionMediator {
             "click" | "double_click" => {
                 if let Some(g) = grounded {
                     let target_focused_after = after.targets.iter().find(|t| t.id == g.target.id).map(|t| t.focused).unwrap_or(false);
-                    let state_changed = before.window_id != after.window_id || before.targets != after.targets;
+                    let state_changed = before.window_id != after.window_id
+                        || before.targets.len() != after.targets.len()
+                        || before.targets.iter().zip(after.targets.iter()).any(|(b, a)| b.id != a.id || b.bounds != a.bounds || b.value != a.value || b.focused != a.focused || b.enabled != a.enabled);
                     if target_focused_after || state_changed {
                         (AssuranceVerdict::Confirmed, true, None)
                     } else {

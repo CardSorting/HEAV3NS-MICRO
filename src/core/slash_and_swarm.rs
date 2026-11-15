@@ -400,7 +400,7 @@ impl AgentEngine {
                 if !staged.is_empty() {
                     staged
                         .iter()
-                        .filter_map(|ov| vfs.generate_diff(&ov.path))
+                        .filter_map(|ov| vfs.generate_diff_in(self.workspace_root(), &ov.path))
                         .collect::<Vec<_>>()
                         .join("\n")
                 } else if let Some(last) = self.latest_receipt() {
@@ -418,7 +418,7 @@ impl AgentEngine {
                     serde_json::to_string_pretty(&j_diff).unwrap_or_else(|_| "No staged VFS or session changes.".to_string())
                 }
             }
-            "/commit" => match self.vfs().lock().unwrap_or_else(|e| e.into_inner()).commit_all() {
+            "/commit" => match self.vfs().lock().unwrap_or_else(|e| e.into_inner()).commit_all_in(self.workspace_root()) {
                 Ok(paths) => {
                     let path_bufs: Vec<std::path::PathBuf> = paths.iter().map(|p| self.workspace_root().join(p)).collect();
                     self.tools().cache.lock().unwrap_or_else(|e| e.into_inner()).invalidate_paths(&path_bufs);

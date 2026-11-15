@@ -54,7 +54,7 @@ Workspace-verified figures (`v0.1.0`):
 | Interactive slash commands | **35** command arms (`/help`, `/mode`, `/posture`, `/preview-request`, `/receipts`, `/turn`, `/restore`, `/undo`, `/models`, `/context`, `/prompt`, `/tools`, `/vfs`, `/diff`, `/commit`, `/skills`, `/rewind`, `/doctor`, `/computer`, `/browser`, `/vision`, `/spatial`, `/legion`, etc.) | [`src/core/slash_and_swarm.rs`](../src/core/slash_and_swarm.rs) |
 | Memory & snapshot substrates | **16 MiB** `ArenaAllocator` ($O(1)$ rewind) + pure-Rust SHA-256 `WorkspaceSnapshotCas` (`WouldBlock`-safe `/undo`) | [`src/domain/arena.rs`](../src/domain/arena.rs) & [`src/infrastructure/workspace_cas.rs`](../src/infrastructure/workspace_cas.rs) |
 | Spatial grounding throughput | **$\le 0.40\ \mu\text{s}$** per operation (`> 240,000` ops/sec) | [`src/core/spatial_tests.rs`](../src/core/spatial_tests.rs) |
-| Rust unit & integration tests | **119** passed (`0` failures) across substrate, spatial, computer-use, prompt/shell-guard zenith, Wave 4–13 hardening, and Codewhale zenith suites | `cargo test` |
+| Rust unit & integration tests | **129** passed (`0` failures) across substrate, spatial, computer-use, prompt/shell-guard zenith, Wave 4–25 hardening, and Codewhale zenith suites | `cargo test` |
 | Agent Flight Test scenarios | **5** (`FT-01..FT-05`, `19/19` checks passing) | [`src/core/flight_runner.rs`](../src/core/flight_runner.rs) |
 | Native macOS AppKit Tests | **323** tests executed (`6` skipped, `0` failures) | [`native/Tests/Heav3nsCodeTests/`](../native/Tests/Heav3nsCodeTests/) |
 | Joyzoning Stability Index ($SI$) | **100% (`SOVEREIGN`, $E_S = 0.0043$)** | [`VALIDATION_REPORT.md`](../VALIDATION_REPORT.md) |

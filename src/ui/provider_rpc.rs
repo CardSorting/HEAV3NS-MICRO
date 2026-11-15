@@ -88,6 +88,11 @@ pub fn handle_provider_credential_rpc(
         keys.remove(&slot);
         keys.remove(raw_prefix);
         keys.remove(&canon_id);
+        keys.retain(|k, _| {
+            lookup_provider_descriptor(k)
+                .map(|d| !d.secret_slot.eq_ignore_ascii_case(&slot))
+                .unwrap_or(true)
+        });
         if persist {
             let _cfg_guard = USER_CONFIG_IO_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(mut ucfg) = Heav3nsUserConfig::load() {

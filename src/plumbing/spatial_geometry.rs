@@ -166,14 +166,14 @@ impl SpatialRect {
     /// Computes a safe interactive point inside the rectangle by insetting margins.
     /// `inset_ratio` is clamped to [0.0, 0.45] to guarantee the safe point stays well within bounds.
     pub fn safe_center(&self, inset_ratio: f64) -> SpatialPoint {
-        let ratio = inset_ratio.clamp(0.0, 0.45);
+        let ratio = if inset_ratio.is_finite() { inset_ratio.clamp(0.0, 0.45) } else { 0.0 };
         let inset_w = self.width * ratio;
         let inset_h = self.height * ratio;
         let safe_rect = SpatialRect {
             x: self.x + inset_w,
             y: self.y + inset_h,
-            width: (self.width - inset_w * 2.0).max(1.0),
-            height: (self.height - inset_h * 2.0).max(1.0),
+            width: (self.width - inset_w * 2.0).max(0.0),
+            height: (self.height - inset_h * 2.0).max(0.0),
         };
         safe_rect.center()
     }

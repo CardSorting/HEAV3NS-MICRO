@@ -412,15 +412,12 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                 }
             }
             "checkpoint.flag" => {
+                let flagged = params.get("flagged").and_then(|v| v.as_bool()).unwrap_or(true);
                 if let Some(cid) = params.get("id").and_then(|v| v.as_str()) {
                     let mut st = lock_unpoison(&state);
-                    if params.get("flagged").and_then(|v| v.as_bool()).unwrap_or(true) {
-                        st.flagged_checkpoints.insert(cid.to_string());
-                    } else {
-                        st.flagged_checkpoints.remove(cid);
-                    }
+                    if flagged { st.flagged_checkpoints.insert(cid.to_string()); } else { st.flagged_checkpoints.remove(cid); }
                 }
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "flagged": true } }));
+                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "flagged": flagged } }));
             }
             "project.discover" => {
                 let targets = project_runner.discover(engine.workspace_root());
@@ -711,8 +708,8 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
             "swarm" => {
                 spawned_turns.retain(|h| !h.is_finished());
                 if spawned_turns.len() >= 32 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } })); continue; }
-                let objective = parsed.get("objective").and_then(|v| v.as_str()).unwrap_or("Swarm execution").to_string();
-                let assignments: Vec<SwarmAssignment> = parsed.get("assignments").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
+                let objective = params.get("objective").and_then(|v| v.as_str()).unwrap_or("Swarm execution").to_string();
+                let assignments: Vec<SwarmAssignment> = params.get("assignments").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
                 let token = CancellationToken::new();
                 lock_unpoison(&state).active_cancels.insert(req_id.clone(), token.clone());
                 let gate = Arc::clone(&legacy_turn_gate);
@@ -757,14 +754,14 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                     "runtime": "heav3ns-micro", "type": "deprecation.notice",
                     "payload": { "method": method, "replacement": "task.submit", "message": format!("Method '{method}' is deprecated; migrate to 'task.submit'.") }
                 }));
-                let prompt = parsed.get("prompt").or_else(|| parsed.get("command")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let prompt = params.get("prompt").or_else(|| params.get("command")).and_then(|v| v.as_str()).unwrap_or("").to_string();
                 if prompt.chars().count() > 16_000 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "id": req_id, "type": "error", "code": "INVALID_PARAMS", "message": "Instruction exceeds 16000 character limit." })); continue; }
-                let gate = Arc::clone(&legacy_turn_gate);
-                let eng = Arc::clone(&engine);
-                let st = Arc::clone(&state);
-                let out = Arc::clone(&stdout_lock);
-                let seq = Arc::clone(&event_seq);
+                pending_submits.fetch_add(1, Ordering::SeqCst);
+                let (eng, st, out, seq, gate, pending) = (Arc::clone(&engine), Arc::clone(&state), Arc::clone(&stdout_lock), Arc::clone(&event_seq), Arc::clone(&legacy_turn_gate), Arc::clone(&pending_submits));
                 let handle = tokio::spawn(async move {
+                    struct LegacyPendingGuard(Arc<AtomicUsize>);
+                    impl Drop for LegacyPendingGuard { fn drop(&mut self) { self.0.fetch_sub(1, Ordering::SeqCst); } }
+                    let _pg = LegacyPendingGuard(pending);
                     execute_multiplexed_submit(eng, st, out, seq, req_id, ws_id, sess_id, is_rpc, prompt, None, false, gate).await;
                 });
                 spawned_turns.push(handle);

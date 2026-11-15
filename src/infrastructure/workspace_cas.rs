@@ -352,7 +352,9 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
         let manifest_path = self.cas_root.join("manifests").join(format!("{ts}_{id}.json"));
         let serialized = serde_json::to_string(&manifest)
             .map_err(|e| format!("CAS manifest serialization failed: {e}"))?;
-        let tmp_manifest = self.cas_root.join("manifests").join(format!(".tmp_{ts}_{id}.json"));
+        static CAS_TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let tmp_seq = CAS_TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp_manifest = self.cas_root.join("manifests").join(format!(".tmp_{ts}_{id}_{}_{tmp_seq}.json", std::process::id()));
         if let Err(e) = fs::write(&tmp_manifest, serialized) {
             let _ = fs::remove_file(&tmp_manifest);
             return Err(format!("CAS manifest write failed: {e}"));
@@ -534,14 +536,23 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
             }
         }
 
-        let _ = self.capture_snapshot(&format!("pre-undo:{post_turn_id}"), post.turn_number);
-        let mut actions = Vec::new();
-
+        let mut pre_blobs: Vec<(String, Option<Vec<u8>>)> = Vec::with_capacity(touched_paths.len());
         for rel in touched_paths {
             if let Some(pre_entry) = pre.files.get(&rel) {
                 let bytes = self
                     .read_blob(&pre_entry.sha256)
                     .ok_or_else(|| format!("Missing CAS blob for '{rel}'"))?;
+                pre_blobs.push((rel, Some(bytes)));
+            } else {
+                pre_blobs.push((rel, None));
+            }
+        }
+
+        let _ = self.capture_snapshot(&format!("pre-undo:{post_turn_id}"), post.turn_number);
+        let mut actions = Vec::new();
+
+        for (rel, bytes_opt) in pre_blobs {
+            if let Some(bytes) = bytes_opt {
                 self.atomic_write_workspace_file(&rel, &bytes)?;
                 actions.push(format!("[Restored] {rel}"));
             } else {
@@ -570,10 +581,9 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
             .cloned()
             .ok_or_else(|| format!("Snapshot '{snapshot_id}' not found"))?;
 
-        let _ = self.capture_snapshot(&format!("pre-restore:{snapshot_id}"), target.turn_number);
         let live = self.scan_working_tree(false)?;
-        // Pre-flight check: verify all required blobs exist before mutating the workspace
-        let mut pending_writes: Vec<(&str, Vec<u8>)> = Vec::new();
+        // Pre-flight check: verify and load all required blobs before capture_snapshot/GC or workspace mutation
+        let mut pending_writes: Vec<(String, Vec<u8>)> = Vec::new();
         for (rel, t_entry) in &target.files {
             let needs_write = live
                 .get(rel)
@@ -583,9 +593,10 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
                 let bytes = self.read_blob(&t_entry.sha256).ok_or_else(|| {
                     format!("CAS blob '{}' missing for '{rel}'; aborting restore before workspace mutation", t_entry.sha256)
                 })?;
-                pending_writes.push((rel.as_str(), bytes));
+                pending_writes.push((rel.clone(), bytes));
             }
         }
+        let _ = self.capture_snapshot(&format!("pre-restore:{snapshot_id}"), target.turn_number);
         let mut actions = Vec::new();
 
         for (rel, _) in &live {
@@ -604,7 +615,7 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
         }
 
         for (rel, bytes) in pending_writes {
-            self.atomic_write_workspace_file(rel, &bytes)?;
+            self.atomic_write_workspace_file(&rel, &bytes)?;
             actions.push(format!("[Restored] {rel}"));
         }
 

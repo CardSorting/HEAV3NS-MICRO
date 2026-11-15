@@ -143,7 +143,7 @@ pub fn detect_modal_or_dialog(
     }
     for title in titles {
         let t = title.to_ascii_lowercase();
-        if t.contains("dialog") || t.contains("alert") || t.contains("confirm") || t.contains("permission") {
+        if t.contains("dialog") || t.contains("alert") || t.contains("confirm") || t.contains("modal") || t.contains("permission") {
             return Some((*title).to_string());
         }
     }

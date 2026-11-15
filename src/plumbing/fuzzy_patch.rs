@@ -127,7 +127,19 @@ pub fn heal_fuzzy_patch(file_content: &str, target_snippet: &str) -> Option<(Str
         }
     }
     let file_lines: Vec<&str> = file_content.lines().collect();
-    let mut target_lines: Vec<&str> = target_snippet.lines().collect();
+    let raw_target_lines: Vec<&str> = target_snippet.lines().collect();
+    let sep = if file_content.contains("\r\n") { "\r\n" } else { "\n" };
+    if !raw_target_lines.is_empty() && file_lines.len() >= raw_target_lines.len() {
+        for i in 0..=(file_lines.len() - raw_target_lines.len()) {
+            if (0..raw_target_lines.len()).all(|j| file_lines[i + j].trim() == raw_target_lines[j].trim()) {
+                let matched = file_lines[i..i + raw_target_lines.len()].join(sep);
+                if file_content.contains(&matched) {
+                    return Some((matched, 0.90));
+                }
+            }
+        }
+    }
+    let mut target_lines = raw_target_lines;
     while target_lines.first().is_some_and(|l| l.trim().is_empty()) {
         target_lines.remove(0);
     }
@@ -138,7 +150,6 @@ pub fn heal_fuzzy_patch(file_content: &str, target_snippet: &str) -> Option<(Str
         return None;
     }
 
-    let sep = if file_content.contains("\r\n") { "\r\n" } else { "\n" };
     for i in 0..=(file_lines.len() - target_lines.len()) {
         if (0..target_lines.len()).all(|j| file_lines[i + j].trim() == target_lines[j].trim()) {
             let matched = file_lines[i..i + target_lines.len()].join(sep);
@@ -205,7 +216,7 @@ impl DeterministicPatchEngine {
             if let Some(t) = cur_type.take() {
                 if !cur_path.is_empty() {
                     let add_content = if t == "add" {
-                        Some(std::mem::take(add_lines).join("\n") + "\n")
+                        Some(if add_lines.is_empty() { String::new() } else { std::mem::take(add_lines).join("\n") + "\n" })
                     } else {
                         None
                     };

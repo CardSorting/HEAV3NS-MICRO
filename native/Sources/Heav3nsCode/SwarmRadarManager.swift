@@ -233,7 +233,7 @@ final class SwarmRadarManager {
 
     func startPeriodicKeepAlive() {
         guard keepAliveTimer == nil else { return }
-        let timer = DispatchSource.makeTimerSource(queue: syncQueue)
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
         // Repeat every 20 minutes (1200 seconds)
         timer.schedule(deadline: .now() + 1200, repeating: 1200)
         timer.setEventHandler { [weak self] in

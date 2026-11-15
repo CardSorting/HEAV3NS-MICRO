@@ -139,12 +139,11 @@ pub fn decode_image_metadata(bytes: &[u8]) -> Result<Value, String> {
     }
 
     // 6. SVG: XML/SVG text header
-    if let Ok(text) = std::str::from_utf8(&bytes[..bytes.len().min(4096)]) {
-        let trimmed = text.trim_start();
-        if trimmed.starts_with("<svg") || (trimmed.starts_with("<?xml") && trimmed.contains("<svg")) {
-            let (w, h) = parse_svg_dimensions(trimmed);
-            return Ok(build_img_meta("svg", "image/svg+xml", w, h, bytes.len(), true, 8, false));
-        }
+    let text = String::from_utf8_lossy(&bytes[..bytes.len().min(4096)]);
+    let trimmed = text.trim_start();
+    if trimmed.starts_with("<svg") || (trimmed.starts_with("<?xml") && trimmed.contains("<svg")) {
+        let (w, h) = parse_svg_dimensions(trimmed);
+        return Ok(build_img_meta("svg", "image/svg+xml", w, h, bytes.len(), true, 8, false));
     }
 
     Err("Unrecognized binary image header (expected PNG, JPEG, GIF, WebP, BMP, or SVG)".to_string())
@@ -158,16 +157,9 @@ fn build_img_meta(fmt: &str, mime: &str, width: u32, height: u32, byte_size: usi
     let tiles_y = ((height.max(1) as u64).saturating_add(511) / 512).max(1);
     let estimated_vision_tokens = 85u64.saturating_add(tiles_x.saturating_mul(tiles_y).saturating_mul(170));
     json!({
-        "format": fmt,
-        "mimeType": mime,
-        "width": width,
-        "height": height,
-        "aspectRatio": aspect,
-        "megapixels": megapixels,
-        "byteSize": byte_size,
-        "hasAlpha": has_alpha,
-        "bitDepth": bit_depth,
-        "animated": animated,
+        "format": fmt, "mimeType": mime, "width": width, "height": height,
+        "aspectRatio": aspect, "megapixels": megapixels, "byteSize": byte_size,
+        "hasAlpha": has_alpha, "bitDepth": bit_depth, "animated": animated,
         "estimatedVisionTokens": estimated_vision_tokens
     })
 }
@@ -175,8 +167,8 @@ fn build_img_meta(fmt: &str, mime: &str, width: u32, height: u32, byte_size: usi
 fn parse_svg_dimensions(svg: &str) -> (u32, u32) {
     let extract_attr = |attr: &str| -> Option<u32> {
         let pat = format!("{}=\"", attr);
-        let start = svg.find(&pat)? + pat.len();
-        let rest = &svg[start..];
+        let pos = svg.match_indices(&pat).find(|(p, _)| *p == 0 || svg.as_bytes()[p - 1].is_ascii_whitespace())?.0;
+        let rest = &svg[pos + pat.len()..];
         let end = rest.find('"')?;
         let digits: String = rest[..end].chars().take_while(|c| c.is_ascii_digit()).collect();
         digits.parse::<u32>().ok()
@@ -505,7 +497,13 @@ pub fn snapshot_html_dom(html: &str, url: &str, max_elements: usize) -> Value {
     let mut i = 0usize;
     while i < bytes.len() && interactive.len() < limit {
         if bytes[i] == b'<' {
-            if let Some(rel_end) = sanitized[i..].find('>') {
+            let mut quote: Option<u8> = None;
+            let rel_end = bytes[i..].iter().position(|&b| match quote {
+                Some(q) => { if b == q { quote = None; } false }
+                None if b == b'"' || b == b'\'' => { quote = Some(b); false }
+                None => b == b'>',
+            });
+            if let Some(rel_end) = rel_end {
                 let tag_slice = &sanitized[i + 1..i + rel_end];
                 let trimmed = tag_slice.trim();
                 if !trimmed.starts_with('/') && !trimmed.starts_with('!') && !trimmed.starts_with('?') {
@@ -620,9 +618,8 @@ fn extract_html_attr(tag_body: &str, attr_name: &str) -> Option<String> {
     let lower = tag_body.to_ascii_lowercase();
     for quote in ['"', '\''] {
         let pat = format!("{}={}", attr_name.to_ascii_lowercase(), quote);
-        if let Some(pos) = lower.find(&pat) {
-            let start = pos + pat.len();
-            let rest = &tag_body[start..];
+        if let Some((pos, _)) = lower.match_indices(&pat).find(|(p, _)| *p == 0 || lower.as_bytes()[p - 1].is_ascii_whitespace()) {
+            let rest = &tag_body[pos + pat.len()..];
             if let Some(end) = rest.find(quote) {
                 return Some(rest[..end].trim().to_string());
             }

@@ -642,8 +642,8 @@ impl AgentEngine {
 
         let file_changes = match (&snap_before, &snap_after) {
             (Some(b), Some(a)) => {
-                let b_hash = b.rsplit('_').next().unwrap_or("");
-                let a_hash = a.rsplit('_').next().unwrap_or("");
+                let b_hash = b.split('_').nth(2).unwrap_or("");
+                let a_hash = a.split('_').nth(2).unwrap_or("");
                 if !b_hash.is_empty() && b_hash == a_hash {
                     Vec::new()
                 } else {

@@ -351,6 +351,9 @@ impl ModelPricingCatalog {
         // 2. Strip trailing snapshot date (`-20261015`, `-20250514`, `-1017`, `-latest`, `-preview`)
         let stripped = strip_model_snapshot_suffix(&norm_model);
         if stripped != norm_model {
+            if let Some(hit) = self.entries.get(&stripped) {
+                return Some(hit);
+            }
             let vendor_stripped = format!("{vendor}/{stripped}");
             if let Some(hit) = self.entries.get(&vendor_stripped) {
                 return Some(hit);
@@ -371,7 +374,10 @@ impl ModelPricingCatalog {
             return ("qwen2.5-coder:14b".to_string(), "qwen2.5-coder:14b".to_string());
         }
         let vendor_prefix = format!("{}/", Self::canonical_vendor_prefix(provider));
-        let use_full_id = p == "openrouter";
+        let use_full_id = matches!(
+            p.as_str(),
+            "openrouter" | "orcarouter" | "codewhale" | "cline-pass" | "nvidia-nim" | "nvidia" | "together" | "fireworks" | "deepinfra" | "huggingface" | "modelscope" | "atlascloud" | "siliconflow" | "siliconflow-cn" | "baseten" | "novita" | "edenai" | "zenmux"
+        );
 
         let mut newest_fast: Option<&ModelCatalogEntry> = None;
         let mut newest_strong: Option<&ModelCatalogEntry> = None;
