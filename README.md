@@ -1,6 +1,14 @@
 <!-- [LAYER: UI] -->
 # HEAV3NS-MICRO (`v0.1.0`) — The Sovereign Intelligence Runtime
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Rust_Tests-129_Passed-2ea44f?style=for-the-badge" alt="Rust Tests: 129 Passed" />
+  <img src="https://img.shields.io/badge/AppKit_Tests-323_Passed-2ea44f?style=for-the-badge" alt="AppKit Tests: 323 Passed" />
+  <img src="https://img.shields.io/badge/Joyzoning-100%25_SOVEREIGN-0969da?style=for-the-badge" alt="Joyzoning: 100% Sovereign" />
+  <img src="https://img.shields.io/badge/Hardening-Waves_4--25-8250df?style=for-the-badge" alt="Hardening: Waves 4-25" />
+  <img src="https://img.shields.io/badge/Docs_Guardrails-438_Links_Verified-1f883d?style=for-the-badge" alt="Docs Guardrails: 438 Links Verified" />
+</p>
+
 **Hyper-Compressed, Architecturally Sovereign Rust Intelligence Runtime, Double-Wrapped Spatial Action Engine & Native macOS AppKit IDE (`HEAV3NS-CODE`)** — structured under the **HEAV3NS-JOY** 5-Zone Joyzoning architecture (`100%` Stability Index, `0` blocking violations, `0` advisories, all `343` workspace files `< 800` lines Tier 1 Optimal).
 
 <p align="center">
@@ -39,23 +47,192 @@
 
 ---
 
-## The Seven Sovereign Pillars (`HEAV3NS`)
+## Start Here in 60 Seconds: The "Surgical Cockpit" Mental Model
+
+If you are opening **HEAV3NS-MICRO** for the first time, think of it not as a single chat wrapper around an LLM, but as a **surgical cockpit** built from seven cooperating subsystems:
+
+> [!TIP]
+> **New to the codebase?** Start in `Plan` posture (`Shift+Tab`) and run `cargo run -- --flight` — you can explore every tool, prompt budget, and safety gate offline with zero API calls or disk mutations.
+
+### If You Already Know X, Here Is How `HEAV3NS-MICRO` Maps
+
+| Familiar Engineering Concept | Closest `HEAV3NS-MICRO` Equivalent | Why It Exists |
+| :--- | :--- | :--- |
+| **`git diff` + `git commit`** | [`SessionVfs`](src/infrastructure/vfs_store.rs) (`/vfs`, `/diff`, `/commit`) | Stage agent edits in memory and verify disk baseline hashes *before* writing. |
+| **Time-Machine Snapshot / `git reset`** | [`WorkspaceSnapshotCas`](src/infrastructure/workspace_cas.rs) (`/undo`, `/restore`) + [`ArenaAllocator`](src/domain/arena.rs) | Rewind files and conversation state in $O(1)$ even in non-Git folders. |
+| **Compiler AST + Browser DevTools** | `SPIDER` ([`environmental_diff.rs`](src/plumbing/environmental_diff.rs)) | Understand code structure, UI affordances, and modal occlusion before acting. |
+| **`chmod` / `sudo` / Seatbelt** | [`ExecutionPosture`](src/domain/types/posture_types.rs) (`Shift+Tab`) + [`seatbelt_profile.rs`](src/plumbing/seatbelt_profile.rs) | Dial autonomy up or down per task; `.heav3ns/constitution.json` rules always win. |
+| **`make -j` Dependency Waves** | [`ToolRegistry`](src/core/tool_registry.rs) Wave Scheduler | Run reads in parallel while serializing file/shell writes to avoid races. |
+
+| Pillar | Everyday Analogy | What It Actually Does | Core Implementation |
+| :--- | :--- | :--- | :--- |
+| **1. `HEAV3NS-MICRO`** | **The Flight Computer** | Runs the deterministic ReAct loop with a cache-locked system prompt prefix so turns stay fast and predictable. | [`AgentEngine`](src/core/engine.rs), [`SystemPromptSpec`](src/domain/prompt_spec.rs), [`ContextInspectionSnapshot`](src/core/context_inspector.rs), [`ToolCallArgParser`](src/domain/tool_parser.rs), [`flight_runner`](src/core/flight_runner.rs) (`FT-01..FT-05`) |
+| **2. `SPIDER`** | **The Structural Radar** | Maps code ASTs, UI affordances, and modal/occlusion relationships *before* anything touches disk or screen. | [`environmental_diff.rs`](src/plumbing/environmental_diff.rs), [`EnvironmentalObservation`](src/domain/types/environmental_types.rs), `spider.check` |
+| **3. `REWIND`** | **The Time Machine** | Takes instant SHA-256 workspace snapshots and $O(1)$ Arena checkpoints so every edit can be `/diff`ed, `/undo`ne, or `/restore`d. | [`ArenaAllocator`](src/domain/arena.rs), [`WorkspaceSnapshotCas`](src/infrastructure/workspace_cas.rs), [`SessionVfs`](src/infrastructure/vfs_store.rs), [`TransactionJournal`](src/infrastructure/transaction_journal.rs), [`VirtualDisplayState`](src/domain/computer_use.rs) |
+| **4. `BROCCOLI`** | **Long-Term Muscle Memory** | Remembers which workflows succeeded or failed with Laplace-smoothed confidence instead of repeating mistakes. | [`BehavioralKnowledgeStore`](src/infrastructure/behavioral_store.rs), [`LearnedWorkflowProcedure`](src/domain/types/learned_knowledge_types.rs), [`MemoryStore`](src/domain/memory.rs), [`SkillTreeCatalog`](src/domain/skill_tree.rs) |
+| **5. `SYNTHETIC SWARM`** | **The Specialist Council** | Splits complex work into non-overlapping file waves (`Legion`) or consults 5 GUI specialists before risky UI clicks. | [`ComputerUseOrchestrator::consult`](src/core/computer_use_orchestrator.rs), [`Legion`](src/domain/swarm.rs) |
+| **6. `COMPUTER USE`** | **Gloved Hands + Double-Check** | Grounds every click/type to a safe hitbox (`Wrapper A`) and verifies an observable state change afterward (`Wrapper B`). | [`ComputerUseOrchestrator`](src/core/computer_use_orchestrator.rs), [`SpatialActionMediator`](src/domain/spatial_mediator.rs), [`SpatialInteractionEngine`](src/core/spatial_engine.rs), `browser_use` |
+| **7. `THE HARNESS`** | **The Guardrails & Toolbelt** | Enforces your `Shift+Tab` safety posture, macOS Seatbelt sandbox, 31 tools, and native AppKit IDE (`HEAV3NS-CODE`). | [`ToolRegistry`](src/core/tool_registry.rs), [`ExecutionPosture`](src/domain/types/posture_types.rs), [`seatbelt_profile.rs`](src/plumbing/seatbelt_profile.rs), [`TurnReceipt`](src/domain/turn_receipt.rs), [`stdio_worker.rs`](src/ui/stdio_worker.rs), [`native/`](native/) |
+
+### Visual Walkthrough: How a Single Turn Executes Safely
 
 > *"Not an agent. Not a swarm. Not an operating system. A computational civilization of cooperating intelligence — where the system doesn't merely execute instructions: it understands its environment, learns its structure, remembers its experience, and acts with intent."* — [`doc.md`](doc.md)
 
-| Pillar | Designation | Core Implementation |
-| :--- | :--- | :--- |
-| **1. `HEAV3NS-MICRO`** | **The Distilled Intelligence Runtime** | [`AgentEngine`](src/core/engine.rs) multi-turn ReAct state machine, KV-cache-deterministic [`SystemPromptSpec`](src/domain/prompt_spec.rs) (`Standard`, `Compact`, `SwarmSpecialist`, `SideQuestion`), [`ContextInspectionSnapshot`](src/core/context_inspector.rs) (`/context` & `/prompt`), 3-stage self-healing [`ToolCallArgParser`](src/domain/tool_parser.rs), and `FT-01..FT-05` [`flight_runner`](src/core/flight_runner.rs). |
-| **2. `SPIDER`** | **Structural Perception & Environmental Understanding** | [`environmental_diff.rs`](src/plumbing/environmental_diff.rs) (`analyze_spider_structural_relationships`, `classify_element_affordance`, `detect_modal_or_dialog`), [`EnvironmentalObservation`](src/domain/types/environmental_types.rs), and `spider.check` AST audits. |
-| **3. `REWIND`** | **Temporal Cognition, Continuity & Recoverability** | 16-MiB [`ArenaAllocator`](src/domain/arena.rs) with $O(1)$ `SlabBufferSnapshot` rewind, pure-Rust SHA-256 [`WorkspaceSnapshotCas`](src/infrastructure/workspace_cas.rs) (`WouldBlock`-protected `/undo`, `/restore`, non-Git `/diff`), two-phase [`SessionVfs`](src/infrastructure/vfs_store.rs) baseline verification, [`TransactionJournal`](src/infrastructure/transaction_journal.rs) rollback, and 32-deep [`VirtualDisplayState`](src/domain/computer_use.rs) undo/redo. |
-| **4. `BROCCOLI`** | **Persistent Knowledge, Memory & Historical Evolution** | [`BehavioralKnowledgeStore`](src/infrastructure/behavioral_store.rs) with Laplace-smoothed confidence calibration & [`LearnedWorkflowProcedure`](src/domain/types/learned_knowledge_types.rs) synthesis, hybrid TF-IDF [`MemoryStore`](src/domain/memory.rs), and Kahn-verified [`SkillTreeCatalog`](src/domain/skill_tree.rs) DAG. |
-| **5. `SYNTHETIC SWARM`** | **Distributed Collective Intelligence** | 5-specialist parallel consultation ([`ComputerUseOrchestrator::consult`](src/core/computer_use_orchestrator.rs): `VisualPerceiver`, `StructuralAnalyst`, `WorkflowNavigator`, `RiskAssessor`, `RecoverySpecialist` + `ConflictResolver`) and 7-specialist [`Legion`](src/domain/swarm.rs) topological formations with exclusive file reservations & bounded handoffs. |
-| **6. `COMPUTER USE`** | **Embodied Agency: Observation, Interpretation, Action, Adaptation** | 9-stage closed-loop [`ComputerUseOrchestrator`](src/core/computer_use_orchestrator.rs), Double-Wrapped [`SpatialActionMediator`](src/domain/spatial_mediator.rs) (`Wrapper A` Grounding + `Wrapper B` Assurance), [`SpatialInteractionEngine`](src/core/spatial_engine.rs) (off-screen auto-scroll & multi-step `execute_plan`), and zero-trust `browser_use`. |
-| **7. `THE HARNESS`** | **The Computational Substrate That Binds It All Together** | 31 native tools (`tool_search` 8-slot LRU + `execute_tools` 32-step batch) & DAG Wave Scheduler ([`ToolRegistry`](src/core/tool_registry.rs)), 5-stop [`ExecutionPosture`](src/domain/types/posture_types.rs) (`Shift+Tab` / fail-closed `RepoConstitution`), macOS Seatbelt [`seatbelt_profile.rs`](src/plumbing/seatbelt_profile.rs), [`TurnReceipt`](src/domain/turn_receipt.rs) (`heav3ns.receipt/v1`), multiplexed `"v": 1` stdio JSON-RPC worker ([`stdio_worker.rs`](src/ui/stdio_worker.rs)), and Native macOS AppKit IDE ([`native/`](native/)). |
+```mermaid
+flowchart TB
+  U["1. User Intent (CLI · Native AppKit IDE · JSON-RPC v1)"] --> P["2. Posture & Constitution Gate (Ask / AcceptEdits / Plan / AutoReview / FullAccess)"]
+  P --> S["3. REWIND Pre-Turn Snapshot (SHA-256 CAS + Arena Checkpoint)"]
+  S --> M["4. KV-Locked Prompt + Model Router (43 Providers · OAuth / API Key)"]
+  M --> W{"5. Wave Scheduler (ToolRegistry)"}
+  W -->|"Read-Only Tools"| R["Parallel Read Wave (view_file · grep · spider)"]
+  W -->|"Mutating Tools"| X["Serialized Write Wave (patch · shell · Seatbelt + Journal)"]
+  R --> REC["6. Post-Turn Receipt (Diff · Token Cost · /undo Ready)"]
+  X --> REC
+```
+
+---
+
+## Your First 5 Minutes: Adoption Ladder
+
+Smooth your onboarding by progressing through four natural stages — you never have to adopt the whole stack at once:
+
+```mermaid
+flowchart LR
+  S1["Stage 1: Verify & Inspect (cargo test · --flight · doctor)"] --> S2["Stage 2: Safe Read-Only (Plan Posture · /context · /prompt)"]
+  S2 --> S3["Stage 3: Reversible Edits (/vfs · /diff · /commit · /undo)"]
+  S3 --> S4["Stage 4: Multi-Agent & GUI (/legion · /spatial · HEAV3NS-CODE)"]
+```
+
+| Stage | Everyday Analogy | Try This First | What You Gain |
+| :--- | :--- | :--- | :--- |
+| **1. Verify Offline** | *Pre-flight instrument check* | `cargo run -- --flight` and `cargo run -- doctor` | Zero-network proof that tools, CAS, and Joyzoning invariants work on your machine. |
+| **2. Read-Only Recon** | *Look before you touch* | Cycle `Shift+Tab` to `Plan`, then run `/context` and `/prompt` | Inspect exact token budgets, active tools, and prompt prefixes with zero disk mutations. |
+| **3. Reversible Editing** | *Drafting in pencil first* | Stage edits with `/vfs`, inspect `/diff`, then `/commit` or `/undo` | Every file change is hash-verified against disk baselines and instantly rollable back. |
+| **4. Swarm & Spatial** | *Delegating to a crew* | Use `/legion` for parallel tasks or `/spatial` for GUI automation | Exclusive file locks prevent worker collisions; Double-Wrapped spatial grounding prevents blind clicks. |
+
+### Choose Your Cockpit (3 Ways to Run)
+
+```mermaid
+flowchart TD
+  WHO{"How do you want to work?"}
+  WHO -->|"Fast Terminal Loop"| CLI["Terminal Pilot: cargo run (Interactive REPL & Slash Commands)"]
+  WHO -->|"Visual Mac Workspace"| IDE["Native Cockpit: HEAV3NS-CODE (native/ AppKit Client)"]
+  WHO -->|"Embed in Editor / CI"| RPC["Headless Sidecar: Stdio JSON-RPC v1 (stdio_worker.rs)"]
+```
+
+---
+
+## Visual Deep-Dives: How Key Subsystems Work
+
+### 1. `REWIND`: Pencil Draft (`SessionVfs`) vs. Time Machine (`WorkspaceSnapshotCas`)
+
+Think of **VFS Staging** as writing in **pencil** before you ink it onto disk, and **CAS Snapshots** as a **time machine** that can rewind even after ink hits disk:
+
+```mermaid
+flowchart LR
+  EDIT["Agent Edit"] --> VFS["Pencil Draft (SessionVfs Overlay)"]
+  VFS -->|"/diff"| PREVIEW["Inspect Unified Diff"]
+  PREVIEW -->|"/commit"| DISK["Ink to Disk (Baseline Hash Verified)"]
+  DISK -->|"/undo or /restore"| CAS["Time Machine (SHA-256 CAS + O(1) Arena Rewind)"]
+  DISK -->|"FS Failure"| JRN["TransactionJournal Rollback"]
+```
+
+### 2. `COMPUTER USE` & `SYNTHETIC SWARM`: Gloved Hands + Air-Traffic Control
+
+Instead of firing blind screen coordinates or letting parallel workers overwrite each other's files, **HEAV3NS-MICRO** wraps every GUI action in **Double-Wrapped Verification** and every swarm wave in **Exclusive File Locks**:
+
+```mermaid
+flowchart LR
+  OBS["Observe Display / DOM"] --> WA["Wrapper A: Ground & Assure (Hitbox · Occlusion · Lease)"]
+  WA --> ACT["Execute Input (Click / Type / Auto-Scroll)"]
+  ACT --> WB["Wrapper B: Verify Observable Delta (Focus · Value · Frame)"]
+  WB -->|"Confirmed"| DONE["Emit Assurance Receipt"]
+  WB -->|"SuspectedNoop"| ESC["Escalate / Consult 5-Seat CUA Swarm"]
+```
+
+```mermaid
+flowchart LR
+  TASK["Legion Objective"] --> W1["Wave 1: Parallel Specialists (Disjoint File Locks)"]
+  W1 -->|"Handoff"| W2["Wave 2: Dependent Specialists (Inherit ExecutionPosture)"]
+  W2 --> MERGE["Unified Turn Receipt"]
+```
+
+### 3. `BROCCOLI` & Toolbelt Scaling: Muscle Memory + Pegboard vs. Rolling Tool Chest
+
+To keep prompts fast and cache-friendly without losing power, **HEAV3NS-MICRO** keeps **15 core tools** on an always-visible *"workshop pegboard"* and stores **16 specialist tools** in a *"rolling tool chest"* (`tool_search` 8-slot LRU), while `BROCCOLI` distills repeated outcomes into calibrated priors:
+
+```mermaid
+flowchart LR
+  PEG["Workshop Pegboard (15 Core Tools · Always in KV Prefix)"] -->|"Need Specialist"| CHEST["Rolling Chest (16 On-Demand Tools)"]
+  CHEST -->|"tool_search (8-Slot LRU)"| PEG
+  PEG -->|"execute_tools (Up to 32 Steps)"| BATCH["Bounded Batch Execution"]
+```
+
+```mermaid
+stateDiagram-v2
+  [*] --> ColdStart: New workspace
+  ColdStart --> Observed: Action outcome recorded
+  Observed --> Calibrated: Laplace-smoothed confidence
+  Calibrated --> Procedure: Repeated success promoted
+  Procedure --> GuidedTurn: Recalled by TF-IDF + BehavioralStore
+  GuidedTurn --> Observed: Updated by next TurnReceipt
+```
+
+### 4. End-to-End Reversible Turn Lifecycle (`sequenceDiagram`)
+
+```mermaid
+sequenceDiagram
+  participant U as User / IDE
+  participant H as Harness (Posture Gate)
+  participant E as AgentEngine
+  participant M as LLM Provider
+  participant T as ToolRegistry + Sandbox
+  participant R as REWIND (CAS + Journal)
+
+  U->>H: Submit prompt (Ask / Plan / AutoReview)
+  H->>R: Capture pre-turn SHA-256 CAS snapshot
+  H->>E: Start turn with KV-locked prefix
+  E->>M: Stream request (preflight + 43-provider router)
+  M-->>E: Tool calls (read + write)
+  E->>T: Partition into parallel reads & serial writes
+  T->>R: Journal pre-image & execute in Seatbelt
+  T-->>E: Bounded tool results
+  E-->>U: TurnReceipt (diff · cost · /undo ready)
+  opt User runs /undo
+    U->>R: /undo last turn
+    R-->>U: Pre-load CAS blobs & restore workspace
+  end
+```
+
+### 5. Native macOS AppKit IDE (`HEAV3NS-CODE`) Architecture
+
+Think of **`HEAV3NS-CODE`** ([`native/`](native/)) as the **glass flight deck** bolted onto the Rust engine over a multiplexed stdio JSON-RPC v1 bridge:
+
+```mermaid
+flowchart LR
+  WIN["WorkspaceWindow (Omnibar · Posture · Composer)"] -->|"Stdio JSON-RPC v1"| RT["RuntimeClient (DispatchIO + ControlFrameReader)"]
+  WIN --> VIEWS["Document · Walkthrough · Approval · Swarm · Checkpoints"]
+  WIN --> STORES["ViewportStore & DraftStore (Atomic .tmp Cleanup)"]
+  RT <-->|"v: 1 Framed Events"| WORKER["Rust stdio_worker.rs (32-Task Queue · Turn Gate)"]
+  ACC["AccountClient (OAuth PKCE)"] <-->|"Loopback :1455"| WORKER
+```
+
+### 6. What the Cockpit HUD Looks Like in Action
+
+```text
+┌─ HEAV3NS-MICRO v0.1.0 ── Posture: [AutoReview] (Shift+Tab) ── CAS: snap_4_a91f3c ──┐
+│ Context Budget :  18,420 / 200,000 tok (9.2%)  │ KV Prefix : LOCKED (98.4% hit)     │
+│ Active Tools   :  15 core + 2 unlocked (spatial_interact, browser_use)               │
+│ Last Receipt   :  turn_0004 · 2 files modified · $0.014 · /diff or /undo ready       │
+└──────────────────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
 ## 5-Zone Joyzoning Architecture (`96` Rust Modules · `343` Workspace Files)
+
+> [!IMPORTANT]
+> **The Kitchen Analogy for Joyzoning:** `PLUMBING` is the knives and thermometers (stateless utilities), `DOMAIN` is the recipes and contracts (pure rules, 0% I/O), `INFRASTRUCTURE` is the stove and pantry (concrete I/O adapters), `CORE` is the head chef (orchestrating turns via domain traits), and `UI` is the dining room (CLI, JSON-RPC, and native macOS AppKit IDE). Dependencies flow strictly inward — never upward.
 
 Every source file belongs to one of five strictly enforced architectural zones, verified by `joy-check --theme strict`:
 
@@ -83,6 +260,15 @@ flowchart LR
 
 [`provider_registry.rs`](src/domain/types/provider_registry.rs), [`wire_dialects.rs`](src/infrastructure/wire_dialects.rs), and [`codex_oauth.rs`](src/infrastructure/codex_oauth.rs) support multi-provider routing with `ProviderChain` fallback, `ModelPricingRegistry` live OpenRouter synchronization (`12h` TTL), and isolated credential handling:
 
+```mermaid
+flowchart LR
+  REQ["Outbound Request"] --> PRE["Credential & SSRF Preflight"]
+  PRE -->|"API Key"| WIRE["Wire Dialect Router (Chat / Responses / Anthropic / Gemini)"]
+  PRE -->|"ChatGPT OAuth"| PKCE["CodexAccountStore (PKCE · Auto-Switch on 429)"]
+  PRE -->|"Offline / --flight"| FLT["ScriptedProvider (Deterministic Replay)"]
+  WIRE -->|"Fallback"| CHAIN["ProviderChain Next Endpoint"]
+```
+
 | Wire Dialect | Target Providers & Capabilities | Hardening Invariants |
 | :--- | :--- | :--- |
 | **OpenAI Chat (`/v1/chat/completions`)** | OpenAI, OpenRouter, DeepSeek, Qwen, Z.AI, MiniMax, Groq, Together, Fireworks, local OpenAI-compatible endpoints | Streaming SSE delta accumulation (`schema_and_sse.rs`), `json_repair.rs`, and `canonical_vendor_prefix` fallback resolution. |
@@ -95,13 +281,45 @@ flowchart LR
 
 ## Governance, Tooling & Execution Postures
 
+Think of `ExecutionPosture` (`Shift+Tab`) as a **5-stop safety dimmer switch** — you choose how much autonomy the runtime has at any moment, and fail-closed `.heav3ns/constitution.json` (`RepoConstitution`) rules always win:
+
+```mermaid
+flowchart LR
+  ASK["1. Ask (Approve every write & shell cmd)"] --> AE["2. AcceptEdits (Auto-approve file edits · ask on shell)"]
+  AE --> PLAN["3. Plan (Strict read-only recon · 0 mutations)"]
+  PLAN --> AR["4. AutoReview (Autonomous inside workspace + sandbox)"]
+  AR --> FA["5. FullAccess (Unrestricted · Process cred guard active)"]
+```
+
 - **5-Stop `ExecutionPosture` (`Shift+Tab`)**: `Ask -> AcceptEdits -> Plan -> AutoReview -> FullAccess` enforced monotonically alongside fail-closed `.heav3ns/constitution.json` (`RepoConstitution`) across tool calls, `AgentEngine::run_swarm`, and `handle_automation_rpc`.
 - **31 Native Tools & Parallel Wave Scheduler**: `15` always-loaded core tools + `16` on-demand specialist tools (`tool_search` 8-slot LRU + `execute_tools` 32-step batch) partitioned into parallel read waves and serialized mutation waves in [`tool_registry.rs`](src/core/tool_registry.rs).
 - **35 Interactive Slash Commands**: Includes `/mode`, `/posture`, `/preview-request`, `/receipts`, `/turn`, `/restore`, `/undo`, `/models`, `/context`, `/prompt`, `/tools`, `/vfs`, `/diff`, `/commit`, `/skills`, `/rewind`, `/doctor`, `/computer`, `/browser`, `/vision`, `/spatial`, and `/legion`.
 
+### Command Cheat Sheet by Goal (No Memorization Required)
+
+| What You Want to Do | Command / Shortcut | Plain-English Analogy |
+| :--- | :--- | :--- |
+| **Change autonomy level** | `Shift+Tab` or `/posture` | Turn the 5-stop safety dimmer switch. |
+| **See what the model sees** | `/context`, `/prompt`, `/preview-request` | Open the cockpit dashboard before takeoff. |
+| **Review staged edits safely** | `/vfs`, `/diff`, `/commit` | Read your pencil draft before inking it to disk. |
+| **Undo a mistake instantly** | `/undo`, `/restore`, `/rewind` | Hit the time-machine rewind button. |
+| **Switch models or providers** | `/models` | Swap engines mid-flight without losing context. |
+| **Run parallel / GUI agents** | `/legion`, `/spatial`, `/computer`, `/browser` | Dispatch the specialist crew or gloved hands. |
+| **Check architectural health** | `/doctor` | Run a full diagnostic scan on the airframe. |
+
 ---
 
-## Hardening & Reliability Guarantees (Waves 4–21)
+## Hardening & Reliability Guarantees (Waves 4–25)
+
+Think of **HEAV3NS-MICRO**'s security as **five concentric airport-security & bank-vault rings** — a single bypass attempt has to clear every independent ring before touching your machine or credentials:
+
+```mermaid
+flowchart LR
+  R1["Ring 1: Input & URL Preflight (SSRF · file:// · Trojan Unicode · 64KiB Cap)"] --> R2["Ring 2: Posture & Constitution Gate (5-Stop Shift+Tab · CUA Lease/Epoch)"]
+  R2 --> R3["Ring 3: Sandbox & Credential Guard (Seatbelt · ShellGuard · Env Scrub)"]
+  R3 --> R4["Ring 4: Workspace Containment (16-Hop Symlink Check · Bounded I/O)"]
+  R4 --> R5["Ring 5: Atomic Vault & Rollback (sync_all · CAS Pre-Load · Journal Discard)"]
+```
 
 - **Workspace, Sandbox & Credential Isolation**: Dangling-symlink resolution (`canonicalize_best_effort` 16-hop `read_link`), lexical `..` resolution in `classify_sensitive_path`, parent-symlink & `..` rejection in `SessionVfs::commit_all`, child-process credential env scrubbing (`SafetyPolicy::is_sensitive_env_var`), `@` userinfo rejection in `is_safe_oauth_url`, `USER_CONFIG_IO_LOCK` config serialization, and hardened `inspect_command_security` / `ShellCommandGuard` (16-level `sh -c` cap, `rm` normalization, bundled `curl` short-flag & credential-pipe `Deny`, `sort -o`/`rg --pre`/`git -C ... -c` filtering, `&>`/`&>>` heredocs, POSIX `>&1`/`>&2`/`>&-` handling, and macOS Seatbelt).
 - **Durable Persistence, Bounded I/O & Parser Safety**: `sync_all()` + temp-rename atomic writes across CAS blobs, manifests, and filesystem tools; fail-closed `WorkspaceSnapshotCas` GC and `rewind_to_snapshot` receipt/CAS alignment; `SessionCompactor` active-turn `[User, Assistant(tc), Tool]` preservation; `ProviderChain` `:model` override retention; bounded `is_file()` disk reads; $O(N)$ SSE/JSON stream parsing, UTF-8 char-boundary pagination, and overflow-safe geometry/CUA checks.
@@ -141,6 +359,20 @@ node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --doctor
 # 5. Run documentation guardrails check
 node bin/docs-check.mjs
 ```
+
+---
+
+## "Wait — Why Did the Cockpit Stop Me?" (Guardrail Decoder)
+
+When **HEAV3NS-MICRO** refuses an action, it is almost always protecting you from a silent hazard. Use this quick decoder:
+
+| What Happened | Everyday Analogy | Why It Stopped | 1-Step Fix |
+| :--- | :--- | :--- | :--- |
+| **Write/command blocked in `Plan`** | *Museum "Look, Don't Touch" mode* | `ExecutionPosture::Plan` forbids all disk & shell mutations. | Press `Shift+Tab` to cycle to `AcceptEdits` or `AutoReview`. |
+| **`.env` / `~/.aws` / `~/.ssh` refused** | *Sealed biohazard container* | `ModelContext` credential guard blocks secret files from entering LLM context (even via `cat` or `file://`). | Inspect secrets yourself locally, or pass non-sensitive mock fixtures. |
+| **Edit rejected ("stale read")** | *Editing an outdated Google Doc tab* | `FileReadTracker` detected disk changes since the agent last read the file. | Let the agent re-read the file, or run `/undo` if unexpected. |
+| **Symlink / `..` path refused** | *Locked emergency exit outside building* | Path resolves outside `workspace_root` or exceeds the 16-hop symlink ceiling. | Keep target files inside the active workspace root. |
+| **GUI click returned `SuspectedNoop`** | *Pushing a pull-only door* | `Wrapper B` saw no focus/value/frame change after clicking (e.g., modal occlusion or disabled button). | Inspect the returned `AssuranceReceipt` or enable the prerequisite control. |
 
 ---
 
