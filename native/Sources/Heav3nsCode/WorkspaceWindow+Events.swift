@@ -5,7 +5,8 @@ import Foundation
 extension WorkspaceWindow {
     func configureClient() {
         viewportBranchGeneration += 1; viewportBranchCheckPending = false; viewportBranchCheckFailureShown = false; sideQuestionPending = nil
-        postureGeneration &+= 1; undoPending = false
+        navigationGeneration += 1; inspectionGeneration += 1; conversationGeneration += 1; conversationSwitchGeneration += 1; walkthroughLoadGeneration += 1
+        postureGeneration &+= 1; undoPending = false; checkingSubmission = false; pendingRequest = nil
         let source = client
         projectTaskRevision = -1; projectTaskDisplayedRevision = -1; projectTaskOffset = 0; projectTaskPreviousOffsets = []; projectTaskMovePending = false; projectTasksLoading = false; projectTasksRefreshPending = false
         client.onNotice = { [weak self, weak source] message in
@@ -258,8 +259,10 @@ extension WorkspaceWindow {
         memoryWindow = ConversationMemoryWindow(folder: folder, conversation: conversation, title: chatTitle.stringValue,
             request: { [weak self] method, params, completion in
                 guard let self else { completion(.failure(BridgeError.message("Workspace closed."))); return }
-                self.client.request(method, params: params) { [weak self] result in
-                    if case .failure(let error) = result, error.localizedDescription.contains("MEMORY_SAVE_UNCERTAIN") { self?.client.closeInput() }
+                let source = self.client
+                source.request(method, params: params) { [weak self, weak source] result in
+                    if case .failure(let error) = result, error.localizedDescription.contains("MEMORY_SAVE_UNCERTAIN"),
+                       let self, let source, self.client === source { source.closeInput() }
                     completion(result)
                 }
             }, available: { [weak self] in self?.canShowMemory == true && self?.currentConversation == conversation },
@@ -431,7 +434,9 @@ extension WorkspaceWindow {
     var probeLayout: [String: Any] {
         let bounds = NSRect(origin: .zero, size: window?.frame.size ?? .zero)
         var controls = [String: Any]()
-        for (name, view) in [("transcript", transcriptScroll as NSView), ("jumpLatest", jumpButton), ("model", modelButton), ("reasoning", reasoningPicker), ("composer", composer.enclosingScrollView! as NSView), ("send", sendButton), ("queue", queueButton), ("stop", stopButton), ("reviewApproval", reviewApprovalButton), ("deny", denyButton), ("inspection", inspectionScroll), ("inspectionBack", inspectionBack), ("inspectionForward", inspectionForward), ("inspectionFind", inspectionFind), ("recordedOutput", recordedOutput), ("relatedEvidence", relatedEvidence)] {
+        var probeViews: [(String, NSView)] = [("transcript", transcriptScroll as NSView), ("jumpLatest", jumpButton), ("model", modelButton), ("reasoning", reasoningPicker), ("send", sendButton), ("queue", queueButton), ("stop", stopButton), ("reviewApproval", reviewApprovalButton), ("deny", denyButton), ("inspection", inspectionScroll), ("inspectionBack", inspectionBack), ("inspectionForward", inspectionForward), ("inspectionFind", inspectionFind), ("recordedOutput", recordedOutput), ("relatedEvidence", relatedEvidence)]
+        if let composerScroll = composer.enclosingScrollView { probeViews.append(("composer", composerScroll)) }
+        for (name, view) in probeViews {
             if !view.isHiddenOrHasHiddenAncestor {
                 let frame = view.convert(view.bounds, to: nil as NSView?)
                 controls[name] = ["visibleWithinWindow": bounds.contains(frame), "x": frame.minX, "y": frame.minY, "width": frame.width, "height": frame.height]

@@ -7,7 +7,7 @@ use serde::de::IgnoredAny;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-fn classify_stream_or_response_error(chunk: &Value, ev_type: &str, raw_body: &str) -> Option<ProviderError> {
+pub(crate) fn classify_stream_or_response_error(chunk: &Value, ev_type: &str, raw_body: &str) -> Option<ProviderError> {
     let err_obj = chunk
         .get("error")
         .filter(|v| !v.is_null())
@@ -514,38 +514,24 @@ impl IncrementalSseAggregator {
             return Ok(());
         }
 
-        // 3. Google Gemini SSE (`candidates[0].content.parts`)
-        if let Some(parts) = chunk
-            .get("candidates")
-            .and_then(Value::as_array)
-            .and_then(|a| a.first())
-            .and_then(|c| c.get("content"))
-            .and_then(|c| c.get("parts"))
-            .and_then(Value::as_array)
-        {
-            for part in parts {
-                let is_thought = part.get("thought").and_then(Value::as_bool) == Some(true);
-                if let Some(t) = part.get("text").and_then(Value::as_str) {
-                    if is_thought {
-                        self.thought_fallback.push_str(t);
-                    } else {
-                        self.text_acc.push_str(t);
+        // 3. Google Gemini SSE (`candidates[0]`)
+        if let Some(cand) = chunk.get("candidates").and_then(Value::as_array).and_then(|a| a.first()) {
+            if let Some(parts) = cand.pointer("/content/parts").and_then(Value::as_array) {
+                for part in parts {
+                    let is_thought = part.get("thought").and_then(Value::as_bool) == Some(true);
+                    if let Some(t) = part.get("text").and_then(Value::as_str) {
+                        if is_thought { self.thought_fallback.push_str(t); } else { self.text_acc.push_str(t); }
                     }
-                }
-                if let Some(fc) = part.get("functionCall") {
-                    let name = fc.get("name").and_then(Value::as_str).unwrap_or("").to_string();
-                    let args = fc.get("args").map(|v| v.to_string()).unwrap_or_else(|| "{}".to_string());
-                    let sig = part
-                        .get("thoughtSignature")
-                        .or_else(|| part.get("thought_signature"))
-                        .or_else(|| fc.get("thoughtSignature"))
-                        .or_else(|| fc.get("thought_signature"))
-                        .and_then(Value::as_str)
-                        .filter(|s| !s.is_empty())
-                        .map(String::from);
-                    if !name.is_empty() {
-                        let next_idx = self.tool_map.len();
-                        self.tool_map.insert(next_idx, (format!("gemini_call_{}", next_idx + 1), name, args, sig));
+                    if let Some(fc) = part.get("functionCall") {
+                        let name = fc.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+                        let args = fc.get("args").map(|v| v.to_string()).unwrap_or_else(|| "{}".to_string());
+                        let sig = part.get("thoughtSignature").or_else(|| part.get("thought_signature"))
+                            .or_else(|| fc.get("thoughtSignature")).or_else(|| fc.get("thought_signature"))
+                            .and_then(Value::as_str).filter(|s| !s.is_empty()).map(String::from);
+                        if !name.is_empty() {
+                            let next_idx = self.tool_map.len();
+                            self.tool_map.insert(next_idx, (format!("gemini_call_{}", next_idx + 1), name, args, sig));
+                        }
                     }
                 }
             }
@@ -557,16 +543,9 @@ impl IncrementalSseAggregator {
                     is_exact: true,
                 });
             }
-            return Ok(());
-        } else if let Some(cand) = chunk.get("candidates").and_then(Value::as_array).and_then(|a| a.first()) {
             if let Some(reason) = cand.get("finishReason").and_then(Value::as_str) {
                 if !matches!(reason, "STOP" | "MAX_TOKENS") {
-                    return Err(ProviderError::HttpStatus {
-                        status: 200,
-                        body: format!("Gemini candidate blocked: finishReason = {reason}"),
-                        retryable: false,
-                        retry_after_ms: None,
-                    });
+                    return Err(ProviderError::HttpStatus { status: 200, body: format!("Gemini candidate blocked: finishReason = {reason}"), retryable: false, retry_after_ms: None });
                 }
             }
             return Ok(());

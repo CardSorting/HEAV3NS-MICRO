@@ -3,7 +3,14 @@ import AppKit
 import WebKit
 
 final class NativeAppPreviewView: NSStackView, WKNavigationDelegate {
-    func dispose() { clear() }
+    func dispose() {
+        webView.stopLoading()
+        webView.navigationDelegate = nil
+        onOpenExternal = nil
+        currentURL = nil
+        urlLabel.stringValue = ""
+        urlLabel.toolTip = ""
+    }
     let webView: WKWebView
     private let urlLabel = JourneyStyle.label("", size: 11, secondary: true)
     private lazy var reloadButton = JourneyButton("Reload", symbol: "arrow.clockwise") { [weak self] in self?.reload() }
@@ -212,7 +219,8 @@ final class ProjectRunView: NSStackView, NSTextFieldDelegate {
     func connect(_ client: RuntimeClient) {
         self.client = client; generation += 1; busy = false; polling = false; failure = nil
         pendingAction = nil; statusKnown = false; discoveryKnown = false; statusFailure = nil; notice = nil; projectRevision = -1
-        if visible { load() } else if running { poll() }
+        current = [:]
+        if visible { load() }
         updateTimer(); updateControls()
     }
     private func updateTimer() {
@@ -227,6 +235,9 @@ final class ProjectRunView: NSStackView, NSTextFieldDelegate {
     func dispose() {
         timer?.invalidate(); timer = nil
         visible = false; generation += 1
+        current = [:]; client = nil
+        inAppPreview.dispose()
+        onState = nil; onRepair = nil; onShowRepair = nil
     }
     private func load(select requestedID: String? = nil, notice: String? = nil) {
         guard connected, !busy else { return }

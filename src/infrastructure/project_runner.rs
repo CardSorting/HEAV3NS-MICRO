@@ -48,6 +48,15 @@ pub struct ProjectRunner {
     inner: Arc<Mutex<ProjectRunState>>,
 }
 
+impl Drop for ProjectRunner {
+    fn drop(&mut self) {
+        if let Some(pid) = lock_unpoison(&self.inner).child_pid.take() {
+            signal_process_group(pid, "-TERM");
+            signal_process_group(pid, "-KILL");
+        }
+    }
+}
+
 impl ProjectRunner {
     pub fn create_runner() -> Self {
         Self::default()
@@ -203,6 +212,7 @@ impl IProjectRunner for ProjectRunner {
         let inner_wait = Arc::clone(&self.inner);
         tokio::spawn(async move {
             let status = child.wait().await;
+            lock_unpoison(&inner_wait).child_pid = None;
             if let Some(h) = out_handle {
                 let _ = h.await;
             }
@@ -211,7 +221,6 @@ impl IProjectRunner for ProjectRunner {
             }
             let mut st = lock_unpoison(&inner_wait);
             let was_stopping = st.state == "stopping";
-            st.child_pid = None;
             st.state = if was_stopping {
                 "stopped".to_string()
             } else if status.as_ref().is_ok_and(|s| s.success()) {

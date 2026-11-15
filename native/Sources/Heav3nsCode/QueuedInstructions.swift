@@ -108,7 +108,7 @@ final class QueuedInstructionEditor: NSWindowController, NSWindowDelegate, NSTex
         updateAvailability()
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) unavailable") }
-    func present(for parent: NSWindow) { parent.beginSheet(window!); window?.makeFirstResponder(text) }
+    func present(for parent: NSWindow) { guard let window else { return }; parent.beginSheet(window); window.makeFirstResponder(text) }
     func textDidChange(_ notification: Notification) {
         saveFailure = nil; updateAvailability()
     }
@@ -139,7 +139,8 @@ final class QueuedInstructionEditor: NSWindowController, NSWindowDelegate, NSTex
             }
         }
     }
-    @objc private func dismiss() { guard !saving else { return }; if let window, let parent = window.sheetParent { parent.endSheet(window); window.orderOut(nil) } }
+    @objc private func dismiss() { performDismiss(force: false) }
+    private func performDismiss(force: Bool) { guard force || !saving else { return }; if let window, let parent = window.sheetParent { parent.endSheet(window); window.orderOut(nil) } }
     func windowShouldClose(_ sender: NSWindow) -> Bool { dismiss(); return false }
-    func dispose() { dismiss() }
+    func dispose() { performDismiss(force: true) }
 }

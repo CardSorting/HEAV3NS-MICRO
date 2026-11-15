@@ -166,7 +166,7 @@ pub fn compute_streaming_arguments_delta(accumulated: &str, incoming: &str) -> (
     if incoming.starts_with(accumulated) && incoming.len() > accumulated.len() {
         return (incoming[accumulated.len()..].to_string(), incoming.to_string());
     }
-    if accumulated.len() >= 2 {
+    if accumulated.len() >= 2 && accumulated.trim_end().ends_with('}') {
         let (ex_roots, ex_rem) = extract_json_roots(accumulated);
         if ex_roots.len() == 1 && ex_rem.trim().is_empty() && ex_roots[0].is_object() {
             let (in_roots, in_rem) = extract_json_roots(incoming);

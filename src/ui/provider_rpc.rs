@@ -47,6 +47,8 @@ pub fn handle_account_mutation_rpc(method: &str, params: &Value) -> Result<Value
 }
 
 /// Handles `<provider>.{status,saveKey,clearKey}` and `provider.{status,saveKey,clearKey}` RPCs across all 43+ providers.
+pub(crate) static USER_CONFIG_IO_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub fn handle_provider_credential_rpc(
     method: &str,
     params: &Value,
@@ -63,9 +65,15 @@ pub fn handle_provider_credential_rpc(
         raw_prefix
     };
     let desc = lookup_provider_descriptor(target_raw);
+    if desc.is_none() && (target_raw.is_empty() || target_raw.len() > 64 || !target_raw.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))) {
+        return json!({ "error": "Invalid provider identifier." });
+    }
     let slot = desc
         .map(|d| d.secret_slot.to_string())
         .unwrap_or_else(|| canonicalize_provider_id(target_raw));
+    if slot.is_empty() || slot.len() > 64 {
+        return json!({ "error": "Invalid provider slot." });
+    }
     let canon_id = desc
         .map(|d| d.id.to_string())
         .unwrap_or_else(|| slot.clone());
@@ -81,6 +89,7 @@ pub fn handle_provider_credential_rpc(
         keys.remove(raw_prefix);
         keys.remove(&canon_id);
         if persist {
+            let _cfg_guard = USER_CONFIG_IO_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(mut ucfg) = Heav3nsUserConfig::load() {
                 ucfg.set_provider_key(&slot, String::new());
                 let cfg_matches = ucfg.provider.as_deref().is_some_and(|p| {
@@ -104,6 +113,9 @@ pub fn handle_provider_credential_rpc(
         "saveKey" => {
             if let Some(raw_k) = params.get("key").or_else(|| params.get("apiKey")).and_then(Value::as_str) {
                 let clean = raw_k.trim().to_string();
+                if clean.len() > 4096 {
+                    return json!({ "error": "API key exceeds 4096-byte safety limit." });
+                }
                 if clean.is_empty() {
                     apply_clear(provider_keys);
                 } else {
@@ -112,6 +124,7 @@ pub fn handle_provider_credential_rpc(
                         provider_keys.insert(raw_prefix.to_string(), clean.clone());
                     }
                     if persist {
+                        let _cfg_guard = USER_CONFIG_IO_LOCK.lock().unwrap_or_else(|e| e.into_inner());
                         let mut ucfg = Heav3nsUserConfig::load().unwrap_or_default();
                         ucfg.set_provider_key(&slot, clean.clone());
                         let _ = ucfg.save();

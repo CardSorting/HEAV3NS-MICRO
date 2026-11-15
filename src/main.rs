@@ -46,8 +46,8 @@ async fn build_engine(opts: &CliOptions) -> (Arc<AgentEngine>, AgentConfig) {
         user_cfg.as_ref().and_then(|c| c.provider.as_deref()),
         user_cfg.as_ref().and_then(|c| c.endpoint.as_deref()),
     ) {
-        let slot = lookup_provider_descriptor(p).map(|d| d.secret_slot).unwrap_or(p);
-        saved_endpoints.entry(slot.to_string()).or_insert_with(|| ep.to_string());
+        let canonical_id = lookup_provider_descriptor(p).map(|d| d.id).unwrap_or(p);
+        saved_endpoints.entry(canonical_id.to_string()).or_insert_with(|| ep.to_string());
     }
 
     let explicit_provider = opts
@@ -302,7 +302,7 @@ async fn main() {
             println!("heav3ns-micro {}", env!("CARGO_PKG_VERSION"));
         }
         RunMode::ConfigShow => match Heav3nsUserConfig::load() {
-            Some(cfg) => println!("{}", serde_json::to_string_pretty(&cfg).unwrap_or_default()),
+            Some(cfg) => println!("{}", serde_json::to_string_pretty(&cfg.redacted_for_display()).unwrap_or_default()),
             None => println!("No configuration file found at {}", Heav3nsUserConfig::config_path().display()),
         },
         RunMode::ConfigSet { key, value } => {
@@ -311,8 +311,8 @@ async fn main() {
             if let Some(prov_slot) = low.strip_prefix("key.") {
                 cfg.set_provider_key(prov_slot, value);
             } else if let Some(prov_slot) = low.strip_prefix("endpoint.") {
-                let slot = lookup_provider_descriptor(prov_slot).map(|d| d.secret_slot).unwrap_or(prov_slot);
-                cfg.provider_endpoints.insert(slot.to_string(), value);
+                let canonical_id = lookup_provider_descriptor(prov_slot).map(|d| d.id).unwrap_or(prov_slot);
+                cfg.provider_endpoints.insert(canonical_id.to_string(), value);
             } else {
                 match low.as_str() {
                     "provider" => {

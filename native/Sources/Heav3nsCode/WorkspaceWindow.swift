@@ -28,8 +28,8 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
     let attachmentBar = AttachmentTokenBar()
     let jumpBar = NSPathControl()
     let toolbarHistory = NSSegmentedControl(images: [
-        NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Back in history")!,
-        NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Forward in history")!
+        NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Back in history") ?? NSImage(),
+        NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Forward in history") ?? NSImage()
     ], trackingMode: .momentary, target: nil, action: nil)
     let transcript = NSTableView()
     let transcriptScroll = TranscriptScrollView()
@@ -254,6 +254,12 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
 
     /// Releases timers, observers, and auxiliary windows to ensure clean termination (`SPI-110`).
     func dispose() {
+        inspectionGeneration += 1
+        navigationGeneration += 1
+        conversationGeneration += 1
+        conversationSwitchGeneration += 1
+        walkthroughLoadGeneration += 1
+        viewportBranchGeneration += 1
         viewportBranchTimer?.invalidate(); viewportBranchTimer = nil
         viewportSaveTimer?.invalidate(); viewportSaveTimer = nil
         workspaceRefreshTimer?.invalidate(); workspaceRefreshTimer = nil
@@ -667,8 +673,9 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         let short = (window?.frame.height ?? 800) < 640
         navigation.previewsSelection = !short
         leftSidebar.isHidden = narrow ? !compactSidebarRevealed : !sidebarPreferred
-        conversations.isHidden = leftSidebar.isHidden || navigatorTabs.selectedSegment != 0
-        navigation.isHidden = leftSidebar.isHidden || navigatorTabs.selectedSegment == 0
+        let showNav = navigatorTabs.selectedSegment != 0 || navigation.destination == .sessions
+        conversations.isHidden = leftSidebar.isHidden || showNav
+        navigation.isHidden = leftSidebar.isHidden || !showNav
         surfaces.isHidden = !narrow
         contextPanel.isHidden = !showingInspector || (narrow && (surfaces.selectedSegment == 0 || compactSidebarRevealed))
         contextSeparator.isHidden = contextPanel.isHidden
@@ -733,9 +740,10 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
     }
 
     func windowWillClose(_ notification: Notification) {
-        dispose()
+        closing = true
         saveViewport()
         saveDraft()
+        dispose()
         client.closeInput()
         onClosed?()
     }
@@ -748,6 +756,7 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard rows.indices.contains(row) else { return nil }
         let value = rows[row]
         return TranscriptMessageCell(value, expanded: expandedActions.contains(value.id), toggle: { [weak self] in
             guard let self else { return }

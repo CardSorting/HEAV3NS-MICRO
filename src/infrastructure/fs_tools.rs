@@ -362,17 +362,21 @@ pub fn dispatch_fs_tool(
             let mut sha256_hex = None;
             let mut lines_count = None;
             if meta.is_file() && meta.len() <= 10 * 1024 * 1024 {
-                if let Ok(bytes) = fs::read(&resolved) {
-                    let mut hasher = Sha256::new();
-                    hasher.update(&bytes);
-                    sha256_hex = Some(format!("{:x}", hasher.finalize()));
-                    lines_count = Some(if bytes.is_empty() {
-                        0
-                    } else {
-                        let mut c = bytes.iter().filter(|&&b| b == b'\n').count();
-                        if bytes.last() != Some(&b'\n') { c += 1; }
-                        c
-                    });
+                if let Ok(file) = fs::File::open(&resolved) {
+                    use std::io::Read;
+                    let mut bytes = Vec::new();
+                    if file.take(10 * 1024 * 1024 + 1).read_to_end(&mut bytes).is_ok() && bytes.len() <= 10 * 1024 * 1024 {
+                        let mut hasher = Sha256::new();
+                        hasher.update(&bytes);
+                        sha256_hex = Some(format!("{:x}", hasher.finalize()));
+                        lines_count = Some(if bytes.is_empty() {
+                            0
+                        } else {
+                            let mut c = bytes.iter().filter(|&&b| b == b'\n').count();
+                            if bytes.last() != Some(&b'\n') { c += 1; }
+                            c
+                        });
+                    }
                 }
             }
             Ok((

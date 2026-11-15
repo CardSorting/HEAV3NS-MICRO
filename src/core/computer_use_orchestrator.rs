@@ -50,7 +50,7 @@ impl ComputerUseOrchestrator {
 
     /// Captures the complete multi-modal environmental state from the active virtual display.
     pub fn observe(&self) -> EnvironmentalObservation {
-        let disp = self.display.lock().unwrap();
+        let disp = self.display.lock().unwrap_or_else(|e| e.into_inner());
         let active_win = disp.windows.iter().find(|w| w.id == disp.active_window_id).or_else(|| disp.windows.first());
         let (win_id, app, title, mut elements) = match active_win {
             Some(w) => (w.id.clone(), w.app.clone(), w.title.clone(), w.elements.clone()),
@@ -71,7 +71,7 @@ impl ComputerUseOrchestrator {
             }
         }
 
-        let layout_epoch = self.spatial_engine.mediator.lock().unwrap().layout_epoch;
+        let layout_epoch = self.spatial_engine.mediator.lock().unwrap_or_else(|e| e.into_inner()).layout_epoch;
         let mut obs = EnvironmentalObservation::new(win_id, app, title, disp.frame_seq, layout_epoch);
         obs.cursor = disp.cursor;
         obs.elements = elements.clone();
@@ -164,9 +164,9 @@ impl ComputerUseOrchestrator {
                     let r = el.role.to_ascii_lowercase();
                     let is_modal_role = r == "dialog" || r == "alertdialog" || r == "modal";
                     let is_full_bleed_bg = el.bounds[0] == 0 && el.bounds[1] == 0 && el.bounds[2] >= disp.width as i32 && el.bounds[3] >= disp.height as i32;
-                    let cx = el.bounds[0] + (el.bounds[2] / 2);
-                    let cy = el.bounds[1] + (el.bounds[3] / 2);
-                    let inside_bounds = !is_full_bleed_bg && cx >= mx && cx <= (mx + mw) && cy >= my && cy <= (my + mh);
+                    let cx = el.bounds[0].saturating_add(el.bounds[2] / 2);
+                    let cy = el.bounds[1].saturating_add(el.bounds[3] / 2);
+                    let inside_bounds = !is_full_bleed_bg && cx >= mx && cx <= mx.saturating_add(mw) && cy >= my && cy <= my.saturating_add(mh);
                     if (is_modal_role || inside_bounds) && !modal_region.element_ids.contains(&el.id) {
                         modal_region.element_ids.push(el.id.clone());
                     }
@@ -333,15 +333,17 @@ impl ComputerUseOrchestrator {
             }
         }
 
+        let effective_key = if modal_intercepted { "key:Escape".to_string() } else { target_key.clone() };
+
         // Check loop breaker: prevent repeated identical failures
         let current_fails = {
-            let fc = self.failure_counts.lock().unwrap();
-            fc.get(&target_key).copied().unwrap_or(0)
+            let fc = self.failure_counts.lock().unwrap_or_else(|e| e.into_inner());
+            fc.get(&effective_key).copied().unwrap_or(0)
         };
         if current_fails >= 3 {
             return Err(format!(
                 "Loop breaker engaged: action '{}' on target '{}' failed {} consecutive times. Breaking execution loop to prevent redundant failure.",
-                contract.action_name, target_key, current_fails
+                contract.action_name, effective_key, current_fails
             ));
         }
 
@@ -400,7 +402,7 @@ impl ComputerUseOrchestrator {
 
         // Save internal checkpoint epoch for Rewind reconciliation
         {
-            let mut ckpt = self.last_checkpoint_epoch.lock().unwrap();
+            let mut ckpt = self.last_checkpoint_epoch.lock().unwrap_or_else(|e| e.into_inner());
             *ckpt = before_obs.layout_epoch;
         }
 
@@ -409,15 +411,15 @@ impl ComputerUseOrchestrator {
             Ok(res) => res,
             Err(err) => {
                 if let Ok(mut kstore) = self.knowledge_store.lock() {
-                    kstore.record_outcome(&target_key, &before_obs.app_name, false, before_obs.layout_epoch);
+                    kstore.record_outcome(&effective_key, &before_obs.app_name, false, before_obs.layout_epoch);
                 }
                 if let Ok(mut fc) = self.failure_counts.lock() {
-                    if !fc.contains_key(&target_key) && fc.len() >= 128 {
+                    if !fc.contains_key(&effective_key) && fc.len() >= 128 {
                         if let Some(victim) = fc.iter().min_by_key(|(_, v)| *v).map(|(k, _)| k.clone()) {
                             fc.remove(&victim);
                         }
                     }
-                    *fc.entry(target_key.clone()).or_insert(0) += 1;
+                    *fc.entry(effective_key.clone()).or_insert(0) += 1;
                 }
                 return Err(err);
             }
@@ -443,10 +445,10 @@ impl ComputerUseOrchestrator {
 
         // Step 9: LEARN (Feedback & Durable Knowledge Update)
         {
-            let mut kstore = self.knowledge_store.lock().unwrap();
+            let mut kstore = self.knowledge_store.lock().unwrap_or_else(|e| e.into_inner());
             kstore.set_epoch(after_obs.layout_epoch);
             if success && !is_noop {
-                kstore.record_outcome(&target_key, &after_obs.app_name, true, after_obs.layout_epoch);
+                kstore.record_outcome(&effective_key, &after_obs.app_name, true, after_obs.layout_epoch);
                 let step_desc = format!("{}:{}", contract.action_name, target_key);
                 if let Ok(mut steps) = self.session_steps.lock() {
                     if modal_intercepted {
@@ -456,7 +458,7 @@ impl ComputerUseOrchestrator {
                         steps.push(format!("click:{target_key}"));
                     }
                     steps.push(step_desc);
-                    if steps.len() > 32 {
+                    while steps.len() > 32 {
                         steps.remove(0);
                     }
                     if auto_focused || modal_intercepted {
@@ -478,25 +480,25 @@ impl ComputerUseOrchestrator {
                         ));
                     }
                 }
-                let mut fc = self.failure_counts.lock().unwrap();
-                fc.remove(&target_key);
+                let mut fc = self.failure_counts.lock().unwrap_or_else(|e| e.into_inner());
+                fc.remove(&effective_key);
             } else {
-                kstore.record_outcome(&target_key, &after_obs.app_name, false, after_obs.layout_epoch);
-                let mut fc = self.failure_counts.lock().unwrap();
-                if !fc.contains_key(&target_key) && fc.len() >= 128 {
+                kstore.record_outcome(&effective_key, &after_obs.app_name, false, after_obs.layout_epoch);
+                let mut fc = self.failure_counts.lock().unwrap_or_else(|e| e.into_inner());
+                if !fc.contains_key(&effective_key) && fc.len() >= 128 {
                     if let Some(victim) = fc.iter().min_by_key(|(_, v)| *v).map(|(k, _)| k.clone()) {
                         fc.remove(&victim);
                     }
                 }
-                let c = fc.entry(target_key.clone()).or_insert(0);
+                let c = fc.entry(effective_key.clone()).or_insert(0);
                 *c += 1;
             }
         }
 
         // Environmental state reconciliation check
         let reconciliation = {
-            let kstore = self.knowledge_store.lock().unwrap();
-            let ckpt = *self.last_checkpoint_epoch.lock().unwrap();
+            let kstore = self.knowledge_store.lock().unwrap_or_else(|e| e.into_inner());
+            let ckpt = *self.last_checkpoint_epoch.lock().unwrap_or_else(|e| e.into_inner());
             let expected_epoch = if success && !is_noop { after_obs.layout_epoch } else { ckpt };
             let hash_drift = before_obs.frame_hash != after_obs.frame_hash && !success;
             kstore.reconcile_state(expected_epoch, after_obs.layout_epoch, hash_drift)

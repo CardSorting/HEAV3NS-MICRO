@@ -157,8 +157,9 @@ extension WorkspaceWindow {
         guard client.isReady, !switchingConversation, !closing else { return }
         if runs.contains(where: { $0["id"] as? String == id }) { showWalkthrough(); walkthrough.selectRecordedRun(id); return }
         let conversation = currentConversation
-        client.request("history.read", params: ["run": id]) { [weak self] result in
-            guard let self, self.currentConversation == conversation, !self.switchingConversation else { return }
+        let source = client
+        source.request("history.read", params: ["run": id]) { [weak self, weak source] result in
+            guard let self, let source, self.client === source, !self.closing, self.currentConversation == conversation, !self.switchingConversation else { return }
             switch result {
             case .success(let data):
                 if let run = data["run"] as? [String: Any] { self.mergeRun(run); self.rebuildRows(); self.showWalkthrough(); self.walkthrough.selectRecordedRun(id) }
@@ -218,8 +219,9 @@ extension WorkspaceWindow {
     func reconcileSubmission() {
         guard client.isReady, !closing, !checkingSubmission, let uncertain = uncertainSubmission else { return }
         checkingSubmission = true; updateStatus()
-        client.request("task.lookup", params: ["request": uncertain.id]) { [weak self] result in
-            guard let self, self.uncertainSubmission?.id == uncertain.id else { return }
+        let source = client
+        source.request("task.lookup", params: ["request": uncertain.id]) { [weak self, weak source] result in
+            guard let self, let source, self.client === source, !self.closing, self.uncertainSubmission?.id == uncertain.id else { return }
             self.checkingSubmission = false
             switch result {
             case .success(let data):
@@ -431,8 +433,9 @@ extension WorkspaceWindow {
     func removeQueued(_ entry: QueuedInstruction) {
         guard client.isReady, !cancelRequested, !closing, !removingQueued.contains(entry.id) else { return }
         removingQueued.insert(entry.id); updateQueue()
-        client.request("task.cancel", params: ["run": entry.id, "ifQueued": true]) { [weak self] result in
-            guard let self else { return }
+        let source = client
+        source.request("task.cancel", params: ["run": entry.id, "ifQueued": true]) { [weak self, weak source] result in
+            guard let self, let source, self.client === source, !self.closing else { return }
             self.removingQueued.remove(entry.id)
             if case .failure(let error) = result { self.showNotice(error.localizedDescription) }
             self.updateQueue(); self.client.requestSnapshot()
@@ -519,7 +522,10 @@ extension WorkspaceWindow {
         guard client.isReady, client.capabilities.contains("checkpoints-v1"), !switchingConversation, let window, window.attachedSheet == nil else { return }
         quickOpen?.dismiss(restoreFocus: false)
         if let existing = checkpointWindow, existing.window?.isVisible == true { if let selected { existing.selectCheckpoint(selected) }; existing.window?.makeKeyAndOrderFront(nil); return }
-        checkpointWindow = CheckpointWindow(request: { [weak self] method, params, complete in self?.client.request(method, params: params, completion: complete) }, selected: selected, canRestore: { [weak self] in
+        checkpointWindow = CheckpointWindow(request: { [weak self] method, params, complete in
+            guard let self else { complete(.failure(BridgeError.message("Workspace closed."))); return }
+            self.client.request(method, params: params, completion: complete)
+        }, selected: selected, canRestore: { [weak self] in
             guard let self else { return false }; return self.canSwitchConversation && !self.projectRun.running
         }, restore: { [weak self] id, token, complete in self?.restoreCheckpoint(id, token: token, complete: complete) })
         checkpointWindow?.present(for: window)
@@ -529,14 +535,15 @@ extension WorkspaceWindow {
         guard canSwitchConversation, saveDraft() else { complete(.failure(BridgeError.message("Finish or stop LUMI before restoring. Your draft is preserved."))); return }
         switchingConversation = true; expectedConversation = nil
         navigationGeneration += 1; inspectionGeneration += 1; conversationGeneration += 1; walkthroughLoadGeneration += 1; updateStatus()
-        client.request("checkpoint.restore", params: ["id": id, "token": token]) { [weak self] result in
-            guard let self else { return }
+        let source = client
+        source.request("checkpoint.restore", params: ["id": id, "token": token]) { [weak self, weak source] result in
+            guard let self, let source, self.client === source, !self.closing else { return }
             switch result {
             case .failure(let error): self.switchingConversation = false; self.expectedConversation = nil; self.updateStatus(); complete(.failure(error))
             case .success(let data):
                 self.expectedConversation = data["conversation"] as? String
-                self.client.requestSnapshot(afterPending: true) { [weak self] in
-                    guard let self else { return }
+                source.requestSnapshot(afterPending: true) { [weak self, weak source] in
+                    guard let self, let source, self.client === source, !self.closing else { return }
                     guard self.currentConversation == self.expectedConversation else {
                         self.switchingConversation = false; self.expectedConversation = nil; self.updateStatus()
                         self.client.closeInput(); complete(.failure(BridgeError.message("Restore could not be confirmed. Reconnect before sending."))); return

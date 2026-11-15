@@ -7,8 +7,9 @@ extension WorkspaceWindow {
         guard client.isReady, client.capabilities.contains("conversations") else { return }
         conversationGeneration += 1; let generation = conversationGeneration
         let offset = next ? conversationOffset + 100 : 0
-        client.request("conversation.list", params: ["offset": offset]) { [weak self] result in
-            guard let self, generation == self.conversationGeneration else { return }
+        let source = client
+        source.request("conversation.list", params: ["offset": offset]) { [weak self, weak source] result in
+            guard let self, let source, self.client === source, !self.closing, generation == self.conversationGeneration else { return }
             switch result {
             case .success(let data):
                 let entries = (data["conversations"] as? [[String: Any]] ?? []).compactMap { value -> ConversationSummary? in
@@ -54,8 +55,9 @@ extension WorkspaceWindow {
         walkthroughLoadGeneration += 1; quickOpen?.dismiss()
         updateStatus()
         let switchGen = conversationSwitchGeneration
-        client.request(deleting ? "conversation.delete" : (id == nil ? "conversation.create" : "conversation.select"), params: id.map { ["id": $0] } ?? [:]) { [weak self] result in
-            guard let self, self.conversationSwitchGeneration == switchGen else { return }
+        let source = client
+        source.request(deleting ? "conversation.delete" : (id == nil ? "conversation.create" : "conversation.select"), params: id.map { ["id": $0] } ?? [:]) { [weak self, weak source] result in
+            guard let self, let source, self.client === source, !self.closing, self.conversationSwitchGeneration == switchGen else { return }
             switch result {
             case .success(let data):
                 if deleting, let id {
@@ -64,8 +66,8 @@ extension WorkspaceWindow {
                     self.savedDraftText = "\u{0}"
                 }
                 self.expectedConversation = data["conversation"] as? String
-                self.client.requestSnapshot(afterPending: true) { [weak self] in
-                    guard let self, self.conversationSwitchGeneration == switchGen else { return }
+                source.requestSnapshot(afterPending: true) { [weak self, weak source] in
+                    guard let self, let source, self.client === source, !self.closing, self.conversationSwitchGeneration == switchGen else { return }
                     guard self.currentConversation == self.expectedConversation else {
                         self.switchingConversation = false; self.expectedConversation = nil; self.updateStatus()
                         self.showNotice("The conversation could not be confirmed. Reconnect before sending.")
@@ -109,6 +111,11 @@ extension WorkspaceWindow {
     }
 
     func resetConversationInspection() {
+        saveViewport()
+        viewportSaveTimer?.invalidate(); viewportSaveTimer = nil
+        currentViewport = nil; viewportBranch = nil; viewportBranchGeneration += 1
+        binaryDocumentLoader?.cancel(); binaryDocumentLoader = nil
+        documentView.isHidden = true; inspectionScroll.isHidden = false
         layoutTimer?.invalidate(); layoutTimer = nil; needsRebuild = false
         navigationGeneration += 1; inspectionGeneration += 1
         workspaceRefreshTimer?.invalidate(); workspaceRefreshTimer = nil
@@ -169,6 +176,7 @@ extension WorkspaceWindow {
     @objc func switchNavigatorTab() {
         switch navigatorTabs.selectedSegment {
         case 0:
+            if navigation.destination == .sessions { navigation.select(.files) }
             conversations.isHidden = false
             navigation.isHidden = true
         case 1:
@@ -236,9 +244,10 @@ extension WorkspaceWindow {
         directory = path; navigationOffset = offset; navigationGeneration += 1
         nextNavigationPage = nil; previousNavigationPage = nil; navigationData = []
         let generation = navigationGeneration
+        let source = client
         navigation.loading("Loading folder…")
-        client.request("files.list", params: ["path": path, "offset": offset, "query": navigationQuery]) { [weak self] result in
-            guard let self, self.navigationGeneration == generation, self.navigation.destination == .files else { return }
+        source.request("files.list", params: ["path": path, "offset": offset, "query": navigationQuery]) { [weak self, weak source] result in
+            guard let self, let source, self.client === source, !self.closing, self.navigationGeneration == generation, self.navigation.destination == .files else { return }
             switch result {
             case .success(let data):
                 self.navigationData = (data["entries"] as? [[String: Any]] ?? []).map { entry in
@@ -262,8 +271,9 @@ extension WorkspaceWindow {
     func loadChanges() {
         navigationGeneration += 1; let generation = navigationGeneration; navigation.loading("Reading Git changes…")
         nextNavigationPage = nil; previousNavigationPage = nil; navigationData = []
-        client.request("changes.list") { [weak self] result in
-            guard let self, self.navigationGeneration == generation, self.navigation.destination == .changes else { return }
+        let source = client
+        source.request("changes.list") { [weak self, weak source] result in
+            guard let self, let source, self.client === source, !self.closing, self.navigationGeneration == generation, self.navigation.destination == .changes else { return }
             switch result {
             case .success(let data):
                 self.navigationData = (data["entries"] as? [[String: Any]] ?? []).map { entry in
@@ -281,8 +291,9 @@ extension WorkspaceWindow {
     func loadSessions(cursor: [String: Any]? = nil, trail: [[String: Any]] = []) {
         navigationGeneration += 1; let generation = navigationGeneration; navigation.loading("Loading recorded runs…")
         nextNavigationPage = nil; previousNavigationPage = nil; navigationData = []
-        client.request("history.list", params: cursor.map { ["cursor": $0] } ?? [:]) { [weak self] result in
-            guard let self, self.navigationGeneration == generation, self.navigation.destination == .sessions else { return }
+        let source = client
+        source.request("history.list", params: cursor.map { ["cursor": $0] } ?? [:]) { [weak self, weak source] result in
+            guard let self, let source, self.client === source, !self.closing, self.navigationGeneration == generation, self.navigation.destination == .sessions else { return }
             switch result {
             case .success(let data):
                 self.navigationData = (data["runs"] as? [[String: Any]] ?? []).reversed().map { run in

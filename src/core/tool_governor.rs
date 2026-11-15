@@ -97,20 +97,32 @@ impl FileReadTracker {
     pub fn reset_stamps(&mut self) {
         self.stamps.clear();
     }
+
+    pub fn is_disk_fresh(&self, path: &Path) -> bool {
+        let key = normalize_tracker_key(path);
+        let Some(stamp) = self.stamps.get(&key) else { return false };
+        let Ok(disk_bytes) = fs::read(&key) else { return false };
+        fnv1a_32(&disk_bytes) == stamp.fnv1a_hash && disk_bytes.len() as u64 == stamp.byte_len
+    }
 }
 
 pub(crate) fn normalize_tracker_key(path: &Path) -> PathBuf {
     if let Ok(c) = fs::canonicalize(path) {
-        c
-    } else if let (Some(parent), Some(file_name)) = (path.parent(), path.file_name()) {
-        if let Ok(c_parent) = fs::canonicalize(parent) {
-            c_parent.join(file_name)
-        } else {
-            path.to_path_buf()
-        }
-    } else {
-        path.to_path_buf()
+        return c;
     }
+    let mut cur = path;
+    let mut tail = Vec::new();
+    while let (Some(parent), Some(name)) = (cur.parent(), cur.file_name()) {
+        tail.push(name);
+        if let Ok(mut c) = fs::canonicalize(parent) {
+            for seg in tail.into_iter().rev() {
+                c.push(seg);
+            }
+            return c;
+        }
+        cur = parent;
+    }
+    path.to_path_buf()
 }
 
 /// Deterministic SHA-256 keyed in-memory read cache with path invalidation.

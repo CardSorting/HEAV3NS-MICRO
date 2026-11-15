@@ -204,6 +204,8 @@ impl ToolRegistry {
         }
     }
 
+    pub fn clear_turn_approval_gate(&self) { *lock_unpoison(&self.approval_gate) = None; }
+
     pub fn configure_turn_security(
         &self,
         posture: Option<ExecutionPosture>,
@@ -259,7 +261,7 @@ impl ToolRegistry {
 
     pub fn extract_target_resources_from_map(&self, canonical: &str, obj: &serde_json::Map<String, Value>, cwd: &Path) -> Vec<PathBuf> {
         let mut paths = Vec::new();
-        for key in ["path", "filePath", "file_path", "source", "target", "cwd", "file", "targetFile", "targetPath", "filename", "from", "to", "dest", "destination"] {
+        for key in ["path", "filePath", "file_path", "source", "sourcePath", "source_path", "src", "target", "target_file", "target_path", "cwd", "file", "targetFile", "targetPath", "filename", "from", "to", "dest", "destination", "inputPath", "outputPath", "directory", "dir", "subpath"] {
             if let Some(Value::String(s)) = obj.get(key) {
                 if !s.trim().is_empty() && !s.contains('\n') {
                     let p = crate::core::tool_governor::normalize_tracker_key(&resolve_workspace_path(cwd, s));
@@ -296,6 +298,7 @@ impl ToolRegistry {
         let (mut waves, mut current_wave, mut current_resources, mut current_has_mutations) =
             (Vec::new(), Vec::new(), HashSet::new(), false);
 
+        let overlaps = |cur: &HashSet<PathBuf>, res: &[PathBuf]| res.iter().any(|r| cur.iter().any(|cr| r == cr || r.starts_with(cr) || cr.starts_with(r)));
         for call in calls {
             let canonical = canonical_tool_name(&call.name);
             let is_mutating = self.get_spec(canonical).map(|s| s.is_mutating).unwrap_or(true);
@@ -306,7 +309,7 @@ impl ToolRegistry {
             let resources = self.extract_target_resources(call, cwd);
 
             if !is_mutating {
-                let conflict = current_has_mutations && (resources.is_empty() || resources.iter().any(|r| current_resources.contains(r)));
+                let conflict = current_has_mutations && (resources.is_empty() || overlaps(&current_resources, &resources));
                 if conflict || current_wave.len() >= self.max_concurrency {
                     if !current_wave.is_empty() {
                         waves.push(std::mem::take(&mut current_wave));
@@ -322,7 +325,7 @@ impl ToolRegistry {
                     current_resources.clear();
                 }
                 let isolate = is_global || resources.is_empty();
-                let conflict = isolate || resources.iter().any(|r| current_resources.contains(r));
+                let conflict = isolate || overlaps(&current_resources, &resources);
                 if conflict || current_wave.len() >= self.max_concurrency {
                     if !current_wave.is_empty() {
                         waves.push(std::mem::take(&mut current_wave));
@@ -488,13 +491,9 @@ impl ToolRegistry {
         if canonical == "apply_unified_diff" {
             if let Some(diff_text) = prepared_args.get("diff").or_else(|| prepared_args.get("patch")).and_then(Value::as_str) {
                 for op in crate::plumbing::fuzzy_patch::DeterministicPatchEngine::parse(diff_text) {
-                    if op.op_type != "add" {
-                        let resolved = resolve_workspace_path(cwd, &op.file_path);
-                        if let Err(stale_err) = lock_unpoison(&self.read_tracker)
-                            .verify_before_mutation(canonical, &resolved, posture)
-                        {
-                            return Self::failed_record(call, prepared_val, stale_err, None, started);
-                        }
+                    let resolved = resolve_workspace_path(cwd, &op.file_path);
+                    if let Err(stale_err) = lock_unpoison(&self.read_tracker).verify_before_mutation(canonical, &resolved, posture) {
+                        return Self::failed_record(call, prepared_val, stale_err, None, started);
                     }
                 }
             }
@@ -512,26 +511,27 @@ impl ToolRegistry {
             let key = ToolExecutionCache::compute_key(canonical, &prepared_args, cwd);
             if let Ok(mut c) = self.cache.lock() {
                 if let Some(cached_val) = c.lookup(&key) {
-                    if canonical == "view_file" {
-                        if let Some(p_str) = prepared_args.get("path").and_then(Value::as_str) {
-                            let full = prepared_args.get("startLine").is_none()
-                                && prepared_args.get("endLine").is_none()
-                                && prepared_args.get("contentOffset").is_none();
-                            lock_unpoison(&self.read_tracker)
-                                .record_disk_file(&resolve_workspace_path(cwd, p_str), full);
-                        }
+                    let disk_stale = canonical == "view_file"
+                        && prepared_args.get("path").and_then(Value::as_str).is_some_and(|p_str| {
+                            let resolved = crate::core::tool_governor::normalize_tracker_key(&resolve_workspace_path(cwd, p_str));
+                            if !lock_unpoison(&self.read_tracker).is_disk_fresh(&resolved) {
+                                c.invalidate_paths(&[resolved]);
+                                true
+                            } else { false }
+                        });
+                    if !disk_stale {
+                        return ToolExecutionRecord {
+                            name: call.name.clone(),
+                            call_id: Some(call.id.clone()),
+                            args: Some(prepared_val),
+                            output: cached_val,
+                            success: true,
+                            denied: None,
+                            output_limited: None,
+                            error: None,
+                            duration_ms: started.elapsed().as_millis() as u64,
+                        };
                     }
-                    return ToolExecutionRecord {
-                        name: call.name.clone(),
-                        call_id: Some(call.id.clone()),
-                        args: Some(prepared_val),
-                        output: cached_val,
-                        success: true,
-                        denied: None,
-                        output_limited: None,
-                        error: None,
-                        duration_ms: started.elapsed().as_millis() as u64,
-                    };
                 }
             }
             Some(key)

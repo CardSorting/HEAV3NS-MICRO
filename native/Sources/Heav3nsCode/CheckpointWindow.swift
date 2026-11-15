@@ -50,7 +50,9 @@ final class CheckpointWindow: NSWindowController, NSWindowDelegate, NSTableViewD
         let navigation = JourneyStyle.stack([latest, previous, next, NSView(), refresh], vertical: false, spacing: 8)
         let buttons = JourneyStyle.stack([copyRevision, NSView(), flag, preview], vertical: false, spacing: 8)
         let root = JourneyStyle.stack([heading, scope, search, filters, scroll, status, navigation, details, buttons], spacing: 10)
-        panel.contentView!.addSubview(root); JourneyStyle.pin(root, to: panel.contentView!, inset: 18)
+        if let content = panel.contentView {
+            content.addSubview(root); JourneyStyle.pin(root, to: content, inset: 18)
+        }
         for view in root.arrangedSubviews { view.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true }
         scroll.setContentHuggingPriority(.init(1), for: .vertical)
     }
@@ -189,11 +191,13 @@ final class CheckpointWindow: NSWindowController, NSWindowDelegate, NSTableViewD
     func windowShouldClose(_ sender: NSWindow) -> Bool { !busy }
     func tableViewSelectionDidChange(_ notification: Notification) { selectionChanged() }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard entries.indices.contains(row) else { return nil }
         let entry = entries[row], cell = NSTableCellView()
         let title = JourneyStyle.label(entry["label"] as? String ?? "Checkpoint", weight: .medium); title.maximumNumberOfLines = 1; title.lineBreakMode = .byTruncatingTail
         let date = Date(timeIntervalSince1970: (entry["createdAt"] as? Double ?? 0) / 1000).formatted(date: .abbreviated, time: .shortened)
         let label = JourneyStyle.label("\(Self.momentTitle(entry["moment"] as? String)) · \(date)", size: 11, secondary: true)
-        let icon = NSImageView(image: NSImage(systemSymbolName: entry["flagged"] as? Bool == true ? "flag.fill" : "clock.arrow.circlepath", accessibilityDescription: entry["flagged"] as? Bool == true ? "Flagged checkpoint" : "Checkpoint")!)
+        let iconImage = NSImage(systemSymbolName: entry["flagged"] as? Bool == true ? "flag.fill" : "clock.arrow.circlepath", accessibilityDescription: entry["flagged"] as? Bool == true ? "Flagged checkpoint" : "Checkpoint") ?? NSImage()
+        let icon = NSImageView(image: iconImage)
         icon.widthAnchor.constraint(equalToConstant: 18).isActive = true
         let text = JourneyStyle.stack([title, label], spacing: 3), content = JourneyStyle.stack([icon, text], vertical: false, spacing: 10)
         cell.addSubview(content); JourneyStyle.pin(content, to: cell, inset: 8)

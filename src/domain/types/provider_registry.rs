@@ -92,13 +92,16 @@ impl ProviderChain {
             if trimmed.is_empty() {
                 continue;
             }
-            let raw_prov = trimmed.split_once(':').map(|(p, _)| p).unwrap_or(trimmed);
+            let (raw_prov, model_override) = trimmed.split_once(':').map(|(p, m)| (p, Some(m.trim()))).unwrap_or((trimmed, None));
             if is_retired_provider(raw_prov) {
                 continue;
             }
             let canon = canonicalize_provider_id(raw_prov);
-            if !providers.iter().any(|existing| existing == &canon) {
-                providers.push(canon);
+            if !providers.iter().any(|existing| existing.split(':').next().unwrap_or(existing) == canon) {
+                providers.push(match model_override {
+                    Some(m) if !m.is_empty() => format!("{canon}:{m}"),
+                    _ => canon,
+                });
             }
         }
         if providers.is_empty() {

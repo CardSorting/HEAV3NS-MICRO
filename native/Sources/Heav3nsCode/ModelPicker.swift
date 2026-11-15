@@ -506,7 +506,7 @@ final class ModelPicker: NSWindowController, NSWindowDelegate, NSTextFieldDelega
         keyStatus.stringValue = "Checking saved key…"
         let token = loadID
         request("\(spec.rpcPrefix).status", [:]) { [weak self] result in
-            guard let self, self.loadID == token, !self.dismissed else { return }
+            guard let self, self.loadID == token, !self.dismissed, self.displayedProvider == id else { return }
             self.installKeyStatus(result)
         }
     }
@@ -627,6 +627,11 @@ final class ModelPicker: NSWindowController, NSWindowDelegate, NSTextFieldDelega
          "connected": connected(), "pending": pending, "reconciled": reconciled,
          "applyEnabled": apply.isEnabled, "status": status.stringValue, "availability": availability.stringValue,
          "catalogStatus": catalogStatus.stringValue, "modelInformation": modelInformation.stringValue, "modelSuggestions": suggestions, "customVisible": !customRow.isHidden, "list": modelChoice.diagnostics]
+    }
+    deinit {
+        if let obs = accountsObserver {
+            NotificationCenter.default.removeObserver(obs)
+        }
     }
     func dispose() {
         if let obs = accountsObserver {

@@ -51,16 +51,16 @@ impl ShellCommandGuard {
         static PIPED_AFTER_RE: OnceLock<Regex> = OnceLock::new();
 
         let before_re = BEFORE_RE.get_or_init(|| {
-            Regex::new(r#"(?:[0-9]*>>|[0-9]*>)\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s'"><;&|\r\n]+))"#).unwrap()
+            Regex::new(r#"(?:&>>|&>|[0-9]*>>|[0-9]*>)\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s'"><;&|\r\n]+))"#).unwrap()
         });
         let tee_before_re = TEE_BEFORE_RE.get_or_init(|| {
-            Regex::new(r#"(?:^|[;&|\s])(?:sudo\s+|doas\s+)?tee\s+(?:-[A-Za-z]+\s+)*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s'"><;&|\r\n]+))"#).unwrap()
+            Regex::new(r#"(?:^|[;&|\s])(?:sudo\s+|doas\s+)?tee\s+(?:(?:--[A-Za-z-]*|-[A-Za-z]+)\s+)*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s'"><;&|\r\n]+))"#).unwrap()
         });
         let after_re = AFTER_RE.get_or_init(|| {
-            Regex::new(r#"<<-?\s*\\?(?:"[^"\r\n]+"|'[^'\r\n]+'|[A-Za-z0-9_-]+)\s*(?:[0-9]*>>|[0-9]*>)\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s'"><;&|\r\n]+))"#).unwrap()
+            Regex::new(r#"<<-?\s*\\?(?:"[^"\r\n]+"|'[^'\r\n]+'|[A-Za-z0-9_-]+)[^\r\n;|&]*?(?:&>>|&>|[0-9]*>>|[0-9]*>)\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s'"><;&|\r\n]+))"#).unwrap()
         });
         let piped_after_re = PIPED_AFTER_RE.get_or_init(|| {
-            Regex::new(r#"\|\s*(?:sudo\s+|doas\s+)?(?:tee\s+(?:-[A-Za-z]+\s+)*|(?:cat|sh|bash)\s*(?:[0-9]*>>|[0-9]*>)\s*)(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s'"><;&|\r\n]+))"#).unwrap()
+            Regex::new(r#"\|\s*(?:sudo\s+|doas\s+)?(?:tee\s+(?:(?:--[A-Za-z-]*|-[A-Za-z]+)\s+)*|(?:cat|sh|bash)(?:\s+-[A-Za-z0-9-]+)*\s*(?:&>>|&>|[0-9]*>>|[0-9]*>)\s*)(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s'"><;&|\r\n]+))"#).unwrap()
         });
 
         let mut targets = Vec::new();
@@ -377,7 +377,15 @@ pub fn split_top_level_statements(cmd: &str) -> Vec<String> {
             }
             i = (j + 1).min(bytes.len());
             continue;
-        } else if c == b';' || c == b'\n' || c == b'\r' || c == b'(' || c == b')' || (c == b'&' && next == b'&') || (c == b'|' && next == b'|') {
+        } else if c == b';'
+            || c == b'\n'
+            || c == b'\r'
+            || c == b'('
+            || c == b')'
+            || (c == b'&' && next == b'&')
+            || (c == b'&' && next != b'>' && (i == 0 || !matches!(bytes[i - 1], b'>' | b'<')))
+            || (c == b'|' && next == b'|')
+        {
             let seg = cmd[start..i].trim();
             if !seg.is_empty() {
                 stmts.push(seg.to_string());

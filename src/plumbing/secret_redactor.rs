@@ -50,11 +50,16 @@ impl DeterministicSecretRedactor {
     /// (never echoing resolved symlink targets to the model context).
     pub fn classify_sensitive_path(path: &str, scope: CredentialDenyScope) -> Option<&'static str> {
         let norm = path.replace('\\', "/");
-        let segments: Vec<String> = norm
-            .split('/')
-            .filter(|s| !s.is_empty() && *s != ".")
-            .map(|s| s.to_ascii_lowercase())
-            .collect();
+        let mut segments: Vec<String> = Vec::new();
+        for raw in norm.split('/') {
+            if raw.is_empty() || raw == "." { continue; }
+            if raw == ".." {
+                if segments.last().is_some_and(|s| s != "..") { segments.pop(); }
+                else { segments.push("..".to_string()); }
+            } else {
+                segments.push(raw.to_ascii_lowercase());
+            }
+        }
         if segments.is_empty() {
             return None;
         }
@@ -210,7 +215,7 @@ pub struct SafetyPolicy;
 impl SafetyPolicy {
     pub fn check_command(cmd: &str) -> Result<(), String> {
         Self::check_invisible_unicode(cmd)?;
-        let lower = cmd.trim().to_lowercase();
+        let lower: String = cmd.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
         let forbidden = [
             "rm -rf /",
             "rm -rf /*",

@@ -412,6 +412,8 @@ final class RuntimeClient {
         deadlineTimer?.cancel(); deadlineTimer = nil
         reader?.stop(); output.fileHandleForReading.readabilityHandler = nil
         try? output.fileHandleForReading.close()
+        diagnostic.fileHandleForReading.readabilityHandler = nil
+        try? diagnostic.fileHandleForReading.close()
         writer?.close(flags: .stop); writer = nil
         try? input.fileHandleForWriting.close()
     }
@@ -434,6 +436,10 @@ final class RuntimeClient {
     deinit {
         deadlineTimer?.cancel()
         reader?.stop()
+        if let reservation = historyReservation {
+            BroccoliGitAdmission.finish(reservation, chargedBytes: historyCharge, cleanExit: false)
+            historyReservation = nil
+        }
         output.fileHandleForReading.readabilityHandler = nil; diagnostic.fileHandleForReading.readabilityHandler = nil
         writer?.close(flags: .stop); try? input.fileHandleForWriting.close()
     }

@@ -136,7 +136,7 @@ impl SkillTreeCatalog {
             }
         }
 
-        let has_cycle = topo_order.len() != self.nodes.len();
+        let has_cycle = topo_order.len() != known_ids.len();
         json!({
             "nodeCount": self.nodes.len(),
             "acyclic": !has_cycle,
@@ -182,6 +182,9 @@ impl SkillTreeCatalog {
             .and_then(|v| v.as_array())
             .map(|arr| arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
             .unwrap_or_else(|| vec!["joyzoning-sovereignty".to_string()]);
+        if prereqs.iter().any(|p| p == &id) {
+            return Err(format!("Skill '{id}' cannot list itself as a prerequisite."));
+        }
         let tags: Vec<String> = args
             .get("tags")
             .and_then(|v| v.as_array())
@@ -220,7 +223,7 @@ impl SkillTreeCatalog {
         if !node.instructions.contains(addon) {
             node.instructions.push_str(addon);
         }
-        node.mastery = (node.mastery + 5).min(100);
+        node.mastery = node.mastery.saturating_add(5).min(100);
         let cloned = node.clone();
         self.recompute_competencies();
         Ok(json!({ "status": "power_up_applied", "pack": pack, "skill": cloned }))
@@ -346,8 +349,16 @@ impl SkillTreeCatalog {
         let mut desc = "Markdown skill capability".to_string();
         let mut category = "general".to_string();
         let mut prereqs = Vec::new();
-        for line in trimmed.lines().take(25) {
+        let mut in_frontmatter = false;
+        for (idx, line) in trimmed.lines().take(25).enumerate() {
             let l = line.trim();
+            if idx == 0 && l == "---" {
+                in_frontmatter = true;
+                continue;
+            }
+            if in_frontmatter && (l == "---" || l == "...") {
+                break;
+            }
             if let Some(v) = l.strip_prefix("name:") {
                 name = v.trim().trim_matches('"').trim_matches('\'').to_string();
             } else if let Some(v) = l.strip_prefix("description:") {
@@ -400,7 +411,8 @@ impl SkillTreeCatalog {
     pub fn render_skill_markdown(node: &SkillNode) -> String {
         format!(
             "<!-- [LAYER: UI] -->\n---\nname: \"{}\"\ndescription: \"{}\"\ncategory: \"{}\"\ntier: {}\nprerequisites: {:?}\ntags: {:?}\n---\n\n# {}\n\n{}\n",
-            node.name, node.description, node.category, node.tier, node.prerequisites, node.tags, node.name, node.instructions
+            escape_yaml_quoted(&node.name), escape_yaml_quoted(&node.description), escape_yaml_quoted(&node.category),
+            node.tier, node.prerequisites, node.tags, node.name, node.instructions
         )
     }
 
@@ -418,7 +430,7 @@ impl SkillTreeCatalog {
             }).to_string(),
             "claude_xml" | "xml" => format!(
                 "<skill id=\"{}\">\n  <name>{}</name>\n  <description>{}</description>\n  <instructions>\n{}\n  </instructions>\n</skill>",
-                node.id, node.name, node.description, node.instructions
+                escape_xml(&node.id), escape_xml(&node.name), escape_xml(&node.description), escape_xml(&node.instructions)
             ),
             _ => Self::render_skill_markdown(node),
         };
@@ -446,10 +458,22 @@ fn slugify(input: &str) -> String {
     if collapsed.is_empty() { "custom-skill".to_string() } else { collapsed }
 }
 
+fn escape_xml(input: &str) -> String {
+    input.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
+}
+
+fn unescape_xml(input: &str) -> String {
+    input.replace("&apos;", "'").replace("&quot;", "\"").replace("&gt;", ">").replace("&lt;", "<").replace("&amp;", "&")
+}
+
+fn escape_yaml_quoted(input: &str) -> String {
+    input.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r")
+}
+
 fn extract_xml_tag(xml: &str, tag: &str) -> Option<String> {
     let open = format!("<{}>", tag);
     let close = format!("</{}>", tag);
     let start = xml.find(&open)? + open.len();
     let end = xml[start..].find(&close)? + start;
-    Some(xml[start..end].trim().to_string())
+    Some(unescape_xml(xml[start..end].trim()))
 }

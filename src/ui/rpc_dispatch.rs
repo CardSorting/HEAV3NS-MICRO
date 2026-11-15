@@ -154,6 +154,7 @@ pub fn build_spider_check_multi_response(workspace_root: &Path, requested: &[Str
     } else {
         requested
             .iter()
+            .take(64)
             .map(|p| {
                 let t = p.trim();
                 if t.is_empty() || t.starts_with('/') || t.contains("..") {
@@ -173,6 +174,7 @@ pub fn build_spider_check_multi_response(workspace_root: &Path, requested: &[Str
 
     for (idx, safe_file) in clean_paths.iter().enumerate() {
         let content = validate_rpc_read_path(workspace_root, safe_file)
+            .filter(|p| fs::metadata(p).map(|m| m.len() <= 2 * 1024 * 1024).unwrap_or(false))
             .and_then(|p| fs::read_to_string(&p).ok())
             .unwrap_or_default();
         let hash_64 = sha256_hex(&content);
@@ -489,6 +491,9 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
                     let ft = entry.file_type();
                     let is_dir = ft.as_ref().map(|t| t.is_dir()).unwrap_or(false);
                     let is_symlink = ft.as_ref().map(|t| t.is_symlink()).unwrap_or(false);
+                    if is_symlink || SafetyPolicy::check_path(&entry.path()).is_err() {
+                        continue;
+                    }
                     let path_str = if clean_rel.is_empty() {
                         name.clone()
                     } else {
@@ -539,7 +544,7 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
                 return json!({ "text": "", "revision": "rev-blocked", "offset": 0, "nextOffset": 0, "size": 0, "more": false });
             };
             let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(65536) as usize;
+            let limit = (params.get("limit").and_then(|v| v.as_u64()).unwrap_or(65536) as usize).clamp(1, 512 * 1024);
             let text_content = if fs::metadata(&full_path).map(|m| m.len() <= 16 * 1024 * 1024).unwrap_or(false) {
                 fs::read_to_string(&full_path).unwrap_or_default()
             } else {
@@ -553,7 +558,7 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
                 return json!({ "data": "", "revision": "bin-blocked", "offset": 0, "nextOffset": 0, "size": 0, "more": false });
             };
             let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(65536) as usize;
+            let limit = (params.get("limit").and_then(|v| v.as_u64()).unwrap_or(65536) as usize).clamp(1, 512 * 1024);
             let bytes = if fs::metadata(&full_path).map(|m| m.len() <= 16 * 1024 * 1024).unwrap_or(false) {
                 fs::read(&full_path).unwrap_or_default()
             } else {
@@ -605,7 +610,10 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
             let want_staged = params.get("staged").and_then(|v| v.as_bool());
             let staged = if want_staged != Some(false) { lock_unpoison(&engine.vfs()).export_staged() } else { Vec::new() };
             let diff = if let Some(f) = staged.into_iter().find(|f| f.path == path) {
-                let old = validate_rpc_read_path(root, path).and_then(|p| fs::read_to_string(p).ok()).unwrap_or_default();
+                let old = validate_rpc_read_path(root, path)
+                    .filter(|p| fs::metadata(p).map(|m| m.len() <= 2 * 1024 * 1024).unwrap_or(false))
+                    .and_then(|p| fs::read_to_string(p).ok())
+                    .unwrap_or_default();
                 render_unified_diff(path, &old, if f.is_deleted { "" } else { &f.content })
             } else if want_staged != Some(true) {
                 engine.latest_receipt()
@@ -617,7 +625,7 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
                 String::new()
             };
             let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(65536) as usize;
+            let limit = (params.get("limit").and_then(|v| v.as_u64()).unwrap_or(65536) as usize).clamp(1, 512 * 1024);
             crate::ui::worker_handlers::paginate_text_response(&diff, "diff", offset, limit)
         }
         _ => json!({ "entries": [] }),
@@ -663,6 +671,9 @@ fn collect_search_files(root: &Path, dir: &Path, query: &str, out: &mut Vec<(i32
             continue;
         }
         let path = entry.path();
+        if entry.file_type().map(|t| t.is_symlink()).unwrap_or(true) || SafetyPolicy::check_path(&path).is_err() {
+            continue;
+        }
         let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
         if is_dir {
             collect_search_files(root, &path, query, out, depth + 1);

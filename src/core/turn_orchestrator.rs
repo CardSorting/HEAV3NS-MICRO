@@ -104,11 +104,11 @@ impl AgentEngine {
     }
 
     pub fn receipts_snapshot(&self) -> Vec<TurnReceipt> {
-        self.turn_receipts.lock().unwrap().clone()
+        self.turn_receipts.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub fn latest_receipt(&self) -> Option<TurnReceipt> {
-        self.turn_receipts.lock().unwrap().last().cloned()
+        self.turn_receipts.lock().unwrap_or_else(|e| e.into_inner()).last().cloned()
     }
 
     pub async fn probe_ollama_default_model() -> Option<String> {
@@ -295,7 +295,7 @@ impl AgentEngine {
         before_snap: &str,
         after_snap: Option<&str>,
     ) -> Result<(Vec<FileChangeReceipt>, String), String> {
-        self.cas.lock().unwrap().diff_between(before_snap, after_snap)
+        self.cas.lock().unwrap_or_else(|e| e.into_inner()).diff_between(before_snap, after_snap)
     }
 
     pub fn cas_snapshot_id_for_game_snapshot(&self, snapshot_id: &str) -> Option<String> {
@@ -306,22 +306,22 @@ impl AgentEngine {
     }
 
     pub fn undo_last_turn(&self, force: bool) -> Result<Value, String> {
-        let last = self.turn_receipts.lock().unwrap().last().cloned();
+        let last = self.turn_receipts.lock().unwrap_or_else(|e| e.into_inner()).last().cloned();
         if let Some(receipt) = last {
             if let (Some(before), Some(after)) = (&receipt.snapshot_before, &receipt.snapshot_after) {
                 if !receipt.file_changes.is_empty() {
-                    let actions = self.cas.lock().unwrap().undo_turn_changes(before, after, force)?;
-                    self.turn_receipts.lock().unwrap().pop();
-                    self.tools().journal.lock().unwrap().discard_turn(&receipt.turn_id);
-                    self.tools().cache.lock().unwrap().clear();
-                    self.tools().read_tracker.lock().unwrap().reset_stamps();
+                    let actions = self.cas.lock().unwrap_or_else(|e| e.into_inner()).undo_turn_changes(before, after, force)?;
+                    self.turn_receipts.lock().unwrap_or_else(|e| e.into_inner()).pop();
+                    self.tools().journal.lock().unwrap_or_else(|e| e.into_inner()).discard_turn(&receipt.turn_id);
+                    self.tools().cache.lock().unwrap_or_else(|e| e.into_inner()).clear();
+                    self.tools().read_tracker.lock().unwrap_or_else(|e| e.into_inner()).reset_stamps();
                     return Ok(json!({
                         "restoredCount": actions.len(),
                         "actions": actions,
                         "turnId": receipt.turn_id,
                     }));
                 } else {
-                    self.turn_receipts.lock().unwrap().pop();
+                    self.turn_receipts.lock().unwrap_or_else(|e| e.into_inner()).pop();
                     return Ok(json!({
                         "restoredCount": 0,
                         "actions": Vec::<String>::new(),
@@ -329,11 +329,11 @@ impl AgentEngine {
                     }));
                 }
             }
-            self.turn_receipts.lock().unwrap().pop();
+            self.turn_receipts.lock().unwrap_or_else(|e| e.into_inner()).pop();
         }
-        let fallback = self.tools().journal.lock().unwrap().rollback_last();
-        self.tools().cache.lock().unwrap().clear();
-        self.tools().read_tracker.lock().unwrap().reset_stamps();
+        let fallback = self.tools().journal.lock().unwrap_or_else(|e| e.into_inner()).rollback_last();
+        self.tools().cache.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.tools().read_tracker.lock().unwrap_or_else(|e| e.into_inner()).reset_stamps();
         serde_json::to_value(fallback).map_err(|e| e.to_string())
     }
 
@@ -635,8 +635,7 @@ impl AgentEngine {
     ) -> TurnReceipt {
         let snap_after = self
             .cas
-            .lock()
-            .unwrap()
+            .lock().unwrap_or_else(|e| e.into_inner())
             .capture_snapshot("post-turn", turn_num)
             .ok();
 
@@ -648,8 +647,7 @@ impl AgentEngine {
                     Vec::new()
                 } else {
                     self.cas
-                        .lock()
-                        .unwrap()
+                        .lock().unwrap_or_else(|e| e.into_inner())
                         .diff_between(b, Some(a.as_str()))
                         .map(|(changes, _)| changes)
                         .unwrap_or_default()
@@ -690,7 +688,7 @@ impl AgentEngine {
             }
         }
 
-        let approvals = self.tools().turn_approvals.lock().unwrap().clone();
+        let approvals = self.tools().turn_approvals.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let catalog = global_pricing_registry().snapshot_catalog();
         let billing = BillingMetering::evaluate_with_catalog(provider_name, active_model, api_endpoint, &usage, &catalog);
         let outcome_slug = match outcome {
@@ -741,8 +739,8 @@ impl AgentEngine {
             claim_ceiling,
         };
 
-        let _ = self.cas.lock().unwrap().append_turn_receipt(&receipt);
-        let mut list = self.turn_receipts.lock().unwrap();
+        let _ = self.cas.lock().unwrap_or_else(|e| e.into_inner()).append_turn_receipt(&receipt);
+        let mut list = self.turn_receipts.lock().unwrap_or_else(|e| e.into_inner());
         if list.len() >= 128 {
             list.remove(0);
         }

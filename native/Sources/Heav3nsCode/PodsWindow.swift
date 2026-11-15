@@ -96,7 +96,9 @@ final class PodsWindow: NSWindowController, NSWindowDelegate, NSSearchFieldDeleg
         summary.maximumNumberOfLines = 1; summary.lineBreakMode = .byTruncatingTail
         summary.setContentCompressionResistancePriority(.init(1), for: .horizontal)
         root = JourneyStyle.stack([header, controls, statusRow, JourneyStyle.rule(), scroll], spacing: 8)
-        window.contentView!.addSubview(root); JourneyStyle.pin(root, to: window.contentView!, inset: 16)
+        if let content = window.contentView {
+            content.addSubview(root); JourneyStyle.pin(root, to: content, inset: 16)
+        }
         for view in root.arrangedSubviews { view.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true }
         scroll.setContentHuggingPriority(.init(1), for: .vertical)
         if let screen = NSScreen.main {
@@ -217,7 +219,9 @@ final class PodsWindow: NSWindowController, NSWindowDelegate, NSSearchFieldDeleg
         let stack = JourneyStyle.stack([title, body, button], spacing: 16)
         let box = NSBox(); box.title = ""; box.boxType = .custom; box.fillColor = .controlBackgroundColor; box.borderColor = .separatorColor; box.cornerRadius = 12
         box.contentViewMargins = NSSize(width: 24, height: 24)
-        box.contentView!.addSubview(stack); JourneyStyle.pin(stack, to: box.contentView!)
+        if let boxContent = box.contentView {
+            boxContent.addSubview(stack); JourneyStyle.pin(stack, to: boxContent)
+        }
         body.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         return box
     }
@@ -302,7 +306,9 @@ final class PodView: NSBox {
         for view in [top, context, requestView, actions] { view.setContentHuggingPriority(.required, for: .vertical) }
         feed.fillAvailableHeight()
         contentViewMargins = NSSize(width: 12, height: 12)
-        contentView!.addSubview(root); JourneyStyle.pin(root, to: contentView!)
+        if let boxContent = contentView {
+            boxContent.addSubview(root); JourneyStyle.pin(root, to: boxContent)
+        }
         for view in root.arrangedSubviews where view !== requestView { view.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true }
         requestWidth = requestView.widthAnchor.constraint(equalTo: root.widthAnchor)
         tileHeight = heightAnchor.constraint(equalToConstant: 400); tileHeight.isActive = true

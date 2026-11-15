@@ -10,12 +10,12 @@ use crate::plumbing::hash_and_math::{fnv1a_32, lock_unpoison, now_ms};
 use crate::ui::cli_presenter::Heav3nsUserConfig;
 use crate::ui::provider_rpc::handle_account_mutation_rpc;
 use crate::ui::rpc_dispatch::{build_context_history_response, build_context_inspect_response, build_hello_response, build_model_selection, build_prompt_inspect_response, build_spider_check_multi_response, build_state_inspect_response, handle_files_rpc, handle_memory_rpc, sha256_hex};
-use crate::ui::worker_handlers::{build_artifact_run_response, build_sovereign_model_catalog_with_recent, build_sovereign_model_discovery, emit_jsonl_line, emit_seq_event, execute_multiplexed_submit, handle_automation_rpc, handle_posture_and_receipts_rpc, handle_provider_credential_rpc, resolve_worker_run, switch_worker_conversation, WorkerSharedState};
+use crate::ui::worker_handlers::{build_artifact_run_response, build_sovereign_model_catalog_with_recent, build_sovereign_model_discovery, emit_jsonl_line, emit_seq_event, execute_multiplexed_submit, handle_automation_rpc, handle_posture_and_receipts_rpc, handle_provider_credential_rpc, read_bounded_stdin_line, resolve_worker_run, switch_worker_conversation, WorkerSharedState};
 use serde_json::{json, Value};
 use std::io;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::BufReader;
 use tokio::task::JoinHandle;
 
 pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn IProjectRunner>) {
@@ -23,6 +23,7 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
     let state = Arc::new(Mutex::new(WorkerSharedState::from_engine_config(&engine.config_snapshot())));
     let event_seq = Arc::new(AtomicI64::new(0));
     let legacy_turn_gate = Arc::new(tokio::sync::Mutex::new(()));
+    let pending_submits = Arc::new(AtomicUsize::new(0));
     let mut spawned_turns: Vec<JoinHandle<()>> = Vec::new();
     let mut active_signin_cancel: Option<CancellationToken> = None;
 
@@ -41,8 +42,17 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
         }),
     );
 
-    let mut lines = BufReader::new(tokio::io::stdin()).lines();
-    while let Ok(Some(raw)) = lines.next_line().await {
+    let mut reader = BufReader::new(tokio::io::stdin());
+    loop {
+        let raw = match read_bounded_stdin_line(&mut reader, 4 * 1024 * 1024).await {
+            Ok(Some(line)) => line,
+            Ok(None) => break,
+            Err(e) => {
+                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "type": "error", "code": "STDIN_READ_ERROR", "message": e.to_string() }));
+                if e.kind() == io::ErrorKind::InvalidData { continue; }
+                break;
+            }
+        };
         spawned_turns.retain(|h| !h.is_finished());
         let trimmed = raw.trim();
         if trimmed.is_empty() {
@@ -103,10 +113,14 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                 }
             }
             "models.list" => {
-                let local_ollama = AgentEngine::probe_ollama_models().await;
-                let st = lock_unpoison(&state);
-                let resp = build_sovereign_model_catalog_with_recent(&st.active_provider, &st.active_model, &st.active_reasoning, st.model_revision, &local_ollama, &st.recent_selections);
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
+                spawned_turns.retain(|h| !h.is_finished());
+                if spawned_turns.len() >= 32 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } })); continue; }
+                let (st, out) = (Arc::clone(&state), Arc::clone(&stdout_lock));
+                spawned_turns.push(tokio::spawn(async move {
+                    let local_ollama = AgentEngine::probe_ollama_models().await;
+                    let resp = { let st = lock_unpoison(&st); build_sovereign_model_catalog_with_recent(&st.active_provider, &st.active_model, &st.active_reasoning, st.model_revision, &local_ollama, &st.recent_selections) };
+                    emit_jsonl_line(&out, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
+                }));
             }
             "models.select" => {
                 if let Some(p_raw) = params.get("provider").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
@@ -115,79 +129,67 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                         continue;
                     }
                 }
-                let local_ollama = AgentEngine::probe_ollama_models().await;
-                let catalog = {
-                    let mut st = lock_unpoison(&state);
-                    if let Some(p) = params.get("provider").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-                        st.active_provider = canonicalize_provider_id(p);
-                    }
-                    if let Some(m) = params.get("model").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-                        st.active_model = m.to_string();
-                    }
-                    if let Some(r) = params.get("reasoningEffort").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-                        match ReasoningEffortLevel::parse_flexible(r) {
-                            Ok(None) => {
-                                st.active_reasoning = "default".to_string();
-                                engine.set_reasoning_effort(None);
+                spawned_turns.retain(|h| !h.is_finished());
+                if spawned_turns.len() >= 32 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } })); continue; }
+                static MODEL_SELECT_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                let select_seq = MODEL_SELECT_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                let (eng, st, out, seq, ws, sess) = (Arc::clone(&engine), Arc::clone(&state), Arc::clone(&stdout_lock), Arc::clone(&event_seq), ws_id.clone(), sess_id.clone());
+                spawned_turns.push(tokio::spawn(async move {
+                    let local_ollama = AgentEngine::probe_ollama_models().await;
+                    let (stale, catalog) = {
+                        let mut st = lock_unpoison(&st);
+                        if MODEL_SELECT_SEQ.load(std::sync::atomic::Ordering::SeqCst) != select_seq {
+                            (true, build_sovereign_model_catalog_with_recent(&st.active_provider, &st.active_model, &st.active_reasoning, st.model_revision, &local_ollama, &st.recent_selections))
+                        } else {
+                            if let Some(p) = params.get("provider").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) { st.active_provider = canonicalize_provider_id(p); }
+                            if let Some(m) = params.get("model").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) { st.active_model = m.to_string(); }
+                            if let Some(r) = params.get("reasoningEffort").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                                match ReasoningEffortLevel::parse_flexible(r) {
+                                    Ok(None) => { st.active_reasoning = "default".to_string(); eng.set_reasoning_effort(None); }
+                                    Ok(Some(lvl)) => { st.active_reasoning = lvl.as_str().to_string(); eng.set_reasoning_effort(Some(lvl.as_str().to_string())); }
+                                    Err(_) => {}
+                                }
                             }
-                            Ok(Some(lvl)) => {
-                                st.active_reasoning = lvl.as_str().to_string();
-                                engine.set_reasoning_effort(Some(lvl.as_str().to_string()));
+                            let slot = lookup_provider_descriptor(&st.active_provider).map(|d| d.secret_slot).unwrap_or(st.active_provider.as_str());
+                            let key_override = st.provider_keys.get(slot).or_else(|| st.provider_keys.get(&st.active_provider)).cloned();
+                            let endpoints = Heav3nsUserConfig::load().map(|c| c.provider_endpoints).unwrap_or_default();
+                            eng.switch_http_provider_with_vault(&st.active_provider, &st.active_model, None, key_override, &st.provider_keys, &endpoints);
+                            st.active_model = eng.config_snapshot().model_name;
+                            let (rp, rm, rr) = (st.active_provider.clone(), st.active_model.clone(), st.active_reasoning.clone());
+                            st.record_recent(&rp, &rm, &rr);
+                            if params.get("persist").and_then(|v| v.as_bool()) == Some(true) {
+                                let _g = crate::ui::provider_rpc::USER_CONFIG_IO_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+                                let mut ucfg = Heav3nsUserConfig::load().unwrap_or_default();
+                                ucfg.record_recent_selection(&rp, &rm, &rr); let _ = ucfg.save();
                             }
-                            Err(_) => {}
+                            st.model_revision += 1;
+                            (false, build_sovereign_model_catalog_with_recent(&st.active_provider, &st.active_model, &st.active_reasoning, st.model_revision, &local_ollama, &st.recent_selections))
                         }
-                    }
-                    let slot = lookup_provider_descriptor(&st.active_provider)
-                        .map(|d| d.secret_slot)
-                        .unwrap_or(st.active_provider.as_str());
-                    let key_override = st
-                        .provider_keys
-                        .get(slot)
-                        .or_else(|| st.provider_keys.get(&st.active_provider))
-                        .cloned();
-                    let endpoints = Heav3nsUserConfig::load().map(|c| c.provider_endpoints).unwrap_or_default();
-                    engine.switch_http_provider_with_vault(&st.active_provider, &st.active_model, None, key_override, &st.provider_keys, &endpoints);
-                    st.active_model = engine.config_snapshot().model_name;
-                    let (rp, rm, rr) = (st.active_provider.clone(), st.active_model.clone(), st.active_reasoning.clone());
-                    st.record_recent(&rp, &rm, &rr);
-                    if params.get("persist").and_then(|v| v.as_bool()) == Some(true) {
-                        let mut ucfg = Heav3nsUserConfig::load().unwrap_or_default();
-                        ucfg.record_recent_selection(&rp, &rm, &rr);
-                        let _ = ucfg.save();
-                    }
-                    st.model_revision += 1;
-                    build_sovereign_model_catalog_with_recent(&st.active_provider, &st.active_model, &st.active_reasoning, st.model_revision, &local_ollama, &st.recent_selections)
-                };
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": catalog }));
-                emit_seq_event(&stdout_lock, &event_seq, json!({ "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id, "runtime": "heav3ns-micro", "type": "models.changed", "payload": catalog }));
+                    };
+                    emit_jsonl_line(&out, &json!({ "v": 1, "kind": "response", "id": req_id, "result": catalog }));
+                    if !stale { emit_seq_event(&out, &seq, json!({ "v": 1, "kind": "event", "workspace": ws, "session": sess, "runtime": "heav3ns-micro", "type": "models.changed", "payload": catalog })); }
+                }));
             }
             "models.discover" | "models.refresh" => {
+                spawned_turns.retain(|h| !h.is_finished());
+                if spawned_turns.len() >= 32 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } })); continue; }
                 let want_live = method == "models.refresh" || params.get("refresh").and_then(|v| v.as_bool()) == Some(true);
-                if want_live {
-                    let _ = AgentEngine::refresh_model_catalog().await;
-                } else {
-                    AgentEngine::trigger_model_catalog_auto_refresh();
-                }
-                let (prov, keys_snap) = {
-                    let st = lock_unpoison(&state);
-                    (
-                        params.get("provider").and_then(|v| v.as_str()).unwrap_or(&st.active_provider).to_string(),
-                        st.provider_keys.clone(),
-                    )
-                };
-                let live_models = engine.probe_provider_models_live(&prov, &keys_snap, want_live).await;
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": build_sovereign_model_discovery(&prov, &live_models) }));
+                let (eng, st, out) = (Arc::clone(&engine), Arc::clone(&state), Arc::clone(&stdout_lock));
+                spawned_turns.push(tokio::spawn(async move {
+                    if want_live { let _ = AgentEngine::refresh_model_catalog().await; } else { AgentEngine::trigger_model_catalog_auto_refresh(); }
+                    let (prov, keys_snap) = { let st = lock_unpoison(&st); (params.get("provider").and_then(|v| v.as_str()).unwrap_or(&st.active_provider).to_string(), st.provider_keys.clone()) };
+                    let live_models = eng.probe_provider_models_live(&prov, &keys_snap, want_live).await;
+                    emit_jsonl_line(&out, &json!({ "v": 1, "kind": "response", "id": req_id, "result": build_sovereign_model_discovery(&prov, &live_models) }));
+                }));
             }
             "providers.list" => {
                 let items: Vec<Value> = PROVIDER_DESCRIPTORS.iter().filter(|d| !d.retired).map(|d| json!({
-                    "id": d.id, "label": d.display_name, "wireDialect": d.wire_dialect.as_str(),
-                    "defaultModel": d.default_model, "requiresApiKey": d.requires_api_key, "envVars": d.env_vars, "credentialUrl": d.credential_url
+                    "id": d.id, "label": d.display_name, "wireDialect": d.wire_dialect.as_str(), "defaultModel": d.default_model, "requiresApiKey": d.requires_api_key, "envVars": d.env_vars, "credentialUrl": d.credential_url
                 })).collect();
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "count": items.len(), "providers": items } }));
             }
             "posture.get" | "posture.set" | "posture.step" | "receipts.list" | "turn.undo" | "request.preview" => {
-                let resp = handle_posture_and_receipts_rpc(method, &params, &engine);
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
+                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": handle_posture_and_receipts_rpc(method, &params, &engine) }));
             }
             "artifact.read" => {
                 let resp = build_artifact_run_response(&lock_unpoison(&state).session_runs, &params).unwrap_or_else(|| handle_files_rpc("files.read", &params, &engine));
@@ -204,14 +206,18 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                     continue;
                 }
                 let prompt = params.get("text").or_else(|| parsed.get("prompt")).and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let posture_override = params
-                    .get("posture")
-                    .or_else(|| params.get("mode"))
-                    .and_then(|v| v.as_str())
-                    .and_then(ExecutionPosture::parse_label);
+                if prompt.chars().count() > 16_000 {
+                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": -32602, "message": "Instruction exceeds 16000 character limit." } }));
+                    continue;
+                }
+                let posture_override = params.get("posture").or_else(|| params.get("mode")).and_then(|v| v.as_str()).and_then(ExecutionPosture::parse_label);
                 let interactive_approval = params.get("interactiveApproval").and_then(|v| v.as_bool()).unwrap_or(true);
-                let (eng, st, out, seq, gate) = (Arc::clone(&engine), Arc::clone(&state), Arc::clone(&stdout_lock), Arc::clone(&event_seq), Arc::clone(&legacy_turn_gate));
+                pending_submits.fetch_add(1, Ordering::SeqCst);
+                let (eng, st, out, seq, gate, pending) = (Arc::clone(&engine), Arc::clone(&state), Arc::clone(&stdout_lock), Arc::clone(&event_seq), Arc::clone(&legacy_turn_gate), Arc::clone(&pending_submits));
                 let handle = tokio::spawn(async move {
+                    struct PendingGuard(Arc<AtomicUsize>);
+                    impl Drop for PendingGuard { fn drop(&mut self) { self.0.fetch_sub(1, Ordering::SeqCst); } }
+                    let _pg = PendingGuard(pending);
                     execute_multiplexed_submit(eng, st, out, seq, req_id, ws_id, sess_id, is_rpc, prompt, posture_override, interactive_approval, gate).await;
                 });
                 spawned_turns.push(handle);
@@ -301,7 +307,7 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "conversations": convs } }));
             }
             "conversation.select" | "conversation.create" => {
-                if legacy_turn_gate.try_lock().is_err() { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "TURN_IN_PROGRESS", "message": "Cannot switch conversations while a turn is active." } })); continue; }
+                if pending_submits.load(Ordering::SeqCst) > 0 || legacy_turn_gate.try_lock().is_err() { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "TURN_IN_PROGRESS", "message": "Cannot switch conversations while a turn is active." } })); continue; }
                 let cid = params
                     .get("id")
                     .or_else(|| params.get("conversation"))
@@ -319,7 +325,7 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "id": st.current_conversation, "conversation": st.current_conversation } }));
             }
             "conversation.delete" => {
-                if legacy_turn_gate.try_lock().is_err() { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "TURN_IN_PROGRESS", "message": "Cannot delete conversations while a turn is active." } })); continue; }
+                if pending_submits.load(Ordering::SeqCst) > 0 || legacy_turn_gate.try_lock().is_err() { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "TURN_IN_PROGRESS", "message": "Cannot delete conversations while a turn is active." } })); continue; }
                 let del_opt = params
                     .get("id")
                     .or_else(|| params.get("conversation"))
@@ -473,48 +479,42 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": legion_plan }));
             }
             "computer.action" | "computer.capture" | "computer.health" | "computer.observe" | "computer.interpret" | "computer.consult" | "computer.orchestrate" | "computer.patterns" | "browser.action" | "browser.snapshot" | "browser.navigate" | "spatial.ground" | "spatial.execute" | "spatial.health" | "spatial.query" | "skills.dag" | "skills.forge" | "skills.lint" | "soul.status" => {
-                let out = handle_automation_rpc(method, &req_id, &params, &engine).await;
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": out }));
+                spawned_turns.retain(|h| !h.is_finished());
+                if spawned_turns.len() >= 32 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } })); continue; }
+                let (m, eng, out) = (method.to_string(), Arc::clone(&engine), Arc::clone(&stdout_lock));
+                spawned_turns.push(tokio::spawn(async move {
+                    let out_res = handle_automation_rpc(&m, &req_id, &params, &eng).await;
+                    emit_jsonl_line(&out, &json!({ "v": 1, "kind": "response", "id": req_id, "result": out_res }));
+                }));
             }
             "agentSwarm.form" | "agentSwarm.formResume" => {
                 let objective = params.get("objective").and_then(|v| v.as_str()).unwrap_or("Swarm task execution").to_string();
                 let strategy = params.get("strategy").and_then(|v| v.as_str());
                 let max_spec = params.get("maxSpecialists").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
                 let legion = classify_task_for_legion(&objective, &[], strategy, max_spec);
-                let assignments: Vec<SwarmAssignment> = legion
-                    .get("assignments")
-                    .and_then(|v| serde_json::from_value(v.clone()).ok())
-                    .unwrap_or_default();
+                let assignments: Vec<SwarmAssignment> = legion.get("assignments").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
                 let execute_live = params.get("live").and_then(|v| v.as_bool()).unwrap_or(false);
-                let rec = if execute_live && !assignments.is_empty() {
-                    let swarm_res = engine.run_swarm(objective.clone(), assignments.clone(), None, None).await;
-                    let form_id = format!("formation-{}", lock_unpoison(&state).saved_formations.len() + 1);
-                    json!({
-                        "id": form_id,
-                        "objective": objective,
-                        "status": format!("{:?}", swarm_res.outcome).to_ascii_lowercase(),
-                        "reports": swarm_res.reports,
-                        "assignments": assignments
-                    })
-                } else {
-                    let form_id = format!("formation-{}", lock_unpoison(&state).saved_formations.len() + 1);
-                    let rep_items: Vec<Value> = assignments
-                        .iter()
-                        .map(|a| json!({ "id": a.id, "role": a.role, "status": "completed", "response": format!("Planned specialist scope: {}", a.objective) }))
-                        .collect();
-                    let assign_items: Vec<Value> = assignments
-                        .iter()
-                        .enumerate()
-                        .map(|(idx, a)| json!({ "id": a.id, "role": a.role, "status": "completed", "summary": a.objective, "childSessionId": format!("cs-{}", idx + 1) }))
-                        .collect();
-                    json!({
-                        "id": form_id,
-                        "objective": objective,
-                        "status": "completed",
-                        "reports": rep_items,
-                        "assignments": assign_items
-                    })
-                };
+                if execute_live && !assignments.is_empty() {
+                    spawned_turns.retain(|h| !h.is_finished());
+                    if spawned_turns.len() >= 32 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } })); continue; }
+                    let (eng, st, out) = (Arc::clone(&engine), Arc::clone(&state), Arc::clone(&stdout_lock));
+                    spawned_turns.push(tokio::spawn(async move {
+                        let swarm_res = eng.run_swarm(objective.clone(), assignments.clone(), None, None).await;
+                        let rec = {
+                            let mut s = lock_unpoison(&st);
+                            let form_id = format!("formation-{}", s.saved_formations.len() + 1);
+                            let r = json!({ "id": form_id, "objective": objective, "status": format!("{:?}", swarm_res.outcome).to_ascii_lowercase(), "reports": swarm_res.reports, "assignments": assignments });
+                            s.saved_formations.push(r.clone());
+                            r
+                        };
+                        emit_jsonl_line(&out, &json!({ "v": 1, "kind": "response", "id": req_id, "result": rec }));
+                    }));
+                    continue;
+                }
+                let form_id = format!("formation-{}", lock_unpoison(&state).saved_formations.len() + 1);
+                let rep_items: Vec<Value> = assignments.iter().map(|a| json!({ "id": a.id, "role": a.role, "status": "completed", "response": format!("Planned specialist scope: {}", a.objective) })).collect();
+                let assign_items: Vec<Value> = assignments.iter().enumerate().map(|(idx, a)| json!({ "id": a.id, "role": a.role, "status": "completed", "summary": a.objective, "childSessionId": format!("cs-{}", idx + 1) })).collect();
+                let rec = json!({ "id": form_id, "objective": objective, "status": "completed", "reports": rep_items, "assignments": assign_items });
                 {
                     let mut st = lock_unpoison(&state);
                     st.saved_formations.push(rec.clone());
@@ -627,22 +627,18 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                 }}));
             }
             "side.query" => {
-                let conv = {
-                    let st = lock_unpoison(&state);
-                    params.get("conversation").and_then(|v| v.as_str()).unwrap_or(&st.current_conversation).to_string()
-                };
-                let q = params.get("question").and_then(|v| v.as_str()).unwrap_or("");
-                match engine.ask_side_question(q).await {
-                    Ok(ans) if !ans.trim().is_empty() => {
-                        emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "conversation": conv, "response": ans, "contextLimited": false } }));
+                spawned_turns.retain(|h| !h.is_finished());
+                if spawned_turns.len() >= 32 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } })); continue; }
+                let conv = { let st = lock_unpoison(&state); params.get("conversation").and_then(|v| v.as_str()).unwrap_or(&st.current_conversation).to_string() };
+                let q = params.get("question").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let (eng, out) = (Arc::clone(&engine), Arc::clone(&stdout_lock));
+                spawned_turns.push(tokio::spawn(async move {
+                    match eng.ask_side_question(&q).await {
+                        Ok(ans) if !ans.trim().is_empty() => emit_jsonl_line(&out, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "conversation": conv, "response": ans, "contextLimited": false } })),
+                        Ok(_) => emit_jsonl_line(&out, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "SIDE_QUERY_EMPTY", "message": "Provider returned an empty response." } })),
+                        Err(err) => emit_jsonl_line(&out, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "SIDE_QUERY_FAILED", "message": err.to_string() } })),
                     }
-                    Ok(_) => {
-                        emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "SIDE_QUERY_EMPTY", "message": "Provider returned an empty response." } }));
-                    }
-                    Err(err) => {
-                        emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "SIDE_QUERY_FAILED", "message": err.to_string() } }));
-                    }
-                }
+                }));
             }
             "memory.list" | "memory.read" | "memory.write" | "memory.remove" => {
                 let conv = lock_unpoison(&state).current_conversation.clone();
@@ -654,9 +650,9 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                 emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
             }
             "signIn" => {
-                if let Some(prev) = active_signin_cancel.take() {
-                    prev.cancel();
-                }
+                spawned_turns.retain(|h| !h.is_finished());
+                if spawned_turns.len() >= 32 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } })); continue; }
+                if let Some(prev) = active_signin_cancel.take() { prev.cancel(); }
                 let cancel = CancellationToken::new();
                 active_signin_cancel = Some(cancel.clone());
                 let out_task = Arc::clone(&stdout_lock);
@@ -702,6 +698,7 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
             }
             "flight" => {
                 spawned_turns.retain(|h| !h.is_finished());
+                if spawned_turns.len() >= 32 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } })); continue; }
                 let gate = Arc::clone(&legacy_turn_gate);
                 let out = Arc::clone(&stdout_lock);
                 let handle = tokio::spawn(async move {
@@ -713,6 +710,7 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
             }
             "swarm" => {
                 spawned_turns.retain(|h| !h.is_finished());
+                if spawned_turns.len() >= 32 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } })); continue; }
                 let objective = parsed.get("objective").and_then(|v| v.as_str()).unwrap_or("Swarm execution").to_string();
                 let assignments: Vec<SwarmAssignment> = parsed.get("assignments").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
                 let token = CancellationToken::new();
@@ -753,12 +751,14 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
             // Deprecated legacy turn methods: migrated onto `execute_multiplexed_submit` with strict FIFO response ordering.
             "tick" | "chat" | "slash" => {
                 spawned_turns.retain(|h| !h.is_finished());
+                if spawned_turns.len() >= 32 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } })); continue; }
                 emit_seq_event(&stdout_lock, &event_seq, json!({
                     "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id,
                     "runtime": "heav3ns-micro", "type": "deprecation.notice",
                     "payload": { "method": method, "replacement": "task.submit", "message": format!("Method '{method}' is deprecated; migrate to 'task.submit'.") }
                 }));
                 let prompt = parsed.get("prompt").or_else(|| parsed.get("command")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                if prompt.chars().count() > 16_000 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "id": req_id, "type": "error", "code": "INVALID_PARAMS", "message": "Instruction exceeds 16000 character limit." })); continue; }
                 let gate = Arc::clone(&legacy_turn_gate);
                 let eng = Arc::clone(&engine);
                 let st = Arc::clone(&state);
@@ -789,6 +789,9 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
     }
 
     if let Some(tok) = active_signin_cancel.take() { tok.cancel(); }
+    for tok in lock_unpoison(&state).active_cancels.values() { tok.cancel(); }
     let _ = project_runner.stop();
-    for handle in spawned_turns { let _ = handle.await; }
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        for handle in spawned_turns { let _ = handle.await; }
+    }).await;
 }

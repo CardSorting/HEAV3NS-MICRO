@@ -110,6 +110,7 @@ pub fn build_macos_seatbelt_invocation(
             ".aws",
             ".heav3ns/credentials",
             ".heav3ns/config.json",
+            ".heav3ns/secrets",
             ".codewhale/credentials",
             ".codewhale/config.json",
             ".codewhale/secrets",
@@ -147,6 +148,15 @@ pub fn build_macos_seatbelt_invocation(
 /// Inspects a shell command for destructive patterns, Trojan Unicode, `curl`/`wget` credential upload exfiltration,
 /// dynamic expansion hazards, and read-only vs mutating execution stakes (`crates/execpolicy` distillation).
 pub fn inspect_command_security(cmd: &str) -> CommandSecurityVerdict {
+    inspect_command_security_depth(cmd, 0)
+}
+
+fn inspect_command_security_depth(cmd: &str, depth: usize) -> CommandSecurityVerdict {
+    if depth > 16 {
+        return CommandSecurityVerdict::Deny {
+            reason: "Subshell nesting depth exceeds 16-level inspection ceiling (fail-closed)".to_string(),
+        };
+    }
     if cmd.len() > 65_536 {
         return CommandSecurityVerdict::Deny {
             reason: "Command exceeds 64 KiB inspection ceiling (fail-closed)".to_string(),
@@ -202,7 +212,7 @@ pub fn inspect_command_security(cmd: &str) -> CommandSecurityVerdict {
                         }
                         if let Some(sub_cmd) = cmd_arg {
                             saw_c_flag = true;
-                            match inspect_command_security(sub_cmd) {
+                            match inspect_command_security_depth(sub_cmd, depth + 1) {
                                 d @ (CommandSecurityVerdict::Deny { .. } | CommandSecurityVerdict::RequireApproval { .. }) => {
                                     return d;
                                 }
@@ -242,7 +252,14 @@ pub fn inspect_command_security(cmd: &str) -> CommandSecurityVerdict {
             if bin == "rm" {
                 for a in args {
                     let clean = a.trim_matches(|c| c == '"' || c == '\'');
-                    if matches!(clean, "/" | "/*" | "~" | "~/" | "$HOME" | "${HOME}") {
+                    let mut norm = String::with_capacity(clean.len());
+                    for ch in clean.chars() {
+                        if ch == '/' && norm.ends_with('/') { continue; }
+                        norm.push(ch);
+                    }
+                    let norm = norm.strip_suffix("/.").unwrap_or(&norm);
+                    let norm = if norm.len() > 1 { norm.trim_end_matches('/') } else { norm };
+                    if matches!(norm, "/" | "/*" | "~" | "~/*" | "$HOME" | "$HOME/*" | "${HOME}" | "${HOME}/*") {
                         return CommandSecurityVerdict::Deny {
                             reason: format!("Safety policy refused destructive `rm` target '{clean}'"),
                         };
@@ -305,9 +322,7 @@ fn check_network_upload_exfiltration(bin: &str, args: &[String], full_stmt: &str
                 arg.as_str(),
                 "-d" | "-F" | "-T" | "--data" | "--data-raw" | "--data-binary" | "--data-urlencode"
                     | "--form" | "--form-string" | "--json" | "--upload-file"
-            ) || arg.starts_with("-d")
-                || arg.starts_with("-F")
-                || arg.starts_with("-T")
+            ) || (arg.starts_with('-') && !arg.starts_with("--") && arg.chars().skip(1).any(|c| matches!(c, 'd' | 'F' | 'T')))
                 || arg.starts_with("--data")
                 || arg.starts_with("--form")
                 || arg.starts_with("--json=")
@@ -355,7 +370,7 @@ fn check_network_upload_exfiltration(bin: &str, args: &[String], full_stmt: &str
         i += 1;
     }
 
-    if let Some(flag) = upload_flag {
+    if let Some(ref _flag) = upload_flag {
         let stripped_path = upload_value
             .trim_start_matches('@')
             .trim_start_matches('<')
@@ -374,17 +389,69 @@ fn check_network_upload_exfiltration(bin: &str, args: &[String], full_stmt: &str
                 reason: format!("Blocked `{bin}` upload targeting protected credential store: {label}"),
             });
         }
-        return Some(CommandSecurityVerdict::RequireApproval {
-            reason: format!("`{bin}` data/file upload (`{flag}`) requires explicit user approval outside Full Access"),
-        });
     }
 
-    if has_pipe_in && (full_stmt.contains(".env") || full_stmt.contains(".ssh") || full_stmt.contains("printenv") || full_stmt.contains("env ")) {
+    if has_pipe_in
+        && (full_stmt.contains("printenv")
+            || full_stmt.contains("env ")
+            || full_stmt.split_whitespace().any(|tok| {
+                let t = tok.trim_matches(|c| matches!(c, '"' | '\'' | ';' | '|' | '&' | '<' | '>'));
+                t == ".env" || t.ends_with("/.env") || DeterministicSecretRedactor::classify_sensitive_path(t, CredentialDenyScope::ModelContext).is_some()
+            }))
+    {
         return Some(CommandSecurityVerdict::Deny {
             reason: format!("Blocked piping environment/credential data into `{bin}`"),
         });
     }
+    if let Some(flag) = upload_flag {
+        return Some(CommandSecurityVerdict::RequireApproval {
+            reason: format!("`{bin}` data/file upload (`{flag}`) requires explicit user approval outside Full Access"),
+        });
+    }
     None
+}
+
+fn has_unquoted_bg_ampersand(s: &str) -> bool {
+    let b = s.as_bytes();
+    let (mut quote, mut i) = (0u8, 0usize);
+    while i < b.len() {
+        let c = b[i];
+        if quote == b'\'' {
+            if c == b'\'' { quote = 0; }
+        } else if quote == b'"' {
+            if c == b'\\' && i + 1 < b.len() { i += 1; } else if c == b'"' { quote = 0; }
+        } else if c == b'\'' || c == b'"' {
+            quote = c;
+        } else if c == b'\\' && i + 1 < b.len() {
+            i += 1;
+        } else if c == b'&' {
+            let next = b.get(i + 1).copied().unwrap_or(0);
+            let prev = if i > 0 { b[i - 1] } else { 0 };
+            if next != b'&' && next != b'>' && prev != b'>' && prev != b'<' {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+fn has_leading_env_override(tokens: &[String]) -> bool {
+    for t in tokens {
+        if t.contains('=') && !t.starts_with('-') {
+            return true;
+        }
+        let base = t.rsplit('/').next().unwrap_or(t).to_ascii_lowercase();
+        if base == "env" {
+            return tokens.iter().any(|a| a.contains('=') && !a.starts_with('-'));
+        }
+        if !matches!(base.as_str(), "sudo" | "doas" | "nohup" | "time" | "exec" | "builtin" | "nice" | "command")
+            && !t.starts_with('-')
+        {
+            break;
+        }
+    }
+    false
 }
 
 fn is_stage_pure_readonly(bin: &str, args: &[String], raw_stage: &str) -> bool {
@@ -393,14 +460,25 @@ fn is_stage_pure_readonly(bin: &str, args: &[String], raw_stage: &str) -> bool {
         || raw_stage.contains('`')
         || raw_stage.contains("<(")
         || raw_stage.contains(">(")
+        || has_unquoted_bg_ampersand(raw_stage)
+        || has_leading_env_override(&tokenize_shell_words(raw_stage))
     {
         return false;
     }
     if PURE_READONLY_COMMANDS.contains(&bin) {
         return true;
     }
-    if matches!(bin, "grep" | "rg" | "ripgrep" | "head" | "tail" | "cat" | "sort" | "uniq" | "cut" | "tr") {
+    if matches!(bin, "grep" | "head" | "tail" | "cat" | "uniq" | "cut" | "tr") {
         return true;
+    }
+    if bin == "sort" {
+        return !args.iter().any(|a| {
+            a == "-o" || a == "--output" || a.starts_with("--output=")
+                || (a.starts_with('-') && !a.starts_with("--") && a.chars().skip(1).any(|c| c == 'o'))
+        });
+    }
+    if matches!(bin, "rg" | "ripgrep") {
+        return !args.iter().any(|a| a == "--pre" || a.starts_with("--pre="));
     }
     if bin == "find" {
         return !args.iter().any(|a| {
@@ -411,8 +489,20 @@ fn is_stage_pure_readonly(bin: &str, args: &[String], raw_stage: &str) -> bool {
         });
     }
     if bin == "git" {
-        if args.iter().any(|a| a == "-c" || a.starts_with("-c=")) {
-            return false;
+        let mut i = 0usize;
+        while i < args.len() {
+            let a = args[i].as_str();
+            if a == "-c" || a.starts_with("-c") || a == "--config-env" || a.starts_with("--config-env=") {
+                return false;
+            }
+            if matches!(a, "-C" | "--git-dir" | "--work-tree" | "--namespace") {
+                i += 2;
+                continue;
+            }
+            if !a.starts_with('-') {
+                break;
+            }
+            i += 1;
         }
         return match first_git_subcommand(args).as_deref() {
             Some("status" | "diff" | "log" | "show" | "rev-parse" | "ls-files" | "blame") => true,

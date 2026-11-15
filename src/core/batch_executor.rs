@@ -18,9 +18,9 @@ pub const MAX_DECLARATIVE_BATCH_STEPS: usize = 32;
 impl ToolRegistry {
     /// Records a deferred specialist tool in the bounded 8-slot LRU active schema window (`Codewhale tool_search` eviction invariant).
     pub fn touch_unlocked_lru(&self, spec_name: &'static str) {
-        let mut unlocked = self.unlocked_tools.lock().unwrap();
-        let mut lru = self.unlocked_lru.lock().unwrap();
-        let mut evicted = self.evicted_tools.lock().unwrap();
+        let mut unlocked = self.unlocked_tools.lock().unwrap_or_else(|e| e.into_inner());
+        let mut lru = self.unlocked_lru.lock().unwrap_or_else(|e| e.into_inner());
+        let mut evicted = self.evicted_tools.lock().unwrap_or_else(|e| e.into_inner());
 
         lru.retain(|&n| n != spec_name);
         lru.push(spec_name);
@@ -84,8 +84,8 @@ impl ToolRegistry {
             }));
         }
 
-        let active_deferred: Vec<&'static str> = self.unlocked_lru.lock().unwrap().clone();
-        let evicted_refs: Vec<&'static str> = self.evicted_tools.lock().unwrap().clone();
+        let active_deferred: Vec<&'static str> = self.unlocked_lru.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let evicted_refs: Vec<&'static str> = self.evicted_tools.lock().unwrap_or_else(|e| e.into_inner()).clone();
         json!({
             "query": query,
             "matchedCount": unlocked_now.len(),
@@ -176,7 +176,7 @@ impl ToolRegistry {
                 if !rec.success {
                     wave_failed = true;
                 }
-                let governed = self.governor.lock().unwrap().govern(&rec.output);
+                let governed = self.governor.lock().unwrap_or_else(|e| e.into_inner()).govern(&rec.output);
                 step_outputs.push(json!({
                     "stepId": rec.call_id,
                     "tool": rec.name,

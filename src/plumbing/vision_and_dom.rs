@@ -405,6 +405,7 @@ fn parse_nonstandard_ipv4(host: &str) -> Option<std::net::Ipv4Addr> {
 fn is_blocked_ipv4(v4: std::net::Ipv4Addr) -> bool {
     let o = v4.octets();
     v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
+        || o[0] == 0 || v4.is_broadcast() || v4.is_multicast()
         || (o[0] == 100 && (64..=127).contains(&o[1]))
 }
 
@@ -421,6 +422,9 @@ fn is_blocked_ssrf_host(host: &str) -> bool {
                     return is_blocked_ipv4(mapped);
                 }
                 let seg = v6.segments();
+                if matches!(seg[0..6], [0, 0, 0, 0, 0xffff, 0] | [0x0064, 0xff9b, 0, 0, 0, 0]) {
+                    return is_blocked_ipv4(std::net::Ipv4Addr::from(((seg[6] as u32) << 16) | (seg[7] as u32)));
+                }
                 v6.is_loopback() || v6.is_unspecified() || (seg[0] & 0xfe00 == 0xfc00) || (seg[0] & 0xffc0 == 0xfe80)
             }
         };
@@ -462,7 +466,7 @@ pub fn redact_cdp_url(url: &str) -> String {
         for sep in ["?", "&"] {
             let pat = format!("{}{}=", sep, key);
             let mut search_from = 0usize;
-            while let Some(rel_pos) = out[search_from..].to_ascii_lowercase().find(&pat) {
+            while let Some(rel_pos) = out[search_from..].as_bytes().windows(pat.len()).position(|w| w.eq_ignore_ascii_case(pat.as_bytes())) {
                 let val_start = search_from + rel_pos + pat.len();
                 let val_end = out[val_start..].find(|c| c == '&' || c == '#').map(|i| val_start + i).unwrap_or(out.len());
                 out.replace_range(val_start..val_end, "[REDACTED]");
@@ -558,6 +562,7 @@ pub fn snapshot_html_dom(html: &str, url: &str, max_elements: usize) -> Value {
                 i += rel_end + 1;
                 continue;
             }
+            break;
         }
         i += 1;
     }
@@ -719,8 +724,10 @@ pub fn parse_drag_points(args: &Value, width: u32, height: u32, cur: [i32; 2], i
          parse_coordinate_value(args.get("from_y"), height, cur[1], is_norm_1000))
     };
 
-    let fx_clamped = fx.clamp(0, width as i32);
-    let fy_clamped = fy.clamp(0, height as i32);
+    let max_w = width.min(i32::MAX as u32) as i32;
+    let max_h = height.min(i32::MAX as u32) as i32;
+    let fx_clamped = fx.clamp(0, max_w);
+    let fy_clamped = fy.clamp(0, max_h);
     let def_tx = fx_clamped.saturating_add(100);
     let def_ty = fy_clamped.saturating_add(100);
 
@@ -737,7 +744,7 @@ pub fn parse_drag_points(args: &Value, width: u32, height: u32, cur: [i32; 2], i
     };
 
     ([fx_clamped, fy_clamped],
-     [tx.clamp(0, width as i32), ty.clamp(0, height as i32)])
+     [tx.clamp(0, max_w), ty.clamp(0, max_h)])
 }
 
 pub fn extract_key_sequence(args: &Value) -> String {

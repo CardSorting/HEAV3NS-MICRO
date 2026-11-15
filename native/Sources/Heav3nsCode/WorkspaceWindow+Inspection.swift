@@ -22,8 +22,9 @@ extension WorkspaceWindow {
                 inspectionFailed(BridgeError.message("Saved state is unavailable. Reconnect to a supported runtime."), initial: true); return
             }
             let generation = inspectionGeneration
-            client.request("state.inspect", params: ["conversation": conversation]) { [weak self] result in
-                guard let self, self.inspectionGeneration == generation, self.currentConversation == conversation else { return }
+            let source = client
+            source.request("state.inspect", params: ["conversation": conversation]) { [weak self, weak source] result in
+                guard let self, let source, self.client === source, !self.closing, self.inspectionGeneration == generation, self.currentConversation == conversation else { return }
                 switch result {
                 case .success(let data):
                     guard let details = SavedStateDetails(data, conversation: conversation) else {
@@ -46,8 +47,9 @@ extension WorkspaceWindow {
                 inspectionFailed(BridgeError.message("Code checks are unavailable. Reconnect to a supported runtime."), initial: true); return
             }
             let generation = inspectionGeneration
-            client.request("spider.check", params: ["paths": [file]]) { [weak self] result in
-                guard let self, self.inspectionGeneration == generation else { return }
+            let source = client
+            source.request("spider.check", params: ["paths": [file]]) { [weak self, weak source] result in
+                guard let self, let source, self.client === source, !self.closing, self.inspectionGeneration == generation else { return }
                 switch result {
                 case .success(let data):
                     guard let details = SpiderCheckDetails(data, file: file) else {
@@ -71,8 +73,9 @@ extension WorkspaceWindow {
                 inspectionFailed(BridgeError.message("Conversation context is unavailable. Reconnect to a supported runtime."), initial: true); return
             }
             let generation = inspectionGeneration
-            client.request("context.inspect", params: ["conversation": conversation]) { [weak self] result in
-                guard let self, self.inspectionGeneration == generation, self.currentConversation == conversation else { return }
+            let source = client
+            source.request("context.inspect", params: ["conversation": conversation]) { [weak self, weak source] result in
+                guard let self, let source, self.client === source, !self.closing, self.inspectionGeneration == generation, self.currentConversation == conversation else { return }
                 switch result {
                 case .success(let data):
                     guard let details = ConversationContextDetails(data, conversation: conversation) else {
@@ -114,8 +117,9 @@ extension WorkspaceWindow {
                 inspectionFailed(BridgeError.message("Run details are unavailable. Reconnect to a supported runtime."), initial: true); return
             }
             let generation = inspectionGeneration
-            client.request("history.read", params: ["run": id]) { [weak self] result in
-                guard let self, self.inspectionGeneration == generation else { return }
+            let source = client
+            source.request("history.read", params: ["run": id]) { [weak self, weak source] result in
+                guard let self, let source, self.client === source, !self.closing, self.inspectionGeneration == generation else { return }
                 switch result {
                 case .success(let data):
                     let details = RunDetails(data)
@@ -147,8 +151,9 @@ extension WorkspaceWindow {
             }
             let generation = inspectionGeneration
             let draftHint = composer.string.trimmingCharacters(in: .whitespacesAndNewlines)
-            client.request("request.preview", params: ["prompt": draftHint]) { [weak self] result in
-                guard let self, self.inspectionGeneration == generation else { return }
+            let source = client
+            source.request("request.preview", params: ["prompt": draftHint]) { [weak self, weak source] result in
+                guard let self, let source, self.client === source, !self.closing, self.inspectionGeneration == generation else { return }
                 switch result {
                 case .success(let data):
                     self.inspection.string = RequestPreviewFormatter.format(data)
@@ -165,8 +170,9 @@ extension WorkspaceWindow {
                 inspectionFailed(BridgeError.message("Turn receipts are unavailable while disconnected."), initial: true); return
             }
             let generation = inspectionGeneration
-            client.request("receipts.list", params: ["limit": 24]) { [weak self] result in
-                guard let self, self.inspectionGeneration == generation else { return }
+            let source = client
+            source.request("receipts.list", params: ["limit": 24]) { [weak self, weak source] result in
+                guard let self, let source, self.client === source, !self.closing, self.inspectionGeneration == generation else { return }
                 switch result {
                 case .success(let data):
                     self.inspection.string = ReceiptsLedgerFormatter.format(data)
@@ -223,7 +229,7 @@ extension WorkspaceWindow {
         let generation = inspectionGeneration
         let source = client
         source.request("workspace.branch") { [weak self, weak source] result in
-            guard let self, let source, self.client === source, self.inspectionGeneration == generation, self.inspectedFile == path else { return }
+            guard let self, let source, self.client === source, !self.closing, self.inspectionGeneration == generation, self.inspectedFile == path else { return }
             switch result {
             case .success(let data):
                 guard let branch = data["branch"] as? String else { return }
@@ -323,9 +329,10 @@ extension WorkspaceWindow {
         if [.pdf, .image].contains(state.kind) { documentView.capture(into: &state) }
         else {
             let selected = inspection.selectedRange()
-            state.selectionLocation = selected.location; state.selectionLength = selected.length
-            state.scrollX = max(0, inspectionScroll.contentView.bounds.origin.x)
-            state.scrollY = max(0, inspectionScroll.contentView.bounds.origin.y)
+            state.selectionLocation = selected.location == NSNotFound ? 0 : min(65_536, max(0, selected.location))
+            state.selectionLength = min(65_536, max(0, selected.length))
+            state.scrollX = min(100_000_000, max(0, inspectionScroll.contentView.bounds.origin.x))
+            state.scrollY = min(100_000_000, max(0, inspectionScroll.contentView.bounds.origin.y))
         }
         state.updatedAt = Date().timeIntervalSince1970
         do { try viewportStore.save(state); currentViewport = state; viewportSaveFailed = false }
@@ -367,8 +374,9 @@ extension WorkspaceWindow {
         var request = params; request["offset"] = offset; if let revision { request["revision"] = revision }
         if method == "files.read", let branch = viewportBranch { request["branch"] = branch }
         moreButton.isEnabled = false; previousButton.isEnabled = false
-        client.request(method, params: request) { [weak self] result in
-            guard let self, self.inspectionGeneration == generation else { return }
+        let source = client
+        source.request(method, params: request) { [weak self, weak source] result in
+            guard let self, let source, self.client === source, !self.closing, self.inspectionGeneration == generation else { return }
             switch result {
             case .success(let data):
                 if method == "files.read", restore != nil, offset > 0, data["binary"] as? Bool == true {
@@ -543,7 +551,7 @@ extension WorkspaceWindow {
         projectTaskMovePending = true; walkthrough.setProjectTaskMovesEnabled(false)
         let source = client
         source.request("project.tasks.move", params: ["board": task.board, "id": task.id, "status": status, "revision": projectTaskDisplayedRevision]) { [weak self, weak source] result in
-            guard let self, let source, self.client === source else { return }
+            guard let self, let source, self.client === source, !self.closing else { return }
             self.projectTaskMovePending = false
             self.walkthrough.setProjectTaskMovesEnabled(source.isReady && source.capabilities.contains("project-tasks-move-v1"))
             if case .failure(let error) = result { self.showNotice(error.localizedDescription) }
@@ -564,7 +572,7 @@ extension WorkspaceWindow {
         let filters = projectTaskFilters
         let query = filters.map { ["field": $0.field.rawValue.lowercased(), "operator": $0.operation.rawValue, "value": $0.value] }
         source.request("project.tasks.list", params: ["offset": offset, "filters": query]) { [weak self, weak source] result in
-            guard let self, let source, self.client === source else { return }
+            guard let self, let source, self.client === source, !self.closing else { return }
             self.projectTasksLoading = false
             switch result {
             case .success(let data):
@@ -594,8 +602,9 @@ extension WorkspaceWindow {
         guard client.isReady, client.capabilities.contains("walkthrough-v1"), let id = walkthrough.selectedID, walkthroughLoaded != id else { return }
         walkthroughLoaded = id; walkthroughLoadGeneration += 1
         let generation = walkthroughLoadGeneration
-        client.request("activity.list", params: ["run": id]) { [weak self] result in
-            guard let self, generation == self.walkthroughLoadGeneration, self.walkthrough.selectedID == id else { return }
+        let source = client
+        source.request("activity.list", params: ["run": id]) { [weak self, weak source] result in
+            guard let self, let source, self.client === source, !self.closing, generation == self.walkthroughLoadGeneration, self.walkthrough.selectedID == id else { return }
             switch result {
             case .success(let data):
                 guard data["run"] as? String == id, let index = self.runs.firstIndex(where: { $0["id"] as? String == id }) else { return }

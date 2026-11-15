@@ -279,8 +279,10 @@ pub fn analyze_spider_structural_relationships(
                         if let (Some((ix, iy, _iw, ih)), Some(ob)) = (b_coords, other.get("bounds").and_then(|v| v.as_array())) {
                             if ob.len() == 4 {
                                 let (lx, ly, lw, lh) = (ob[0].as_i64().unwrap_or(0), ob[1].as_i64().unwrap_or(0), ob[2].as_i64().unwrap_or(0), ob[3].as_i64().unwrap_or(0));
-                                let left_adjacent = lx + lw <= ix + 24 && (ix - (lx + lw)) <= 160 && (ly - iy).abs() <= ih.max(lh);
-                                let top_adjacent = ly + lh <= iy + 12 && (iy - (ly + lh)) <= 56 && (lx - ix).abs() <= 80;
+                                let l_right = lx.saturating_add(lw);
+                                let l_bottom = ly.saturating_add(lh);
+                                let left_adjacent = l_right <= ix.saturating_add(24) && ix.saturating_sub(l_right) <= 160 && ly.saturating_sub(iy).saturating_abs() <= ih.max(lh);
+                                let top_adjacent = l_bottom <= iy.saturating_add(12) && iy.saturating_sub(l_bottom) <= 56 && lx.saturating_sub(ix).saturating_abs() <= 80;
                                 if left_adjacent || top_adjacent {
                                     relationships.push(json!({
                                         "sourceId": other_id,
@@ -307,7 +309,7 @@ pub fn analyze_spider_structural_relationships(
                         if let Some(ob) = other.get("bounds").and_then(|v| v.as_array()) {
                             if ob.len() == 4 {
                                 let (ox, oy, ow, oh) = (ob[0].as_i64().unwrap_or(0), ob[1].as_i64().unwrap_or(0), ob[2].as_i64().unwrap_or(0), ob[3].as_i64().unwrap_or(0));
-                                if ox >= x && oy >= y && ox + ow <= x + w && oy + oh <= y + h {
+                                if ox >= x && oy >= y && ox.saturating_add(ow) <= x.saturating_add(w) && oy.saturating_add(oh) <= y.saturating_add(h) {
                                     relationships.push(json!({
                                         "sourceId": id,
                                         "targetId": oid,

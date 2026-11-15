@@ -2,7 +2,7 @@
 use crate::domain::interfaces::{BoxFuture, ICodexAccountStore};
 use crate::domain::types::account_types::{ChatGptAccountCredentials, ChatGptAccountStoreData};
 use crate::domain::types::runtime::CancellationToken;
-use crate::plumbing::hash_and_math::now_ms;
+use crate::plumbing::hash_and_math::{lock_unpoison, now_ms};
 use crate::plumbing::oauth_pkce::{build_openai_authorize_url, encode_base64url, encode_hex_lower, extract_jwt_expiry_ms, extract_openai_account_id, extract_openai_email, extract_openai_plan_type, generate_pkce_challenge, parse_query_params, url_encode_component};
 use serde_json::{json, Value};
 use std::fs;
@@ -15,10 +15,9 @@ use tokio::net::TcpListener;
 use tokio::sync::Mutex as AsyncMutex;
 
 static REFRESH_FLIGHT_LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
-
-fn refresh_flight_lock() -> &'static AsyncMutex<()> {
-    REFRESH_FLIGHT_LOCK.get_or_init(|| AsyncMutex::new(()))
-}
+static STORE_IO_LOCK: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
+fn refresh_flight_lock() -> &'static AsyncMutex<()> { REFRESH_FLIGHT_LOCK.get_or_init(|| AsyncMutex::new(())) }
+fn store_io_lock() -> &'static std::sync::Mutex<()> { STORE_IO_LOCK.get_or_init(|| std::sync::Mutex::new(())) }
 
 pub const OPENAI_CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 pub const OPENAI_OAUTH_AUTH_URL: &str = "https://auth.openai.com/oauth/authorize";
@@ -34,7 +33,7 @@ fn is_safe_oauth_url(url: &str) -> bool {
     if lower.starts_with("https://") { return true; }
     let Some(rest) = lower.strip_prefix("http://") else { return false; };
     let host_port = rest.split(['/', '?', '#']).next().unwrap_or("");
-    matches!(host_port.split(':').next().unwrap_or(""), "127.0.0.1" | "localhost") || host_port == "[::1]" || host_port.starts_with("[::1]:")
+    !host_port.contains('@') && (matches!(host_port.split(':').next().unwrap_or(""), "127.0.0.1" | "localhost") || host_port == "[::1]" || host_port.starts_with("[::1]:"))
 }
 
 pub(crate) fn resolve_token_url() -> String {
@@ -90,10 +89,9 @@ impl CodexAccountStore {
     }
 
     pub fn switch_account(&self, target_id: &str) -> Result<Value, String> {
+        let _io = lock_unpoison(store_io_lock());
         let mut data = self.load_accounts_store();
-        if !data.accounts.iter().any(|a| a.id == target_id) {
-            return Err(format!("Account '{target_id}' was not found."));
-        }
+        if !data.accounts.iter().any(|a| a.id == target_id) { return Err(format!("Account '{target_id}' was not found.")); }
         data.active_id = Some(target_id.to_string());
         self.save_accounts_store(&data)?;
         Ok(snapshot_value(&data))
@@ -101,59 +99,46 @@ impl CodexAccountStore {
 
     pub fn rename_account(&self, target_id: &str, new_label: &str) -> Result<Value, String> {
         let trimmed = new_label.trim();
-        if trimmed.is_empty() {
-            return Err("Account name cannot be empty.".to_string());
-        }
+        if trimmed.is_empty() { return Err("Account name cannot be empty.".to_string()); }
+        let _io = lock_unpoison(store_io_lock());
         let mut data = self.load_accounts_store();
-        let Some(acc) = data.accounts.iter_mut().find(|a| a.id == target_id) else {
-            return Err(format!("Account '{target_id}' was not found."));
-        };
-        acc.label = trimmed.chars().take(100).collect();
-        acc.updated_at_ms = now_ms();
+        let Some(acc) = data.accounts.iter_mut().find(|a| a.id == target_id) else { return Err(format!("Account '{target_id}' was not found.")); };
+        acc.label = trimmed.chars().take(100).collect(); acc.updated_at_ms = now_ms();
         self.save_accounts_store(&data)?;
         Ok(snapshot_value(&data))
     }
 
     pub fn remove_account(&self, target_id: &str) -> Result<Value, String> {
+        let _io = lock_unpoison(store_io_lock());
         let mut data = self.load_accounts_store();
         let before = data.accounts.len();
         data.accounts.retain(|a| a.id != target_id);
-        if data.accounts.len() == before {
-            return Err(format!("Account '{target_id}' was not found."));
-        }
-        if data.active_id.as_deref() == Some(target_id) {
-            data.active_id = data.accounts.first().map(|a| a.id.clone());
-        }
+        if data.accounts.len() == before { return Err(format!("Account '{target_id}' was not found.")); }
+        if data.active_id.as_deref() == Some(target_id) { data.active_id = data.accounts.first().map(|a| a.id.clone()); }
         self.save_accounts_store(&data)?;
         Ok(snapshot_value(&data))
     }
 
     pub fn sign_out(&self, all: bool) -> Result<Value, String> {
+        let _io = lock_unpoison(store_io_lock());
         let mut data = self.load_accounts_store();
-        if all {
-            data.accounts.clear();
-            data.active_id = None;
-        } else if let Some(active) = data.active_id.clone() {
-            data.accounts.retain(|a| a.id != active);
-            data.active_id = data.accounts.first().map(|a| a.id.clone());
-        }
+        if all { data.accounts.clear(); data.active_id = None; }
+        else if let Some(active) = data.active_id.clone() { data.accounts.retain(|a| a.id != active); data.active_id = data.accounts.first().map(|a| a.id.clone()); }
         self.save_accounts_store(&data)?;
         Ok(snapshot_value(&data))
     }
 
     pub fn clear_limit(&self, target_id: &str) -> Result<Value, String> {
+        let _io = lock_unpoison(store_io_lock());
         let mut data = self.load_accounts_store();
-        let Some(acc) = data.accounts.iter_mut().find(|a| a.id == target_id) else {
-            return Err(format!("Account '{target_id}' was not found."));
-        };
-        acc.limited_until_ms = None;
-        acc.limit_estimated = false;
-        acc.updated_at_ms = now_ms();
+        let Some(acc) = data.accounts.iter_mut().find(|a| a.id == target_id) else { return Err(format!("Account '{target_id}' was not found.")); };
+        acc.limited_until_ms = None; acc.limit_estimated = false; acc.updated_at_ms = now_ms();
         self.save_accounts_store(&data)?;
         Ok(snapshot_value(&data))
     }
 
     pub fn set_auto_switch(&self, enabled: bool) -> Result<Value, String> {
+        let _io = lock_unpoison(store_io_lock());
         let mut data = self.load_accounts_store();
         data.auto_switch = enabled;
         self.save_accounts_store(&data)?;
@@ -165,8 +150,8 @@ impl CodexAccountStore {
     where
         F: FnOnce(String),
     {
-        let verifier = encode_base64url(&random_bytes_32());
-        let state = encode_hex_lower(&random_bytes_32()[..16]);
+        let verifier = encode_base64url(&random_bytes_32()?);
+        let state = encode_hex_lower(&random_bytes_32()?[..16]);
         let challenge = generate_pkce_challenge(&verifier);
         let auth_url = build_openai_authorize_url(
             OPENAI_OAUTH_AUTH_URL,
@@ -190,9 +175,13 @@ impl CodexAccountStore {
         let creds = exchange_code_for_tokens(&code, &verifier).await?;
         let (access_checked, model_count) = probe_codex_models(&creds.access_token, creds.account_id.as_deref()).await;
 
-        let mut data = self.load_accounts_store();
-        let created = upsert_account(&mut data, creds.clone());
-        self.save_accounts_store(&data)?;
+        let (data, created) = {
+            let _io = lock_unpoison(store_io_lock());
+            let mut data = self.load_accounts_store();
+            let created = upsert_account(&mut data, creds.clone());
+            self.save_accounts_store(&data)?;
+            (data, created)
+        };
 
         let mut out = snapshot_value(&data);
         if let Some(obj) = out.as_object_mut() {
@@ -253,6 +242,7 @@ impl CodexAccountStore {
 
         let refreshed = refresh_oauth_token(&refresh_tok, &current).await?;
         let result = (refreshed.access_token.clone(), refreshed.account_id.clone());
+        let _io = lock_unpoison(store_io_lock());
         let mut data = self.load_accounts_store();
         if let Some(slot) = data.accounts.iter_mut().find(|a| a.id == id) {
             slot.access_token = refreshed.access_token;
@@ -267,6 +257,7 @@ impl CodexAccountStore {
 
     /// Records a 429 usage limit on the active account and auto-switches if another ready account exists.
     pub fn record_rate_limit(&self, retry_after_ms: Option<u64>) {
+        let _io = lock_unpoison(store_io_lock());
         let mut data = self.load_accounts_store();
         let now = now_ms();
         let until = now.saturating_add(retry_after_ms.unwrap_or(15 * 60_000).max(5_000));
@@ -399,13 +390,22 @@ fn upsert_account(data: &mut ChatGptAccountStoreData, mut incoming: ChatGptAccou
     }
 }
 
-fn random_bytes_32() -> [u8; 32] {
+fn random_bytes_32() -> Result<[u8; 32], String> {
     let mut buf = [0u8; 32];
-    let mut f = fs::File::open("/dev/urandom")
-        .expect("CSPRNG /dev/urandom unavailable for OAuth PKCE generation");
-    f.read_exact(&mut buf)
-        .expect("Failed to read 32 random bytes from /dev/urandom");
-    buf
+    let mut f = fs::File::open("/dev/urandom").map_err(|e| format!("CSPRNG /dev/urandom unavailable: {e}"))?;
+    f.read_exact(&mut buf).map_err(|e| format!("Failed reading CSPRNG bytes: {e}"))?;
+    Ok(buf)
+}
+
+async fn read_oauth_body_bounded(mut resp: reqwest::Response, max_bytes: usize) -> Result<String, String> {
+    let mut buf = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
+        if buf.len().saturating_add(chunk.len()) > max_bytes {
+            return Err(format!("OAuth response exceeded {max_bytes} byte cap"));
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
 async fn wait_for_oauth_callback(
@@ -510,7 +510,7 @@ async fn exchange_code_for_tokens(code: &str, verifier: &str) -> Result<ChatGptA
         .await
         .map_err(|e| format!("OpenAI token exchange request failed: {e}"))?;
     let status = resp.status();
-    let text = resp.text().await.map_err(|e| e.to_string())?;
+    let text = read_oauth_body_bounded(resp, 1024 * 1024).await?;
     if !status.is_success() {
         return Err(format!("OpenAI token exchange failed ({status}): {text}"));
     }
@@ -535,7 +535,7 @@ async fn refresh_oauth_token(
         .await
         .map_err(|e| format!("OpenAI token refresh failed: {e}"))?;
     let status = resp.status();
-    let text = resp.text().await.map_err(|e| e.to_string())?;
+    let text = read_oauth_body_bounded(resp, 1024 * 1024).await?;
     if !status.is_success() {
         return Err(format!("OpenAI token refresh rejected ({status}): {text}"));
     }
@@ -591,10 +591,10 @@ fn parse_token_response(
         .map(|p| p.label.clone())
         .or_else(|| email.clone())
         .unwrap_or_else(|| "ChatGPT Account".to_string());
-    let id = prev
-        .map(|p| p.id.clone())
-        .or_else(|| account_id.clone())
-        .unwrap_or_else(|| format!("acc-{}", &encode_hex_lower(&random_bytes_32()[..6])));
+    let id = match prev.map(|p| p.id.clone()).or_else(|| account_id.clone()) {
+        Some(existing) => existing,
+        None => format!("acc-{}", &encode_hex_lower(&random_bytes_32()?[..6])),
+    };
 
     Ok(ChatGptAccountCredentials {
         id: id.chars().take(64).collect(),
@@ -641,7 +641,8 @@ async fn probe_codex_models(access_token: &str, account_id: Option<&str>) -> (bo
     if !resp.status().is_success() {
         return (false, 0);
     }
-    let Ok(body) = resp.json::<Value>().await else { return (false, 0); };
+    let Ok(text) = read_oauth_body_bounded(resp, 2 * 1024 * 1024).await else { return (false, 0); };
+    let Ok(body) = serde_json::from_str::<Value>(&text) else { return (false, 0); };
     let count = body.get("models").and_then(Value::as_array).or_else(|| body.as_array()).map(|a| a.len()).unwrap_or(0);
     (true, count)
 }

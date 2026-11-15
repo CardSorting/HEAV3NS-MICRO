@@ -164,7 +164,14 @@ fn default_pricing_cache_path() -> PathBuf {
 }
 
 fn load_cached_catalog(path: &Path) -> Option<ModelPricingCatalog> {
-    let raw = fs::read_to_string(path).ok()?;
+    use std::io::Read;
+    const MAX_CACHED_CATALOG_BYTES: usize = 4 * 1024 * 1024;
+    let file = fs::File::open(path).ok()?;
+    let mut raw = String::new();
+    file.take(MAX_CACHED_CATALOG_BYTES as u64 + 1).read_to_string(&mut raw).ok()?;
+    if raw.len() > MAX_CACHED_CATALOG_BYTES {
+        return None;
+    }
     let disk: ModelPricingCatalog = serde_json::from_str(&raw).ok()?;
     if disk.entries.is_empty() {
         return None;

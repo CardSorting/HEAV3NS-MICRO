@@ -64,7 +64,7 @@ impl AgentEngine {
     pub fn inspect_context_snapshot(&self, sample_prompt: &str) -> ContextInspectionSnapshot {
         let cfg = self.config_snapshot();
         let posture = self.current_posture();
-        let soul = Some(self.tools().skill_catalog.lock().unwrap().active_soul.clone());
+        let soul = Some(self.tools().skill_catalog.lock().unwrap_or_else(|e| e.into_inner()).active_soul.clone());
         let authority = if matches!(posture, ExecutionPosture::AutoReview | ExecutionPosture::FullAccess) {
             ExecutionAuthorityLevel::Autonomous
         } else if matches!(posture, ExecutionPosture::Plan) {
@@ -80,8 +80,7 @@ impl AgentEngine {
         let dynamic_suffix = spec.dynamic_suffix(&cfg, self.workspace_root(), &facts, &skills);
         let full_system = self
             .pinned_system_prompt
-            .lock()
-            .unwrap()
+            .lock().unwrap_or_else(|e| e.into_inner())
             .clone()
             .unwrap_or_else(|| spec.render(&cfg, self.workspace_root(), &facts, &skills));
         let static_prefix_tokens = estimate_text_tokens(&static_prefix);
@@ -95,11 +94,11 @@ impl AgentEngine {
         let tool_full_schema_tokens = estimate_text_tokens(&Value::Array(full_schemas.clone()).to_string());
 
         let unlocked_set: Vec<String> = {
-            let guard = self.tools().unlocked_lru.lock().unwrap();
+            let guard = self.tools().unlocked_lru.lock().unwrap_or_else(|e| e.into_inner());
             guard.iter().map(|s| (*s).to_string()).collect()
         };
         let evicted_set: Vec<String> = {
-            let guard = self.tools().evicted_tools.lock().unwrap();
+            let guard = self.tools().evicted_tools.lock().unwrap_or_else(|e| e.into_inner());
             guard.iter().map(|s| (*s).to_string()).collect()
         };
         let mut deferred = Vec::new();
@@ -110,14 +109,14 @@ impl AgentEngine {
         }
 
         let (memory_entries, memory_tokens) = {
-            let mem = self.memory().lock().unwrap();
+            let mem = self.memory().lock().unwrap_or_else(|e| e.into_inner());
             let count = mem.list_memories().len();
             let toks = mem.format_memory_envelope().map(|e| estimate_text_tokens(&e)).unwrap_or(0);
             (count, toks)
         };
 
         let (history_messages, rolling_summaries, history_tokens) = {
-            let sess = self.session().lock().unwrap();
+            let sess = self.session().lock().unwrap_or_else(|e| e.into_inner());
             let non_sys: Vec<_> = sess.messages().iter().filter(|m| m.role != Role::System).cloned().collect();
             let sums = non_sys.iter().filter(|m| SessionCompactor::is_checkpoint(m)).count();
             let toks = estimate_messages_tokens(&non_sys);
@@ -137,7 +136,7 @@ impl AgentEngine {
         let model_family = ModelPromptFamily::classify(&cfg).as_str().to_string();
         let fp = PrefixFingerprint::from_wire_prefix(&full_system, &active_schemas);
         let cache_prefix_hash = fp.combined_hash;
-        let prefix_pin_status = self.last_prefix_status.lock().unwrap().clone();
+        let prefix_pin_status = self.last_prefix_status.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let sample_usage = ProviderTokenUsage {
             prompt_tokens: used_input_tokens,
             completion_tokens: 0,
@@ -192,7 +191,7 @@ impl AgentEngine {
     pub fn build_request_manifest(&self, sample_prompt: &str) -> RequestManifest {
         let cfg = self.config_snapshot();
         let posture = self.current_posture();
-        let soul = Some(self.tools().skill_catalog.lock().unwrap().active_soul.clone());
+        let soul = Some(self.tools().skill_catalog.lock().unwrap_or_else(|e| e.into_inner()).active_soul.clone());
         let authority = if matches!(posture, ExecutionPosture::AutoReview | ExecutionPosture::FullAccess) {
             ExecutionAuthorityLevel::Autonomous
         } else if matches!(posture, ExecutionPosture::Plan) {
@@ -206,14 +205,14 @@ impl AgentEngine {
         let probe = if sample_prompt.trim().is_empty() { "inspect workspace" } else { sample_prompt };
         let tools_wire = self.tools().peek_tool_schemas_for(probe, self.forbids_swarm_delegation());
         let tool_toks = estimate_text_tokens(&Value::Array(tools_wire.clone()).to_string());
-        let pinned = self.pinned_system_prompt.lock().unwrap().clone();
+        let pinned = self.pinned_system_prompt.lock().unwrap_or_else(|e| e.into_inner()).clone();
 
         let msgs = {
-            let mut sess = self.session().lock().unwrap().clone();
+            let mut sess = self.session().lock().unwrap_or_else(|e| e.into_inner()).clone();
             if !sample_prompt.trim().is_empty() {
                 sess.add_message(SessionMessage::new(Role::User, sample_prompt.trim()));
             }
-            let mem = self.memory().lock().unwrap();
+            let mem = self.memory().lock().unwrap_or_else(|e| e.into_inner());
             let (m, _) = PromptComposer::compose_with_posture(
                 &cfg,
                 self.workspace_root(),
@@ -237,7 +236,7 @@ impl AgentEngine {
             .as_deref()
             .and_then(WireDialect::parse_override)
             .unwrap_or(model_wire);
-        let status = self.last_prefix_status.lock().unwrap().clone();
+        let status = self.last_prefix_status.lock().unwrap_or_else(|e| e.into_inner()).clone();
         RequestManifest::build(&wire_model, posture, &msgs, &tools_wire, cfg.context_window_tokens, &status)
             .with_route_metadata(&cfg.provider, active_wire.as_str(), &cfg.api_endpoint, cfg.reasoning_effort.as_deref())
     }
@@ -336,7 +335,7 @@ impl AgentEngine {
         let cfg = self.config_snapshot();
         let facts = WorkspacePromptProbe::probe_cached(self.workspace_root());
         let skills = discover_skills_cached(self.workspace_root());
-        let soul = Some(self.tools().skill_catalog.lock().unwrap().active_soul.clone());
+        let soul = Some(self.tools().skill_catalog.lock().unwrap_or_else(|e| e.into_inner()).active_soul.clone());
         let trimmed = mode.trim().to_ascii_lowercase();
 
         let spec = match trimmed.as_str() {
@@ -382,7 +381,7 @@ impl AgentEngine {
 
     pub fn render_tools_status(&self) -> String {
         let specs = builtin_tool_specs();
-        let unlocked = self.tools().unlocked_tools.lock().unwrap().clone();
+        let unlocked = self.tools().unlocked_tools.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let snap = self.inspect_context_snapshot("");
         let mut lines = vec![format!(
             "Registered Built-in Tools ({} available · {} active [{}t] / {}t full):",

@@ -64,7 +64,7 @@ extension WorkspaceWindow {
         guard syncRemote, client.isReady, !closing else { return }
         let source = client
         source.request("posture.set", params: ["posture": stop.rawValue]) { [weak self, weak source] result in
-            guard let self, let source, self.client === source, self.postureGeneration == gen else { return }
+            guard let self, let source, self.client === source, self.postureGeneration == gen, !self.closing else { return }
             if case .success(let data) = result,
                let remoteSlug = data["posture"] as? String,
                let parsed = ExecutionPostureStop.parse(remoteSlug),
@@ -224,7 +224,7 @@ extension WorkspaceWindow {
         guard (!modeRequiresFileSearch || canOpenFile), !closing, let window, window.attachedSheet == nil else { return }
         quickOpen?.dismiss(restoreFocus: false)
         let picker = QuickOpenWindow(folder: folder, search: { [weak self] query, refresh, completion in
-            guard let self, self.canOpenFile else {
+            guard let self, !self.closing, self.canOpenFile else {
                 completion(.success(["entries": [], "matched": 0, "more": false, "scanLimited": false, "scope": "workspace"]))
                 return
             }

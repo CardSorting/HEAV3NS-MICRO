@@ -135,6 +135,7 @@ final class ActionPalette: NSWindowController, NSWindowDelegate, NSTableViewData
     }
     var diagnostics: [String: Any] { ["visible": window?.isVisible == true, "query": search.stringValue, "matches": matches.map(\.title), "selectedRow": table.selectedRow] }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard matches.indices.contains(row) else { return nil }
         let title = NSTextField(labelWithString: matches[row].title)
         let shortcut = NSTextField(labelWithString: matches[row].shortcut); shortcut.textColor = .secondaryLabelColor; shortcut.font = .systemFont(ofSize: 11)
         let cell = NSTableCellView()

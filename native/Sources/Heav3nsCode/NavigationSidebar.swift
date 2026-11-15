@@ -31,9 +31,9 @@ final class NavigationSidebar: NSView, NSTableViewDataSource, NSTableViewDelegat
     private let search = NSSearchField()
     private let location = NSTextField(labelWithString: "Workspace")
     private let message = NSTextField(wrappingLabelWithString: "Choose Files to browse this workspace.")
-    private let back = NSButton(image: NSImage(systemSymbolName: "chevron.up", accessibilityDescription: "Parent folder")!, target: nil, action: nil)
+    private let back = NSButton(image: NSImage(systemSymbolName: "chevron.up", accessibilityDescription: "Parent folder") ?? NSImage(), target: nil, action: nil)
     private let next = NSButton(title: "Next 100", target: nil, action: nil)
-    private let previous = NSButton(image: NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Previous page")!, target: nil, action: nil)
+    private let previous = NSButton(image: NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Previous page") ?? NSImage(), target: nil, action: nil)
     private var suppressSelection = false
     private var filterWork: DispatchWorkItem?
     private let destinationScroll = NSScrollView()
@@ -87,7 +87,7 @@ final class NavigationSidebar: NSView, NSTableViewDataSource, NSTableViewDelegat
         let scroll = NSScrollView(); scroll.documentView = items; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
         scroll.setContentHuggingPriority(.init(1), for: .vertical); root.addArrangedSubview(scroll)
         message.font = .systemFont(ofSize: 11); message.textColor = .secondaryLabelColor; root.addArrangedSubview(message)
-        let refresh = NSButton(image: NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh")!, target: self, action: #selector(reload))
+        let refresh = NSButton(image: NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh") ?? NSImage(), target: self, action: #selector(reload))
         refresh.bezelStyle = .texturedRounded; refresh.setAccessibilityLabel("Refresh current destination")
         next.target = self; next.action = #selector(nextPage); next.bezelStyle = .rounded; next.isHidden = true
         previous.target = self; previous.action = #selector(previousPage); previous.bezelStyle = .texturedRounded; previous.isEnabled = false

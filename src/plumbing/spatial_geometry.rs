@@ -74,7 +74,8 @@ impl SpatialPoint {
     }
 
     pub fn to_i32(&self) -> [i32; 2] {
-        [self.x.round() as i32, self.y.round() as i32]
+        let clamp = |v: f64| if v.is_finite() { v.round().clamp(i32::MIN as f64, i32::MAX as f64) as i32 } else { 0 };
+        [clamp(self.x), clamp(self.y)]
     }
 
     pub fn from_i32(pt: [i32; 2]) -> Self {
@@ -131,10 +132,11 @@ impl SpatialRect {
     }
 
     pub fn area(&self) -> f64 {
-        if self.width <= 0.0 || self.height <= 0.0 {
+        if !self.width.is_finite() || !self.height.is_finite() || self.width <= 0.0 || self.height <= 0.0 {
             0.0
         } else {
-            self.width * self.height
+            let a = self.width * self.height;
+            if a.is_finite() { a } else { 0.0 }
         }
     }
 
@@ -232,7 +234,7 @@ impl SpatialRect {
     /// Computes what fraction of `self` is covered by `occluder` in range [0.0, 1.0].
     pub fn occlusion_ratio(&self, occluder: &SpatialRect) -> f64 {
         let self_area = self.area();
-        if self_area <= 0.0 {
+        if !self_area.is_finite() || self_area <= 0.0 {
             return 1.0;
         }
         let inter_area = self.intersection(occluder).map(|r| r.area()).unwrap_or(0.0);
@@ -258,10 +260,18 @@ impl SpatialRect {
     }
 
     pub fn clamp_to_bounds(&self, bounds: &SpatialRect) -> SpatialRect {
-        let cx1 = self.min_x().clamp(bounds.min_x(), bounds.max_x());
-        let cy1 = self.min_y().clamp(bounds.min_y(), bounds.max_y());
-        let cx2 = self.max_x().clamp(bounds.min_x(), bounds.max_x());
-        let cy2 = self.max_y().clamp(bounds.min_y(), bounds.max_y());
+        if !self.is_valid() || !bounds.is_valid() {
+            return SpatialRect::zero();
+        }
+        let (bx1, bx2) = (bounds.min_x(), bounds.max_x());
+        let (by1, by2) = (bounds.min_y(), bounds.max_y());
+        if !bx2.is_finite() || !by2.is_finite() || bx1 > bx2 || by1 > by2 {
+            return SpatialRect::zero();
+        }
+        let cx1 = self.min_x().clamp(bx1, bx2);
+        let cy1 = self.min_y().clamp(by1, by2);
+        let cx2 = self.max_x().clamp(bx1, bx2);
+        let cy2 = self.max_y().clamp(by1, by2);
         SpatialRect {
             x: cx1,
             y: cy1,

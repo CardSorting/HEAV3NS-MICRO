@@ -70,10 +70,19 @@ impl TransactionJournal {
         self.seq += 1;
         let id = format!("tx_{}_{}", self.seq, now_ms());
         let (previous_content, created_new_file) = match fs::metadata(target_path) {
-            Ok(meta) if meta.len() <= 8 * 1024 * 1024 => match fs::read(target_path) {
-                Ok(bytes) => (Some(bytes), false),
-                Err(_) => (None, false),
-            },
+            Ok(meta) if meta.is_file() && meta.len() <= 8 * 1024 * 1024 => {
+                use std::io::Read;
+                match fs::File::open(target_path) {
+                    Ok(file) => {
+                        let mut buf = Vec::new();
+                        match file.take(8 * 1024 * 1024 + 1).read_to_end(&mut buf) {
+                            Ok(_) if buf.len() <= 8 * 1024 * 1024 => (Some(buf), false),
+                            _ => (None, false),
+                        }
+                    }
+                    Err(_) => (None, false),
+                }
+            }
             Ok(_) => (None, false),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (None, true),
             Err(_) => (None, false),
@@ -212,7 +221,7 @@ impl TransactionJournal {
                 .as_deref()
                 .map(|b| String::from_utf8_lossy(b).into_owned())
                 .unwrap_or_default();
-            let after_str = fs::read_to_string(&p).unwrap_or_default();
+            let after_str = crate::infrastructure::search_tools::read_text_file_bounded(&p, 8 * 1024 * 1024).unwrap_or_default();
             if before_str != after_str || !p.exists() {
                 let rel = p.strip_prefix(cwd).unwrap_or(&p).to_string_lossy().into_owned();
                 diffs.push(render_unified_diff(&rel, &before_str, &after_str));

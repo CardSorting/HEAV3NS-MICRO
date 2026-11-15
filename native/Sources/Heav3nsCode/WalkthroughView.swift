@@ -528,7 +528,7 @@ final class WalkthroughView: NSView, NSTableViewDataSource, NSTableViewDelegate,
                 let inserted = IndexSet(difference.insertions.compactMap { if case .insert(let index, _, _) = $0 { return index }; return nil })
                 table.beginUpdates(); table.removeRows(at: removed, withAnimation: []); table.insertRows(at: inserted, withAnimation: []); table.endUpdates()
             }
-            let previous = Dictionary(uniqueKeysWithValues: old.map { ($0.id, $0) })
+            let previous = Dictionary(old.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
             let changed = IndexSet(next.indices.filter { previous[next[$0].id] != next[$0] })
             if !changed.isEmpty {
                 for row in changed {

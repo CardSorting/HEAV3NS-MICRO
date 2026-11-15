@@ -8,7 +8,6 @@ use crate::infrastructure::vfs_store::{FileSessionPersistence, SessionVfs};
 use crate::plumbing::hash_and_math::{fnv1a_32, now_ms};
 use crate::plumbing::text_tokens::{estimate_text_tokens, truncate_text_to_token_budget};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Hybrid deterministic context compactor generating `LUMI-CONTEXT/1` rolling checkpoints.
@@ -257,8 +256,24 @@ impl SessionCompactor {
             }
         }
         kept_rev.reverse();
-        while kept_rev.first().is_some_and(|m| m.role != Role::User) {
+        while kept_rev.first().is_some_and(|m| m.role == Role::Tool) {
             kept_rev.remove(0);
+        }
+        if !kept_rev.is_empty() && kept_rev.first().is_some_and(|m| m.role != Role::User) {
+            if kept_rev.iter().any(|m| m.role == Role::User) {
+                while kept_rev.first().is_some_and(|m| m.role != Role::User) {
+                    kept_rev.remove(0);
+                }
+            } else if let Some(fallback) = non_system.iter().rev().find(|m| m.role == Role::User) {
+                let mut clamped = fallback.clone();
+                clamped.content = truncate_text_to_token_budget(&fallback.content, (remaining_budget / 3).max(32));
+                clamped.tool_calls = None;
+                kept_rev.insert(0, clamped);
+            } else {
+                while kept_rev.first().is_some_and(|m| m.role != Role::User) {
+                    kept_rev.remove(0);
+                }
+            }
         }
         if kept_rev.is_empty() {
             if let Some(fallback) = non_system.iter().rev().find(|m| m.role == Role::User) {
@@ -282,7 +297,6 @@ pub struct SessionStore {
     pub turn_count: u64,
     messages: Vec<SessionMessage>,
     transcript: Vec<SessionMessage>,
-    transcript_index: HashMap<String, SessionMessage>,
     arena: ArenaAllocator,
     context_generation: u64,
     last_saved_hash: Option<u32>,
@@ -300,7 +314,6 @@ impl SessionStore {
             turn_count: 0,
             messages: Vec::new(),
             transcript: Vec::new(),
-            transcript_index: HashMap::new(),
             arena: ArenaAllocator::new(arena_capacity.unwrap_or(DEFAULT_ARENA_CAPACITY_BYTES)),
             context_generation: 0,
             last_saved_hash: None,
@@ -316,8 +329,6 @@ impl SessionStore {
         if !msg.content.is_empty() {
             let _ = self.arena.allocate_str(&msg.content);
         }
-        let reference = SessionCompactor::reference_for(&msg);
-        self.transcript_index.insert(reference, msg.clone());
         self.transcript.push(msg.clone());
         self.messages.push(msg);
         self.messages.last().unwrap()
@@ -346,17 +357,20 @@ impl SessionStore {
     pub extern "Rust" fn clear(&mut self) {
         self.messages.clear();
         self.transcript.clear();
-        self.transcript_index.clear();
         self.context_generation += 1;
         self.arena.reset();
     }
 
     pub fn truncate_active_messages(&mut self, count: usize) {
         let keep = self.messages.len().saturating_sub(count);
-        self.messages.truncate(keep);
-        let t_keep = self.transcript.len().saturating_sub(count);
-        self.transcript.truncate(t_keep);
-        self.rebuild_transcript_index();
+        if keep == 0 {
+            self.messages.clear();
+            self.transcript.clear();
+        } else {
+            self.messages.truncate(keep);
+            let t_keep = self.transcript.len().saturating_sub(count);
+            self.transcript.truncate(t_keep);
+        }
         self.rebuild_arena();
     }
 
@@ -400,7 +414,6 @@ impl SessionStore {
         self.messages = parsed.clone();
         self.transcript = parsed;
         self.turn_count = self.messages.iter().filter(|m| m.role == Role::User).count() as u64;
-        self.rebuild_transcript_index();
         self.context_generation += 1;
         self.rebuild_arena();
         Ok(())
@@ -446,7 +459,6 @@ impl SessionStore {
         self.turn_count = snapshot.frame_index;
         self.messages = snapshot.messages.clone();
         self.transcript = snapshot.transcript.clone();
-        self.rebuild_transcript_index();
         self.context_generation += 1;
         self.rebuild_arena();
         vfs.clear();
@@ -458,14 +470,6 @@ impl SessionStore {
             }
         }
         memory.restore_memories(snapshot.memories.clone());
-    }
-
-    fn rebuild_transcript_index(&mut self) {
-        self.transcript_index.clear();
-        for msg in &self.transcript {
-            self.transcript_index
-                .insert(SessionCompactor::reference_for(msg), msg.clone());
-        }
     }
 
     fn rebuild_arena(&mut self) {

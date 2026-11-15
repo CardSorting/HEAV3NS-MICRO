@@ -99,14 +99,22 @@ impl WorkspaceSnapshotCas {
     }
 
     pub fn load_recent_receipts(&self, limit: usize) -> Vec<TurnReceipt> {
+        use std::io::{Read, Seek, SeekFrom};
         let path = self.cas_root.join("receipts.jsonl");
-        let Ok(raw) = fs::read_to_string(path) else {
+        let Ok(mut file) = fs::File::open(&path) else { return Vec::new() };
+        let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+        const MAX_RECEIPTS_TAIL: u64 = 4 * 1024 * 1024;
+        let truncated = len > MAX_RECEIPTS_TAIL;
+        if truncated && file.seek(SeekFrom::Start(len - MAX_RECEIPTS_TAIL)).is_err() {
             return Vec::new();
-        };
-        let mut parsed: Vec<TurnReceipt> = raw
-            .lines()
-            .filter_map(|l| serde_json::from_str::<TurnReceipt>(l).ok())
-            .collect();
+        }
+        let mut buf = Vec::new();
+        if file.take(MAX_RECEIPTS_TAIL).read_to_end(&mut buf).is_err() {
+            return Vec::new();
+        }
+        let raw = String::from_utf8_lossy(&buf);
+        let lines = raw.lines().skip(usize::from(truncated));
+        let mut parsed: Vec<TurnReceipt> = lines.filter_map(|l| serde_json::from_str::<TurnReceipt>(l).ok()).collect();
         if parsed.len() > limit {
             parsed = parsed.split_off(parsed.len() - limit);
         }
@@ -328,7 +336,12 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
         let files: BTreeMap<String, CasFileEntry> = scanned.into_iter().map(|(k, (v, _))| (k, v)).collect();
         let ts = now_ms();
         let tree_digest = Self::sha256_hex(serde_json::to_string(&files).unwrap_or_default().as_bytes());
-        let id = format!("snap_{turn_number}_{}", &tree_digest[..8]);
+        let mut seq = 0u64;
+        let mut id = format!("snap_{turn_number}_{}", &tree_digest[..8]);
+        while self.snapshots.iter().any(|s| s.id == id) {
+            seq += 1;
+            id = format!("snap_{turn_number}_{}_{seq}", &tree_digest[..8]);
+        }
         let manifest = CasSnapshotManifest {
             id: id.clone(),
             label: label.to_string(),
@@ -486,9 +499,20 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
                 if fs::symlink_metadata(&disk_path).is_ok_and(|m| m.file_type().is_symlink()) {
                     return Err(format!("WouldBlock: '{rel}' is a symlink; refusing CAS undo."));
                 }
-                match (post.files.get(rel), fs::read(&disk_path).ok()) {
-                    (Some(expected), Some(actual_bytes)) => {
-                        let actual_sha = Self::sha256_hex(&actual_bytes);
+                let disk_sha = fs::File::open(&disk_path).ok().and_then(|mut f| {
+                    use std::io::Read;
+                    let mut h = Sha256::new();
+                    let mut buf = [0u8; 64 * 1024];
+                    loop {
+                        match f.read(&mut buf) {
+                            Ok(0) => return Some(format!("{:x}", h.finalize())),
+                            Ok(n) => h.update(&buf[..n]),
+                            Err(_) => return None,
+                        }
+                    }
+                });
+                match (post.files.get(rel), disk_sha) {
+                    (Some(expected), Some(actual_sha)) => {
                         if actual_sha != expected.sha256 {
                             return Err(format!(
                                 "WouldBlock: '{rel}' was modified after the turn completed. Use `/undo --force` or `/restore {pre_turn_id}` to overwrite external edits."

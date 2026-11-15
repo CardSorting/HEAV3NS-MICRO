@@ -137,26 +137,26 @@ impl AgentEngine {
     pub fn compactor(&self) -> &SessionCompactor { &self.compactor }
 
     pub(crate) fn provider_arc(&self) -> Arc<dyn ILlmProvider> {
-        Arc::clone(&self.provider.lock().unwrap())
+        Arc::clone(&self.provider.lock().unwrap_or_else(|e| e.into_inner()))
     }
 
     pub fn swap_provider_and_config(&self, new_cfg: AgentConfig, new_provider: Arc<dyn ILlmProvider>) {
-        *self.config.lock().unwrap() = new_cfg;
-        *self.provider.lock().unwrap() = new_provider;
-        *self.pinned_system_prompt.lock().unwrap() = None;
-        self.prefix_tracker.lock().unwrap().declare_repin("provider_or_model_switch");
+        *self.config.lock().unwrap_or_else(|e| e.into_inner()) = new_cfg;
+        *self.provider.lock().unwrap_or_else(|e| e.into_inner()) = new_provider;
+        *self.pinned_system_prompt.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        self.prefix_tracker.lock().unwrap_or_else(|e| e.into_inner()).declare_repin("provider_or_model_switch");
     }
 
     pub fn config_snapshot(&self) -> AgentConfig {
-        self.config.lock().unwrap().clone()
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub fn set_posture(&self, posture: ExecutionPosture) {
-        *self.active_posture.lock().unwrap() = Some(posture);
+        *self.active_posture.lock().unwrap_or_else(|e| e.into_inner()) = Some(posture);
     }
 
     pub fn current_posture(&self) -> ExecutionPosture {
-        self.active_posture.lock().unwrap().unwrap_or(ExecutionPosture::AcceptEdits)
+        self.active_posture.lock().unwrap_or_else(|e| e.into_inner()).unwrap_or(ExecutionPosture::AcceptEdits)
     }
 
     pub fn step_posture(&self) -> ExecutionPosture {
@@ -166,67 +166,66 @@ impl AgentEngine {
     }
 
     pub(crate) fn set_active_model_name(&self, name: &str) {
-        self.config.lock().unwrap().model_name = name.to_string();
-        *self.pinned_system_prompt.lock().unwrap() = None;
-        self.prefix_tracker.lock().unwrap().declare_repin("model_switch");
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).model_name = name.to_string();
+        *self.pinned_system_prompt.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        self.prefix_tracker.lock().unwrap_or_else(|e| e.into_inner()).declare_repin("model_switch");
     }
 
     pub fn set_reasoning_effort(&self, effort: Option<String>) {
-        self.config.lock().unwrap().reasoning_effort = effort.filter(|s| !s.trim().is_empty());
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).reasoning_effort = effort.filter(|s| !s.trim().is_empty());
     }
 
     pub fn set_fallback_providers(&self, fallbacks: Vec<String>) {
-        self.config.lock().unwrap().fallback_providers = fallbacks;
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).fallback_providers = fallbacks;
     }
 
     pub fn snapshots_list(&self) -> Vec<GameStateSnapshot> {
-        self.snapshots.lock().unwrap().clone()
+        self.snapshots.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub(crate) fn snapshot_count(&self) -> usize {
-        self.snapshots.lock().unwrap().len()
+        self.snapshots.lock().unwrap_or_else(|e| e.into_inner()).len()
     }
 
     pub(crate) fn snapshot_cas_map_clone(&self) -> BTreeMap<usize, String> {
-        self.snapshot_cas_map.lock().unwrap().clone()
+        self.snapshot_cas_map.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub fn create_snapshot(&self) -> GameStateSnapshot {
-        let session = self.session.lock().unwrap();
-        let vfs = self.vfs.lock().unwrap();
-        let memory = self.memory.lock().unwrap();
+        let session = self.session.lock().unwrap_or_else(|e| e.into_inner());
+        let vfs = self.vfs.lock().unwrap_or_else(|e| e.into_inner());
+        let memory = self.memory.lock().unwrap_or_else(|e| e.into_inner());
         let snap = session.create_snapshot(&vfs, &memory);
-        let mut snaps = self.snapshots.lock().unwrap();
+        let mut snaps = self.snapshots.lock().unwrap_or_else(|e| e.into_inner());
         let idx = snaps.len();
         snaps.push(snap.clone());
-        if let Ok(cas_id) = self.cas.lock().unwrap().capture_snapshot(&snap.snapshot_id, snap.frame_index) {
-            self.snapshot_cas_map.lock().unwrap().insert(idx, cas_id);
+        if let Ok(cas_id) = self.cas.lock().unwrap_or_else(|e| e.into_inner()).capture_snapshot(&snap.snapshot_id, snap.frame_index) {
+            self.snapshot_cas_map.lock().unwrap_or_else(|e| e.into_inner()).insert(idx, cas_id);
         }
         snap
     }
 
     pub fn rewind_to_snapshot(&self, index: usize) -> Result<GameStateSnapshot, String> {
         let snap = {
-            let snaps = self.snapshots.lock().unwrap();
+            let snaps = self.snapshots.lock().unwrap_or_else(|e| e.into_inner());
             snaps
                 .get(index)
                 .cloned()
                 .ok_or_else(|| format!("Snapshot #{index} not found (total: {})", snaps.len()))?
         };
-        if let Some(cas_id) = self.snapshot_cas_map.lock().unwrap().get(&index).cloned() {
-            self.cas.lock().unwrap().restore_full_snapshot(&cas_id)?;
+        if let Some(cas_id) = self.snapshot_cas_map.lock().unwrap_or_else(|e| e.into_inner()).get(&index).cloned() {
+            self.cas.lock().unwrap_or_else(|e| e.into_inner()).restore_full_snapshot(&cas_id)?;
         }
-        self.tools.cache.lock().unwrap().clear();
-        self.tools.read_tracker.lock().unwrap().reset_stamps();
-        self.tools.journal.lock().unwrap().clear();
-        let future_cas: std::collections::HashSet<String> = self.snapshot_cas_map.lock().unwrap().iter().filter(|(&k, _)| k > index).map(|(_, v)| v.clone()).collect();
-        self.turn_receipts.lock().unwrap().retain(|r| index > 0 && r.snapshot_after.as_ref().is_none_or(|a| !future_cas.contains(a)));
-        let mut session = self.session.lock().unwrap();
-        let mut vfs = self.vfs.lock().unwrap();
-        let mut memory = self.memory.lock().unwrap();
+        self.tools.cache.lock().unwrap_or_else(|e| e.into_inner()).clear(); self.tools.read_tracker.lock().unwrap_or_else(|e| e.into_inner()).reset_stamps(); self.tools.journal.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        let future_cas: std::collections::HashSet<String> = self.snapshot_cas_map.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|(&k, _)| k > index).map(|(_, v)| v.clone()).collect();
+        self.snapshots.lock().unwrap_or_else(|e| e.into_inner()).truncate(index + 1); self.snapshot_cas_map.lock().unwrap_or_else(|e| e.into_inner()).retain(|&k, _| k <= index);
+        self.turn_receipts.lock().unwrap_or_else(|e| e.into_inner()).retain(|r| r.snapshot_after.as_ref().is_none_or(|a| !future_cas.contains(a)));
+        let mut session = self.session.lock().unwrap_or_else(|e| e.into_inner());
+        let mut vfs = self.vfs.lock().unwrap_or_else(|e| e.into_inner());
+        let mut memory = self.memory.lock().unwrap_or_else(|e| e.into_inner());
         session.rewind_to_snapshot(&snap, &mut vfs, &mut memory);
-        *self.pinned_system_prompt.lock().unwrap() = None;
-        self.prefix_tracker.lock().unwrap().declare_repin("snapshot_rewind");
+        *self.pinned_system_prompt.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        self.prefix_tracker.lock().unwrap_or_else(|e| e.into_inner()).declare_repin("snapshot_rewind");
         Ok(snap)
     }
 
@@ -263,11 +262,11 @@ impl AgentEngine {
         let started_ms = now_ms();
         let frame_index = self.frame_counter.fetch_add(1, Ordering::Relaxed) + 1;
         let turn_activity_id = format!("turn-{frame_index}");
-        let cfg = self.config.lock().unwrap().clone();
+        let cfg = self.config.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let authority = input.execution_authority.unwrap_or(ExecutionAuthorityLevel::Autonomous);
         let effective_posture = if let Some(p) = input.posture {
             p
-        } else if let Some(explicit) = *self.active_posture.lock().unwrap() {
+        } else if let Some(explicit) = *self.active_posture.lock().unwrap_or_else(|e| e.into_inner()) {
             explicit
         } else {
             match authority {
@@ -316,7 +315,7 @@ impl AgentEngine {
         }
 
         if let Some(reply) = self.handle_slash_command(&input.prompt) {
-            let active_model = self.config.lock().unwrap().model_name.clone();
+            let active_model = self.config.lock().unwrap_or_else(|e| e.into_inner()).model_name.clone();
             self.emit_progress_internal(&input.on_progress, &turn_activity_id, EngineProgressPhase::Completed, EngineProgressStatus::Completed, "Slash command executed", None, started_ms, None);
             return EngineTickResult {
                 frame_index,
@@ -340,7 +339,7 @@ impl AgentEngine {
             .map(str::trim)
             .filter(|s| !s.is_empty())
         {
-            let entry = self.memory.lock().unwrap().save_memory(format!("fact_{}", now_ms()), fact, "fact");
+            let entry = self.memory.lock().unwrap_or_else(|e| e.into_inner()).save_memory(format!("fact_{}", now_ms()), fact, "fact");
             let reply = format!("Saved to LUMI-MEMORY/1 ({}): {}", entry.key, entry.value);
             return EngineTickResult {
                 frame_index,
@@ -358,7 +357,7 @@ impl AgentEngine {
         }
 
         let turn_num = {
-            let mut sess = self.session.lock().unwrap();
+            let mut sess = self.session.lock().unwrap_or_else(|e| e.into_inner());
             let turn = sess.increment_turn();
             sess.add_message(SessionMessage::new(Role::User, input.prompt.clone()));
             if sess.messages().len() > cfg.max_turns {
@@ -376,12 +375,14 @@ impl AgentEngine {
 
         let constitution = Self::load_constitution(&self.workspace_root);
         self.tools.configure_turn_security(Some(effective_posture), constitution, input.approval_callback.clone());
+        struct TurnApprovalGuard<'a>(&'a crate::core::tool_registry::ToolRegistry);
+        impl Drop for TurnApprovalGuard<'_> { fn drop(&mut self) { self.0.clear_turn_approval_gate(); } }
+        let _approval_guard = TurnApprovalGuard(&self.tools);
         self.tools.begin_turn(turn_num);
 
         let snap_before = self
             .cas
-            .lock()
-            .unwrap()
+            .lock().unwrap_or_else(|e| e.into_inner())
             .capture_snapshot("pre-turn", turn_num)
             .ok();
 
@@ -421,7 +422,7 @@ impl AgentEngine {
             if input.cancel_token.as_ref().map(|t| t.is_cancelled()).unwrap_or(false) {
                 let msg = "Turn cancelled by user.".to_string();
                 {
-                    let mut sess = self.session.lock().unwrap();
+                    let mut sess = self.session.lock().unwrap_or_else(|e| e.into_inner());
                     Self::heal_dangling_tools(&mut sess, "[Turn cancelled by user]");
                 }
                 self.emit_progress_internal(&input.on_progress, &turn_activity_id, EngineProgressPhase::Cancelled, EngineProgressStatus::Cancelled, &msg, None, started_ms, None);
@@ -449,7 +450,7 @@ impl AgentEngine {
             if round > 0 && input.should_defer.as_ref().map(|f| f()).unwrap_or(false) {
                 let msg = "Turn deferred between tool rounds.".to_string();
                 {
-                    let mut sess = self.session.lock().unwrap();
+                    let mut sess = self.session.lock().unwrap_or_else(|e| e.into_inner());
                     Self::heal_dangling_tools(&mut sess, "[Turn deferred between tool rounds]");
                 }
                 self.emit_progress_internal(&input.on_progress, &turn_activity_id, EngineProgressPhase::Deferred, EngineProgressStatus::Deferred, &msg, None, started_ms, None);
@@ -474,25 +475,25 @@ impl AgentEngine {
                 };
             }
 
-            let unlocked_before: Vec<&str> = self.tools.unlocked_tools.lock().unwrap().iter().copied().collect();
+            let unlocked_before: Vec<&str> = self.tools.unlocked_tools.lock().unwrap_or_else(|e| e.into_inner()).iter().copied().collect();
             let routing_hint = {
-                let sess = self.session.lock().unwrap();
+                let sess = self.session.lock().unwrap_or_else(|e| e.into_inner());
                 let tail = sess.messages().last().map(|m| m.content.as_str()).unwrap_or("");
                 format!("{}\n{}", input.prompt, tail)
             };
             let openai_tools = self.tools.select_tool_schemas_for(&routing_hint, self.forbid_swarm_delegation);
-            let unlocked_after: Vec<&str> = self.tools.unlocked_tools.lock().unwrap().iter().copied().collect();
+            let unlocked_after: Vec<&str> = self.tools.unlocked_tools.lock().unwrap_or_else(|e| e.into_inner()).iter().copied().collect();
             if unlocked_after != unlocked_before {
-                self.prefix_tracker.lock().unwrap().declare_repin("tool_schema_unlock");
+                self.prefix_tracker.lock().unwrap_or_else(|e| e.into_inner()).declare_repin("tool_schema_unlock");
             }
 
             let tool_defs_tokens = estimate_text_tokens(&Value::Array(openai_tools.clone()).to_string());
-            let soul = Some(self.tools.skill_catalog.lock().unwrap().active_soul.clone());
+            let soul = Some(self.tools.skill_catalog.lock().unwrap_or_else(|e| e.into_inner()).active_soul.clone());
             let spec = crate::domain::prompt_spec::SystemPromptSpec::for_turn(&cfg, authority, soul);
-            let pinned_sys = self.pinned_system_prompt.lock().unwrap().clone();
+            let pinned_sys = self.pinned_system_prompt.lock().unwrap_or_else(|e| e.into_inner()).clone();
             let (messages_for_provider, composed_summary) = {
-                let sess = self.session.lock().unwrap();
-                let mem = self.memory.lock().unwrap();
+                let sess = self.session.lock().unwrap_or_else(|e| e.into_inner());
+                let mem = self.memory.lock().unwrap_or_else(|e| e.into_inner());
                 PromptComposer::compose_with_posture(
                     &cfg,
                     &self.workspace_root,
@@ -506,14 +507,14 @@ impl AgentEngine {
             };
             if pinned_sys.is_none() {
                 if let Some(sys_msg) = messages_for_provider.first().filter(|m| m.role == Role::System) {
-                    *self.pinned_system_prompt.lock().unwrap() = Some(sys_msg.content.clone());
+                    *self.pinned_system_prompt.lock().unwrap_or_else(|e| e.into_inner()) = Some(sys_msg.content.clone());
                 }
             }
             let sys_str = messages_for_provider.first().map(|m| m.content.as_str()).unwrap_or("");
             let fp = PrefixFingerprint::from_wire_prefix(sys_str, &openai_tools);
             last_prefix_hash = fp.combined_hash.clone();
-            last_prefix_status = self.prefix_tracker.lock().unwrap().record_prefix(fp).label();
-            *self.last_prefix_status.lock().unwrap() = last_prefix_status.clone();
+            last_prefix_status = self.prefix_tracker.lock().unwrap_or_else(|e| e.into_inner()).record_prefix(fp).label();
+            *self.last_prefix_status.lock().unwrap_or_else(|e| e.into_inner()) = last_prefix_status.clone();
             last_composed_summary = composed_summary;
 
             let resp = match self
@@ -537,7 +538,7 @@ impl AgentEngine {
                 Err((ProviderError::Cancelled, _)) => {
                     let msg = "Turn cancelled by user.".to_string();
                     {
-                        let mut sess = self.session.lock().unwrap();
+                        let mut sess = self.session.lock().unwrap_or_else(|e| e.into_inner());
                         Self::heal_dangling_tools(&mut sess, "[Turn cancelled by user]");
                     }
                     self.emit_progress_internal(&input.on_progress, &turn_activity_id, EngineProgressPhase::Cancelled, EngineProgressStatus::Cancelled, &msg, None, started_ms, None);
@@ -567,10 +568,10 @@ impl AgentEngine {
                         .and_then(|e| e.code.as_deref())
                         == Some(CREDENTIAL_REJECTED_UNSENT_CODE);
                     if is_unsent_auth && !tools_admitted {
-                        let mut sess = self.session.lock().unwrap();
+                        let mut sess = self.session.lock().unwrap_or_else(|e| e.into_inner());
                         sess.truncate_active_messages(1);
                     } else {
-                        let mut sess = self.session.lock().unwrap();
+                        let mut sess = self.session.lock().unwrap_or_else(|e| e.into_inner());
                         Self::heal_dangling_tools(&mut sess, "[Turn halted due to provider error]");
                     }
                     let err_str = if let Some(env) = envelope {
@@ -615,7 +616,7 @@ impl AgentEngine {
             if resp.tool_calls.is_empty() {
                 final_response = resp.content.unwrap_or_default();
                 completed_with_assistant_reply = true;
-                let mut sess = self.session.lock().unwrap();
+                let mut sess = self.session.lock().unwrap_or_else(|e| e.into_inner());
                 sess.add_message(SessionMessage::new(Role::Assistant, final_response.clone()));
                 if sess.messages().len() > cfg.max_turns {
                     sess.compact_session(
@@ -634,7 +635,7 @@ impl AgentEngine {
             {
                 let mut assistant_msg = SessionMessage::new(Role::Assistant, resp.content.clone().unwrap_or_default());
                 assistant_msg.tool_calls = Some(resp.tool_calls.clone());
-                self.session.lock().unwrap().add_message(assistant_msg);
+                self.session.lock().unwrap_or_else(|e| e.into_inner()).add_message(assistant_msg);
             }
 
             let scheduled_calls: Vec<ScheduledToolCall> = resp
@@ -687,8 +688,8 @@ impl AgentEngine {
                 .await;
 
             {
-                let mut sess = self.session.lock().unwrap();
-                let mut gov = self.tools.governor.lock().unwrap();
+                let mut sess = self.session.lock().unwrap_or_else(|e| e.into_inner());
+                let mut gov = self.tools.governor.lock().unwrap_or_else(|e| e.into_inner());
                 for (tc, mut rec) in resp.tool_calls.iter().zip(records.into_iter()) {
                     let is_skill_call = rec.name == "use_skill" || canonical_tool_name(&rec.name) == "use_skill";
                     let (out_text, spill_id) = if is_skill_call {
@@ -705,7 +706,7 @@ impl AgentEngine {
                         (governed.output_text, governed.spill_id)
                     };
                     if canonical_tool_name(&rec.name) == "tool_search" {
-                        self.prefix_tracker.lock().unwrap().declare_repin("tool_search_unlock");
+                        self.prefix_tracker.lock().unwrap_or_else(|e| e.into_inner()).declare_repin("tool_search_unlock");
                     }
 
                     let wire_payload = if rec.success {
@@ -754,33 +755,34 @@ impl AgentEngine {
             );
         }
 
-        if final_response.trim().is_empty() {
+        let cancelled = !completed_with_assistant_reply && input.cancel_token.as_ref().is_some_and(|t| t.is_cancelled());
+        if cancelled { final_response = "Turn cancelled by user.".to_string(); }
+        else if final_response.trim().is_empty() {
             final_response = if !all_tool_results.is_empty() {
                 let success_count = all_tool_results.iter().filter(|r| r.success).count();
                 let tool_names: Vec<String> = all_tool_results.iter().map(|r| r.name.clone()).collect();
                 format!("Completed {} tool action(s) successfully: {}.", success_count, tool_names.join(", "))
-            } else {
-                "Turn completed with no text response from model.".to_string()
-            };
+            } else { "Turn completed with no text response from model.".to_string() };
         }
-
-        // Heal dangling Role::Tool tail if max_rounds was reached without a final text message!
         if !completed_with_assistant_reply {
-            let mut sess = self.session.lock().unwrap();
-            Self::heal_dangling_tools(&mut sess, &final_response);
+            Self::heal_dangling_tools(&mut self.session.lock().unwrap_or_else(|e| e.into_inner()), if cancelled { "[Turn cancelled by user]" } else { &final_response });
         }
-
-        self.emit_progress_internal(&input.on_progress, &turn_activity_id, EngineProgressPhase::Completed, EngineProgressStatus::Completed, "Turn completed", None, started_ms, None);
+        let (outcome, phase, status, note) = if cancelled {
+            (EngineTickOutcome::Cancelled, EngineProgressPhase::Cancelled, EngineProgressStatus::Cancelled, "Turn cancelled by user.")
+        } else {
+            (EngineTickOutcome::Completed, EngineProgressPhase::Completed, EngineProgressStatus::Completed, "Turn completed")
+        };
+        self.emit_progress_internal(&input.on_progress, &turn_activity_id, phase, status, note, None, started_ms, None);
         let dur = now_ms().saturating_sub(started_ms);
         let (r_prov, r_ep) = turn_route.as_ref().map(|(_, p, e)| (p.as_str(), e.as_str())).unwrap_or((&cfg.provider, &cfg.api_endpoint));
         let receipt = self.build_and_persist_turn_receipt(
             turn_num, frame_index, r_prov, r_ep, &active_model, effective_posture,
-            EngineTickOutcome::Completed, dur, accumulated_usage, last_prefix_hash, last_prefix_status, snap_before, &all_tool_results,
+            outcome, dur, accumulated_usage, last_prefix_hash, last_prefix_status, snap_before, &all_tool_results,
         );
 
         EngineTickResult {
             frame_index,
-            outcome: EngineTickOutcome::Completed,
+            outcome,
             active_model,
             is_fallback_model,
             is_slash_command: false,

@@ -20,14 +20,23 @@ This guide defines the engineering standards enforced across **HEAV3NS-MICRO**.
 3. **Role-Specific Symbol Naming (`SPI-106`)**: Avoid exporting identical `pub fn` symbol names across distinct zones.
 4. **Formal `I<StructName>` Traits (`SPI-107`)**: Whenever `src/core/` imports a struct `<Name>` from `src/infrastructure/`, define and implement `pub trait I<Name>` in `src/domain/interfaces/mod.rs`.
 
-## 3. Pre-Commit Verification Commands
+## 3. Recursive Engineering & Hardening Strategy
+
+Every hardening pass audits `PLUMBING`, `DOMAIN`, `INFRASTRUCTURE`, `CORE`, `UI`, and `native/` against five invariants:
+
+1. **Bounded I/O & Linear Complexity**: Regular-file (`is_file()`) checks and `.take(CAP + 1)` bounds on disk reads; `O(N)` streaming parsers without quadratic re-scans.
+2. **Fail-Closed Security Boundaries**: Lexical `..` resolution, symlink/parent-symlink rejection, URL userinfo/SSRF blocking, and Seatbelt/heredoc normalization.
+3. **Arithmetic & UTF-8 Boundary Safety**: Finite-float checks, saturating/clamped integer conversions, and char-boundary-safe string slicing/pagination.
+4. **Concurrency & Lifecycle Hygiene**: Serialized config read-modify-write locks, monotonic request tokens (`client === source`), explicit `dispose()`/`deinit` resource release, and `NSTableView` row bounds guards.
+5. **Regression Proof & 5-Gate Verification**: Every fixed invariant receives a targeted regression test before running the full verification suite.
+
+## 4. Pre-Commit Verification Commands
 
 ```bash
 cargo test
-cargo build --release
-./target/release/heav3ns-micro --flight
-./target/release/heav3ns-micro --smoke
+cd native && swift test && cd ..
 node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --theme strict
 node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --doctor
+node bin/docs-check.mjs
 ```
 

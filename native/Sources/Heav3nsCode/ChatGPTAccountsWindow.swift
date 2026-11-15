@@ -16,6 +16,8 @@ final class ChatGPTAccountsWindow: NSWindowController, NSWindowDelegate {
     private var loaded = false
     private var waiting = false
     private var busy = false
+    private var pendingRequests = 0
+    private var requestToken: UInt64 = 0
     private var browserURL: URL?
     private var clock: Timer?
     var now: () -> Date = Date.init
@@ -55,7 +57,7 @@ final class ChatGPTAccountsWindow: NSWindowController, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         clock?.invalidate(); clock = nil
         // Closing the window also ends any browser sign-in still waiting (EOF cancels it) and frees the helper process.
-        waiting = false; browserURL = nil; loaded = false
+        waiting = false; browserURL = nil; loaded = false; pendingRequests = 0; busy = false; requestToken &+= 1
         client.stop()
     }
 
@@ -65,10 +67,16 @@ final class ChatGPTAccountsWindow: NSWindowController, NSWindowDelegate {
 
     private func perform(_ method: String, params: [String: Any] = [:], success: String = "") {
         guard !busy || method == "accounts" else { return }
+        requestToken &+= 1
+        let token = requestToken
+        pendingRequests += 1
         busy = true; render()
         client.request(method, params: params) { [weak self] result in
             guard let self else { return }
-            self.busy = false; self.loaded = true
+            self.pendingRequests = max(0, self.pendingRequests - 1)
+            self.busy = self.pendingRequests > 0
+            self.loaded = true
+            guard method != "accounts" || token == self.requestToken else { self.render(); return }
             switch result {
             case .success(let data):
                 if let updated = ChatGPTAccountList(data) {
@@ -207,7 +215,7 @@ final class ChatGPTAccountsWindow: NSWindowController, NSWindowDelegate {
     }
     func dispose() {
         clock?.invalidate(); clock = nil
-        waiting = false; browserURL = nil; loaded = false
+        waiting = false; browserURL = nil; loaded = false; pendingRequests = 0; busy = false; requestToken &+= 1
         client.stop()
         window?.orderOut(nil)
     }

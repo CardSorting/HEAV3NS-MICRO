@@ -425,7 +425,7 @@ pub fn extract_workspace_symbols(
     let mut results = Vec::new();
 
     for file in files {
-        let Ok(content) = fs::read_to_string(&file) else { continue };
+        let Ok(content) = read_text_file_bounded(&file, 2 * 1024 * 1024) else { continue };
         let rel = file.strip_prefix(cwd).unwrap_or(&file).to_string_lossy().into_owned();
         for (line_idx, line) in content.lines().enumerate() {
             for &(kind, ref re) in patterns {
@@ -519,10 +519,10 @@ fn search_file_lines(file: &Path, root: &Path, re: &Regex, max_results: usize, h
         return;
     }
     let Ok(meta) = fs::metadata(file) else { return };
-    if meta.len() > 2 * 1024 * 1024 {
+    if !meta.is_file() || meta.len() > 2 * 1024 * 1024 {
         return;
     }
-    let Ok(content) = fs::read_to_string(file) else { return };
+    let Ok(content) = read_text_file_bounded(file, 2 * 1024 * 1024) else { return };
     let rel = file.strip_prefix(root).unwrap_or(file).to_string_lossy().into_owned();
     for (idx, line) in content.lines().enumerate() {
         if hits.len() >= max_results {

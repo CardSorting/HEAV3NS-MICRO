@@ -4,9 +4,10 @@ import Foundation
 
 extension WorkspaceWindow {
     @objc func showCommandRecovery() {
-        client.request("command.actionsList", params: [:]) { [weak self] result in
+        let source = client
+        source.request("command.actionsList", params: [:]) { [weak self, weak source] result in
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self, let source, self.client === source, !self.closing else { return }
                 guard case .success(let response) = result else {
                     if case .failure(let error) = result { self.showNotice(error.localizedDescription) }
                     return
@@ -75,9 +76,10 @@ extension WorkspaceWindow {
             return
         }
         let resultName = outcome.indexOfSelectedItem == 0 ? "completed" : "failed"
-        client.request("command.actionReconcile", params: ["actionId": actionId, "outcome": resultName, "confirmation": note, "confirmedStopped": true]) { [weak self] result in
+        let source = client
+        source.request("command.actionReconcile", params: ["actionId": actionId, "outcome": resultName, "confirmation": note, "confirmedStopped": true]) { [weak self, weak source] result in
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self, let source, self.client === source, !self.closing else { return }
                 switch result {
                 case .success: self.showNotice("Command outcome recorded as \(resultName). No command was dispatched.")
                 case .failure(let error): self.showNotice(error.localizedDescription)
@@ -87,9 +89,10 @@ extension WorkspaceWindow {
     }
 
     @objc func showAgentSwarmSettings() {
-        client.request("agentSwarm.settings", params: ["action": "get"]) { [weak self] result in
+        let source = client
+        source.request("agentSwarm.settings", params: ["action": "get"]) { [weak self, weak source] result in
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self, let source, self.client === source, !self.closing else { return }
                 guard case .success(let values) = result else { self.showNotice("Could not load Agent Swarm settings."); return }
                 let alert = NSAlert()
                 alert.messageText = "Agent Swarm Settings"
@@ -202,9 +205,10 @@ extension WorkspaceWindow {
                 let persistedReview = isSavingWithMasterOn ? (savedReviewState == .on) : (review.state == .on)
                 let persistedDefer = isSavingWithMasterOn ? (savedDeferState == .on) : (deferToggle.state == .on)
                 let persistedLegion = isSavingWithMasterOn ? (savedLegionState == .on) : (legion.state == .on)
-                self.client.request("agentSwarm.settings", params: ["action": "set", "enabled": isSavingWithMasterOn, "criticalCompletionReview": persistedReview, "maxInitialReviews": Int(initialReviewLimit.titleOfSelectedItem ?? "1") ?? 1, "maxCorrectivePasses": Int(correctivePassLimit.titleOfSelectedItem ?? "1") ?? 1, "autoDeferOnCompletionReview": autoDeferReview.state == .on, "hierarchicalDefer": persistedDefer, "legion": persistedLegion, "deferBoundary": selectedBoundary, "strategy": selectedStrategy, "maxSpecialists": Int(specialistCap.titleOfSelectedItem ?? "4") ?? 4]) { [weak self] saved in
+                let saveSource = self.client
+                saveSource.request("agentSwarm.settings", params: ["action": "set", "enabled": isSavingWithMasterOn, "criticalCompletionReview": persistedReview, "maxInitialReviews": Int(initialReviewLimit.titleOfSelectedItem ?? "1") ?? 1, "maxCorrectivePasses": Int(correctivePassLimit.titleOfSelectedItem ?? "1") ?? 1, "autoDeferOnCompletionReview": autoDeferReview.state == .on, "hierarchicalDefer": persistedDefer, "legion": persistedLegion, "deferBoundary": selectedBoundary, "strategy": selectedStrategy, "maxSpecialists": Int(specialistCap.titleOfSelectedItem ?? "4") ?? 4]) { [weak self, weak saveSource] saved in
                     DispatchQueue.main.async {
-                        guard let self else { return }
+                        guard let self, let saveSource, self.client === saveSource, !self.closing else { return }
                         if case .success(let settings) = saved {
                             let master = settings["enabled"] as? Bool == true
                             self.criticalReviewEnabled = master || settings["criticalCompletionReview"] as? Bool == true

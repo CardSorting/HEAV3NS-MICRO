@@ -395,35 +395,35 @@ final class QuickOpenWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         case .file(let filePath, let fileName):
             name = JourneyStyle.label(fileName, size: 13, weight: .medium)
             path = JourneyStyle.label(filePath, size: 11, secondary: true)
-            icon = NSImageView(image: NSImage(systemSymbolName: "doc", accessibilityDescription: nil)!)
+            icon = NSImageView(image: NSImage(systemSymbolName: "doc", accessibilityDescription: nil) ?? NSImage())
             cell.toolTip = filePath
         case .action(let action):
             name = JourneyStyle.label(action.title, size: 13, weight: .medium)
             let subtitle = action.keywords.isEmpty ? "Workspace command" : action.keywords.prefix(4).joined(separator: " · ")
             path = JourneyStyle.label(subtitle, size: 11, secondary: true)
-            icon = NSImageView(image: NSImage(systemSymbolName: "command", accessibilityDescription: nil)!)
+            icon = NSImageView(image: NSImage(systemSymbolName: "command", accessibilityDescription: nil) ?? NSImage())
             if !action.shortcut.isEmpty { badgeText = action.shortcut }
             cell.toolTip = action.shortcut.isEmpty ? action.title : "\(action.title) (\(action.shortcut))"
         case .symbol(let symbolName, let kind, let line, _):
             name = JourneyStyle.label(symbolName, size: 13, weight: .medium)
             path = JourneyStyle.label("\(kind) · Line \(line)", size: 11, secondary: true)
-            icon = NSImageView(image: NSImage(systemSymbolName: "number", accessibilityDescription: nil)!)
+            icon = NSImageView(image: NSImage(systemSymbolName: "number", accessibilityDescription: nil) ?? NSImage())
             badgeText = ":\(line)"
             cell.toolTip = "\(symbolName) (\(kind))"
         case .checkpoint(_, let title, let detail):
             name = JourneyStyle.label(title, size: 13, weight: .medium)
             path = JourneyStyle.label(detail, size: 11, secondary: true)
-            icon = NSImageView(image: NSImage(systemSymbolName: "clock.arrow.circlepath", accessibilityDescription: nil)!)
+            icon = NSImageView(image: NSImage(systemSymbolName: "clock.arrow.circlepath", accessibilityDescription: nil) ?? NSImage())
             cell.toolTip = "\(title) · \(detail)"
         case .lineNumber(let line, let col, let snippet):
             name = JourneyStyle.label("Line \(line)\(col > 1 ? ", Column \(col)" : "")", size: 13, weight: .medium)
             path = JourneyStyle.label(snippet.isEmpty ? "Jump to line in current inspected file" : snippet, size: 11, secondary: true)
-            icon = NSImageView(image: NSImage(systemSymbolName: "arrow.down.to.line", accessibilityDescription: nil) ?? NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil)!)
+            icon = NSImageView(image: NSImage(systemSymbolName: "arrow.down.to.line", accessibilityDescription: nil) ?? NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil) ?? NSImage())
             cell.toolTip = "Go to line \(line)"
         case .modeGuide(let prefix, let title, let detail):
             name = JourneyStyle.label(title, size: 13, weight: .medium)
             path = JourneyStyle.label(detail, size: 11, secondary: true)
-            icon = NSImageView(image: NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: nil) ?? NSImage(systemSymbolName: "command", accessibilityDescription: nil)!)
+            icon = NSImageView(image: NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: nil) ?? NSImage(systemSymbolName: "command", accessibilityDescription: nil) ?? NSImage())
             badgeText = prefix.isEmpty ? "⌘P" : prefix
             cell.toolTip = detail
         }

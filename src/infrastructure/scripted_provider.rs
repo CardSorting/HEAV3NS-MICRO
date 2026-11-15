@@ -1,5 +1,6 @@
 // [LAYER: INFRASTRUCTURE]
 use crate::domain::interfaces::{BoxFuture, ILlmProvider};
+use crate::plumbing::hash_and_math::lock_unpoison;
 use crate::domain::types::messages::{Role, SessionMessage, ToolCall, ToolCallFunction};
 use crate::domain::types::runtime::CancellationToken;
 use crate::domain::types::tick_result::{finalize_provider_response, is_retryable_http_status, ProviderError, ProviderRequest, ProviderResponse};
@@ -75,30 +76,26 @@ impl ScriptedProvider {
     }
 
     pub fn push_step(&self, step: ProviderStep) {
-        self.steps.lock().unwrap().push_back(step);
+        lock_unpoison(&self.steps).push_back(step);
     }
 
     pub fn request_count(&self) -> usize {
-        self.recorded_requests.lock().unwrap().len()
+        lock_unpoison(&self.recorded_requests).len()
     }
 
     pub fn requests(&self) -> Vec<ProviderRequest> {
-        self.recorded_requests.lock().unwrap().clone()
+        lock_unpoison(&self.recorded_requests).clone()
     }
 
     pub fn tool_reply_count_by_request(&self) -> Vec<usize> {
-        self.recorded_requests
-            .lock()
-            .unwrap()
+        lock_unpoison(&self.recorded_requests)
             .iter()
             .map(|r| r.messages.iter().filter(|m| m.role == Role::Tool).count())
             .collect()
     }
 
     pub fn tool_messages_by_request(&self) -> Vec<Vec<SessionMessage>> {
-        self.recorded_requests
-            .lock()
-            .unwrap()
+        lock_unpoison(&self.recorded_requests)
             .iter()
             .map(|r| r.messages.iter().filter(|m| m.role == Role::Tool).cloned().collect())
             .collect()
@@ -129,15 +126,12 @@ impl ILlmProvider for ScriptedProvider {
         cancel: Option<CancellationToken>,
     ) -> BoxFuture<'a, Result<ProviderResponse, ProviderError>> {
         Box::pin(async move {
-            self.recorded_requests.lock().unwrap().push(req);
+            lock_unpoison(&self.recorded_requests).push(req);
             self.request_notify.notify_waiters();
             if cancel.as_ref().map(|t| t.is_cancelled()).unwrap_or(false) {
                 return Err(ProviderError::Cancelled);
             }
-            let step = self
-                .steps
-                .lock()
-                .unwrap()
+            let step = lock_unpoison(&self.steps)
                 .pop_front()
                 .unwrap_or_else(|| ProviderStep::text("Scripted provider queue exhausted."));
             match step {

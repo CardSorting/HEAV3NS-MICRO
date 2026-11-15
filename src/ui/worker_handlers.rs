@@ -148,6 +148,12 @@ pub fn paginate_text_response(text: &str, rev_prefix: &str, offset: usize, limit
     while end > safe_offset && !text.is_char_boundary(end) {
         end -= 1;
     }
+    if end == safe_offset && safe_offset < total {
+        end = safe_offset + 1;
+        while end < total && !text.is_char_boundary(end) {
+            end += 1;
+        }
+    }
     let rev = format!("{rev_prefix}-{}", &sha256_hex_ui(text)[..12]);
     json!({
         "text": &text[safe_offset..end],
@@ -160,6 +166,42 @@ pub fn paginate_text_response(text: &str, rev_prefix: &str, offset: usize, limit
     })
 }
 
+pub async fn read_bounded_stdin_line<R: tokio::io::AsyncBufRead + Unpin>(reader: &mut R, max_bytes: usize) -> std::io::Result<Option<String>> {
+    use tokio::io::AsyncBufReadExt;
+    let mut buf = Vec::new();
+    loop {
+        let chunk = reader.fill_buf().await?;
+        if chunk.is_empty() {
+            return if buf.is_empty() { Ok(None) } else {
+                String::from_utf8(buf).map(Some).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            };
+        }
+        if let Some(pos) = chunk.iter().position(|&b| b == b'\n') {
+            let take = pos + 1;
+            if buf.len().saturating_add(take) > max_bytes {
+                reader.consume(take);
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("JSONL frame exceeds {max_bytes} byte cap")));
+            }
+            buf.extend_from_slice(&chunk[..take]);
+            reader.consume(take);
+            return String::from_utf8(buf).map(Some).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e));
+        }
+        let n = chunk.len();
+        if buf.len().saturating_add(n) > max_bytes {
+            reader.consume(n);
+            while let Ok(more) = reader.fill_buf().await {
+                if more.is_empty() { break; }
+                if let Some(p) = more.iter().position(|&b| b == b'\n') { reader.consume(p + 1); break; }
+                let m = more.len();
+                reader.consume(m);
+            }
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("JSONL frame exceeds {max_bytes} byte cap")));
+        }
+        buf.extend_from_slice(chunk);
+        reader.consume(n);
+    }
+}
+
 /// Builds a paginated `artifact.read` response from a recorded `run` output when `params["run"]` is present.
 pub fn build_artifact_run_response(runs: &[Value], params: &Value) -> Option<Value> {
     let run_id = params.get("run").and_then(|v| v.as_str())?;
@@ -167,7 +209,7 @@ pub fn build_artifact_run_response(runs: &[Value], params: &Value) -> Option<Val
         .and_then(|r| r.get("response").or_else(|| r.get("error")).or_else(|| r.get("text")).and_then(|v| v.as_str()))
         .unwrap_or("");
     let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-    let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(65536) as usize;
+    let limit = (params.get("limit").and_then(|v| v.as_u64()).unwrap_or(65536) as usize).clamp(1, 512 * 1024);
     Some(paginate_text_response(text, "artifact", offset, limit))
 }
 
@@ -554,16 +596,15 @@ pub async fn execute_multiplexed_submit(
                     *existing = resumed_run.clone();
                 }
             }
-            let s_res = seq_approve.fetch_add(1, Ordering::SeqCst) + 1;
-            emit_jsonl_line(
+            emit_seq_event(
                 &out_approve,
-                &json!({
+                &seq_approve,
+                json!({
                     "v": 1,
                     "kind": "event",
                     "workspace": ws_a,
                     "session": sess_a,
                     "runtime": "heav3ns-micro",
-                    "seq": s_res,
                     "type": "approval.resolved",
                     "run": run_a,
                     "payload": resumed_run
@@ -705,5 +746,17 @@ mod tests {
         assert_eq!(resolve_worker_run(&runs, &hash_id).and_then(|r| r["id"].as_str()), Some("run_abc"));
         let art = build_artifact_run_response(&runs, &json!({ "run": "run_abc", "offset": 0 })).unwrap();
         assert_eq!(art["text"], json!("artifact-body-123"));
+    }
+
+    #[tokio::test]
+    async fn test_wave18_artifact_limit_clamp_and_bounded_stdin() {
+        let runs = vec![json!({ "id": "r1", "response": "abcdef" })];
+        let resp = build_artifact_run_response(&runs, &json!({ "run": "r1", "offset": 0, "limit": 0 })).unwrap();
+        assert_eq!(resp["nextOffset"], 1);
+
+        let mut cursor = tokio::io::BufReader::new(std::io::Cursor::new(b"oversized_frame\nok\n".as_slice()));
+        let err = read_bounded_stdin_line(&mut cursor, 8).await.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(read_bounded_stdin_line(&mut cursor, 8).await.unwrap().as_deref(), Some("ok\n"));
     }
 }

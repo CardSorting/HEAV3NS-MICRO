@@ -34,8 +34,17 @@ enum BroccoliGitAdmission {
         return total <= applicationBytes ? entries : nil
     }
 
-    static func reserve(_ folder: URL, defaults: UserDefaults = .standard) -> Reservation? {
+    private static func withAdmissionLock<T>(_ body: () -> T) -> T {
         lock.lock(); defer { lock.unlock() }
+        let lockPath = (NSTemporaryDirectory() as NSString).appendingPathComponent("heav3ns-broccoli-admission.lock")
+        let fd = open(lockPath, O_CREAT | O_RDWR, 0o600)
+        if fd >= 0 { flock(fd, LOCK_EX) }
+        defer { if fd >= 0 { flock(fd, LOCK_UN); close(fd) } }
+        return body()
+    }
+
+    static func reserve(_ folder: URL, defaults: UserDefaults = .standard) -> Reservation? {
+        return withAdmissionLock {
         guard active.count < 4, var entries = saved(defaults) else { return nil }
         let identity = SHA256.hash(data: Data(folder.resolvingSymlinksInPath().standardizedFileURL.path.utf8))
             .map { String(format: "%02x", $0) }.joined()
@@ -53,20 +62,27 @@ enum BroccoliGitAdmission {
         let available = min(workspaceBytes, applicationBytes - others)
         guard available >= 64 * 1024 else { return nil }
         let reservation = Reservation(identity: identity, token: UUID().uuidString, bytes: available)
+        let prior = defaults.object(forKey: key)
         entries[identity] = ["bytes": available, "token": reservation.token]
         defaults.set(entries, forKey: key)
-        guard defaults.synchronize() else { return nil }
+        guard defaults.synchronize() else {
+            if let prior { defaults.set(prior, forKey: key) } else { defaults.removeObject(forKey: key) }
+            _ = defaults.synchronize()
+            return nil
+        }
         active.insert(reservation.token)
         return reservation
+        }
     }
 
     static func finish(_ reservation: Reservation, chargedBytes: Int?, cleanExit: Bool, defaults: UserDefaults = .standard) {
-        lock.lock(); defer { lock.unlock() }
+        withAdmissionLock {
         active.remove(reservation.token)
         guard cleanExit, let chargedBytes, (0...reservation.bytes).contains(chargedBytes),
               var entries = saved(defaults), entries[reservation.identity]?["token"] as? String == reservation.token else { return }
         entries[reservation.identity] = ["bytes": max(4096, chargedBytes), "token": reservation.token]
         defaults.set(entries, forKey: key)
         _ = defaults.synchronize()
+        }
     }
 }

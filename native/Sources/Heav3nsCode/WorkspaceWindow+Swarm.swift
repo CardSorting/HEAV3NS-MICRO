@@ -269,8 +269,9 @@ extension WorkspaceWindow {
             showNotice("No specialist has an unresolved roadmap state. Refresh Formation Status and inspect its saved record.")
             return
         }
-        collectFormationReconciliationDecision(formationId: formationId, assignments: uncertain, index: 0, decisions: []) { [weak self] decisions in
-            guard let self else { return }
+        let source = client
+        collectFormationReconciliationDecision(formationId: formationId, assignments: uncertain, index: 0, decisions: []) { [weak self, weak source] decisions in
+            guard let self, let source, self.client === source, !self.closing else { return }
             let confirmation = NSTextField(frame: NSRect(x: 0, y: 0, width: 420, height: 24))
             confirmation.placeholderString = "Briefly describe what you inspected (at least 20 characters)"
             confirmation.setAccessibilityLabel("Workspace and terminal review notes")
@@ -293,7 +294,6 @@ extension WorkspaceWindow {
                 self.showNotice("Reconciliation was not submitted. Confirm the stopped and reviewed checkbox and add at least 20 characters describing your review.")
                 return
             }
-            let source = self.client
             source.request("agentSwarm.formReconcile", params: ["formationId": formationId, "confirmation": note, "confirmedStopped": true, "decisions": decisions]) { [weak self, weak source] result in
                 DispatchQueue.main.async {
                     guard let self, let source, self.client === source, !self.closing else { return }
@@ -347,9 +347,10 @@ extension WorkspaceWindow {
             return
         }
         if choice == "completed" {
-            client.request("agentSwarm.formStream", params: ["formationId": formationId, "specialistId": specialistId]) { [weak self] result in
+            let source = client
+            client.request("agentSwarm.formStream", params: ["formationId": formationId, "specialistId": specialistId]) { [weak self, weak source] result in
                 DispatchQueue.main.async {
-                    guard let self else { return }
+                    guard let self, let source, self.client === source, !self.closing else { return }
                     guard case .success(let stream) = result else {
                         if case .failure(let error) = result { self.showNotice("A saved stream is required to mark this specialist completed.\n\n\(error.localizedDescription)") }
                         return

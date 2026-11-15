@@ -5,7 +5,7 @@ use crate::domain::types::provider_registry::{canonicalize_provider_id, infer_wi
 use crate::domain::types::runtime::CancellationToken;
 use crate::domain::types::tick_result::{finalize_provider_response, is_retryable_http_status, ProviderError, ProviderRequest, ProviderResponse, ProviderTokenUsage};
 use crate::infrastructure::codex_oauth::{build_codex_oauth_post, resolve_codex_base_url, CodexAccountStore};
-use crate::infrastructure::sse_and_response_parsers::{parse_multidialect_sse_stream, parse_responses_json, IncrementalSseAggregator};
+use crate::infrastructure::sse_and_response_parsers::{classify_stream_or_response_error, parse_multidialect_sse_stream, parse_responses_json, IncrementalSseAggregator};
 use crate::infrastructure::wire_dialects::{build_anthropic_messages_payload, build_chat_completions_payload_with_endpoint, build_google_gemini_payload, build_openai_responses_payload};
 use serde_json::Value;
 use std::time::Duration;
@@ -364,6 +364,7 @@ impl HttpProvider {
     }
 
     fn parse_openai_response(body: &Value) -> Result<ProviderResponse, ProviderError> {
+        if let Some(err) = classify_stream_or_response_error(body, "", &body.to_string()) { return Err(err); }
         let choice = body
             .get("choices")
             .and_then(|c| c.as_array())
@@ -409,6 +410,7 @@ impl HttpProvider {
     }
 
     fn parse_anthropic_response(body: &Value) -> Result<ProviderResponse, ProviderError> {
+        if let Some(err) = classify_stream_or_response_error(body, "", &body.to_string()) { return Err(err); }
         let blocks = body
             .get("content")
             .and_then(|c| c.as_array())
@@ -459,6 +461,7 @@ impl HttpProvider {
     }
 
     fn parse_gemini_response(body: &Value) -> Result<ProviderResponse, ProviderError> {
+        if let Some(err) = classify_stream_or_response_error(body, "", &body.to_string()) { return Err(err); }
         let candidate = body.get("candidates").and_then(|c| c.as_array()).and_then(|a| a.first());
         let raw_parts = candidate.and_then(|c| c.get("content")).and_then(|c| c.get("parts")).and_then(|p| p.as_array());
         if raw_parts.is_none() {
@@ -638,24 +641,20 @@ impl ILlmProvider for HttpProvider {
                                 self.client.post(&url).header("content-type", "application/json"),
                                 effective_wire,
                             );
-                            if let Ok(retry_resp) = retry_builder.json(&healed_payload).send().await {
-                                let retry_status = retry_resp.status().as_u16();
-                                let retry_ra = parse_retry_after_header(retry_resp.headers());
-                                let retry_ct = retry_resp.headers().get("content-type").and_then(|v| v.to_str().ok()).map(String::from);
-                                if (200..300).contains(&retry_status) && is_event_stream_content_type(retry_ct.as_deref()) {
-                                    return stream_incremental_sse_response(retry_resp, &self.name, MAX_HTTP_RESPONSE_BODY_BYTES).await;
-                                }
-                                let retry_text = read_bounded_response_text(retry_resp, MAX_HTTP_RESPONSE_BODY_BYTES).await?;
-                                if (200..300).contains(&retry_status) {
-                                    if looks_like_sse(&retry_text, retry_ct.as_deref()) {
-                                        return parse_sse_stream(&retry_text, &self.name);
-                                    }
-                                    let json_body: Value = serde_json::from_str(&retry_text)
-                                        .map_err(|e| ProviderError::Transport(format!("Invalid JSON from provider: {e}")))?;
-                                    return Self::parse_openai_response(&json_body);
-                                }
-                                return Err(ProviderError::HttpStatus { status: retry_status, body: retry_text, retryable: is_retryable_http_status(retry_status), retry_after_ms: retry_ra });
+                            let retry_resp = retry_builder.json(&healed_payload).send().await.map_err(|e| ProviderError::Transport(e.without_url().to_string()))?;
+                            let retry_status = retry_resp.status().as_u16();
+                            let retry_ra = parse_retry_after_header(retry_resp.headers());
+                            let retry_ct = retry_resp.headers().get("content-type").and_then(|v| v.to_str().ok()).map(String::from);
+                            if (200..300).contains(&retry_status) && is_event_stream_content_type(retry_ct.as_deref()) {
+                                return stream_incremental_sse_response(retry_resp, &self.name, MAX_HTTP_RESPONSE_BODY_BYTES).await;
                             }
+                            let retry_text = read_bounded_response_text(retry_resp, MAX_HTTP_RESPONSE_BODY_BYTES).await?;
+                            if (200..300).contains(&retry_status) {
+                                if looks_like_sse(&retry_text, retry_ct.as_deref()) { return parse_sse_stream(&retry_text, &self.name); }
+                                let json_body: Value = serde_json::from_str(&retry_text).map_err(|e| ProviderError::Transport(format!("Invalid JSON from provider: {e}")))?;
+                                return Self::parse_openai_response(&json_body);
+                            }
+                            return Err(ProviderError::HttpStatus { status: retry_status, body: retry_text, retryable: is_retryable_http_status(retry_status), retry_after_ms: retry_ra });
                         }
                     }
 
@@ -664,30 +663,23 @@ impl ILlmProvider for HttpProvider {
                     }
                     if let Some((ref rejected_tok, _)) = codex_oauth {
                         if status == 401 {
-                            if let Ok((new_token, new_account_id)) = CodexAccountStore::default_store().force_refresh_active(rejected_tok).await {
-                                let retry_b = build_codex_oauth_post(&self.client, &url, &new_token, new_account_id.as_deref());
-                                if let Ok(retry_resp) = retry_b.json(&payload).send().await {
-                                    let retry_status = retry_resp.status().as_u16();
-                                    let retry_ra = parse_retry_after_header(retry_resp.headers());
-                                    let retry_ct = retry_resp.headers().get("content-type").and_then(|v| v.to_str().ok()).map(String::from);
-                                    if (200..300).contains(&retry_status) && is_event_stream_content_type(retry_ct.as_deref()) {
-                                        return stream_incremental_sse_response(retry_resp, &self.name, MAX_HTTP_RESPONSE_BODY_BYTES).await;
-                                    }
-                                    let retry_text = read_bounded_response_text(retry_resp, MAX_HTTP_RESPONSE_BODY_BYTES).await?;
-                                    if (200..300).contains(&retry_status) {
-                                        if looks_like_sse(&retry_text, retry_ct.as_deref()) {
-                                            return parse_sse_stream(&retry_text, &self.name);
-                                        }
-                                        let json_body: Value = serde_json::from_str(&retry_text)
-                                            .map_err(|e| ProviderError::Transport(format!("Invalid JSON from provider: {e}")))?;
-                                        return parse_responses_json(&json_body, &self.name);
-                                    }
-                                    if retry_status == 429 {
-                                        CodexAccountStore::default_store().record_rate_limit(retry_ra);
-                                    }
-                                    return Err(ProviderError::HttpStatus { status: retry_status, body: retry_text, retryable: is_retryable_http_status(retry_status), retry_after_ms: retry_ra });
-                                }
+                            let (new_token, new_account_id) = CodexAccountStore::default_store().force_refresh_active(rejected_tok).await.map_err(|e| ProviderError::HttpStatus { status: 401, body: e, retryable: false, retry_after_ms: None })?;
+                            let retry_b = build_codex_oauth_post(&self.client, &url, &new_token, new_account_id.as_deref());
+                            let retry_resp = retry_b.json(&payload).send().await.map_err(|e| ProviderError::Transport(e.without_url().to_string()))?;
+                            let retry_status = retry_resp.status().as_u16();
+                            let retry_ra = parse_retry_after_header(retry_resp.headers());
+                            let retry_ct = retry_resp.headers().get("content-type").and_then(|v| v.to_str().ok()).map(String::from);
+                            if (200..300).contains(&retry_status) && is_event_stream_content_type(retry_ct.as_deref()) {
+                                return stream_incremental_sse_response(retry_resp, &self.name, MAX_HTTP_RESPONSE_BODY_BYTES).await;
                             }
+                            let retry_text = read_bounded_response_text(retry_resp, MAX_HTTP_RESPONSE_BODY_BYTES).await?;
+                            if (200..300).contains(&retry_status) {
+                                if looks_like_sse(&retry_text, retry_ct.as_deref()) { return parse_sse_stream(&retry_text, &self.name); }
+                                let json_body: Value = serde_json::from_str(&retry_text).map_err(|e| ProviderError::Transport(format!("Invalid JSON from provider: {e}")))?;
+                                return parse_responses_json(&json_body, &self.name);
+                            }
+                            if retry_status == 429 { CodexAccountStore::default_store().record_rate_limit(retry_ra); }
+                            return Err(ProviderError::HttpStatus { status: retry_status, body: retry_text, retryable: is_retryable_http_status(retry_status), retry_after_ms: retry_ra });
                         }
                     }
 

@@ -123,6 +123,16 @@ pub async fn execute_shell_command_sandboxed(
     let mut stdout_pipe = child.stdout.take();
     let mut stderr_pipe = child.stderr.take();
     Box::pin(async move {
+        struct ProcessGroupGuard(Option<u32>);
+        impl Drop for ProcessGroupGuard {
+            fn drop(&mut self) {
+                #[cfg(unix)]
+                if let Some(pid) = self.0.take() {
+                    let _ = std::process::Command::new("kill").args(["-KILL", &format!("-{pid}")]).status();
+                }
+            }
+        }
+        let mut pg_guard = ProcessGroupGuard(child_pid);
         let pipes_fut = async {
             tokio::join!(
                 drain_pipe_bounded(stdout_pipe.take(), MAX_PIPE_CAPTURE_BYTES),
@@ -137,6 +147,7 @@ pub async fn execute_shell_command_sandboxed(
                 _ = tok.cancelled() => {
                     Box::pin(kill_process_tree(child_pid)).await;
                     let _ = child.wait().await;
+                    pg_guard.0 = None;
                     return Err("Command execution cancelled by user".to_string());
                 }
                 res = tokio::time::timeout(timeout_dur, async {
@@ -156,6 +167,7 @@ pub async fn execute_shell_command_sandboxed(
 
         match outcome {
             Ok((Ok(status), out_bytes, err_bytes)) => {
+                pg_guard.0 = None;
                 let exit_code = status.code().unwrap_or(-1);
                 let (cleaned_out, _pty_replies) = SafetyPolicy::strip_and_respond_pty_queries(&out_bytes, 24, 80);
                 let stdout = String::from_utf8_lossy(&cleaned_out).into_owned();
@@ -185,11 +197,13 @@ pub async fn execute_shell_command_sandboxed(
             Ok((Err(e), _, _)) => {
                 Box::pin(kill_process_tree(child_pid)).await;
                 let _ = child.wait().await;
+                pg_guard.0 = None;
                 Err(format!("Command execution failed: {e}"))
             }
             Err(_) => {
                 Box::pin(kill_process_tree(child_pid)).await;
                 let _ = child.wait().await;
+                pg_guard.0 = None;
                 Err(format!("Command timed out after {timeout_ms}ms"))
             }
         }

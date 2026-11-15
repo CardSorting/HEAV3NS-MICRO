@@ -153,10 +153,15 @@ pub fn evaluate_tool_posture(
             "list_dag" | "soul_status" | "export" | "lint"
         );
     let is_readonly_gui = match canonical {
-        "computer_use" => matches!(
-            args.get("action").and_then(Value::as_str).unwrap_or("capture"),
-            "capture" | "capture_frame" | "screenshot" | "snapshot" | "list_windows" | "list_apps" | "list_elements" | "read_window_below" | "ax_query" | "clipboard_read" | "lease_status" | "search_dsl" | "query" | "audit_health" | "health" | "metrics"
-        ),
+        "computer_use" => {
+            let action = args.get("action").and_then(Value::as_str).unwrap_or("capture").trim().to_ascii_lowercase();
+            let has_mutating_button = args.get("button").and_then(Value::as_str).is_some_and(|b| !b.trim().is_empty());
+            let has_multi_click = args.get("click_count").and_then(Value::as_u64).is_some_and(|c| c > 1);
+            !has_mutating_button && !has_multi_click && matches!(
+                action.as_str(),
+                "capture" | "capture_frame" | "screenshot" | "snapshot" | "list_windows" | "list_apps" | "list_elements" | "read_window_below" | "ax_query" | "clipboard_read" | "lease_status" | "search_dsl" | "query" | "audit_health" | "health" | "metrics"
+            )
+        }
         "browser_use" => matches!(
             args.get("action").and_then(Value::as_str).unwrap_or("snapshot"),
             "snapshot" | "dom" | "console" | "network" | "cookies_get" | "storage_get" | "validate_url" | "query"

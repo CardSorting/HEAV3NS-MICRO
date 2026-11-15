@@ -16,13 +16,13 @@ pub struct SpatialInteractionEngine {
 impl SpatialInteractionEngine {
     pub extern "Rust" fn new(display: Arc<Mutex<VirtualDisplayState>>) -> Self {
         let (w, h, active_id) = {
-            let disp = display.lock().unwrap();
+            let disp = display.lock().unwrap_or_else(|e| e.into_inner());
             (disp.width, disp.height, disp.active_window_id.clone())
         };
         let mut mediator = SpatialActionMediator::new(w, h, active_id);
         // Synchronize initial scene from display
         {
-            let disp = display.lock().unwrap();
+            let disp = display.lock().unwrap_or_else(|e| e.into_inner());
             let initial_scene = Self::extract_scene_from_display(&disp);
             mediator.update_scene(initial_scene);
         }
@@ -92,7 +92,7 @@ impl SpatialInteractionEngine {
     /// Reconciles Set-of-Marks visual elements with DOM HTML snapshot interactive elements.
     /// Elements that appear in both modalities receive boosted confidence and cross-modal provenance.
     pub fn reconcile_dom_and_visual(&self, dom_elements: &[Value]) -> SpatialScene {
-        let disp = self.display.lock().unwrap();
+        let disp = self.display.lock().unwrap_or_else(|e| e.into_inner());
         let mut scene = Self::extract_scene_from_display(&disp);
         let cur_epoch = scene.layout_epoch;
 
@@ -126,7 +126,7 @@ impl SpatialInteractionEngine {
             }
         }
 
-        let mut med = self.mediator.lock().unwrap();
+        let mut med = self.mediator.lock().unwrap_or_else(|e| e.into_inner());
         med.update_scene(scene);
         med.active_scene.clone()
     }
@@ -137,9 +137,9 @@ impl SpatialInteractionEngine {
     pub fn execute_spatially_grounded_action(&self, contract: &SpatialActionContract) -> Result<Value, String> {
         // Step 1: Refresh scene state from display only when frame_seq changed or mediator has no active scene
         let mut before_scene = {
-            let disp = self.display.lock().unwrap();
+            let disp = self.display.lock().unwrap_or_else(|e| e.into_inner());
             let fresh = Self::extract_scene_from_display(&disp);
-            let mut med = self.mediator.lock().unwrap();
+            let mut med = self.mediator.lock().unwrap_or_else(|e| e.into_inner());
             if med.layout_epoch == 0 || med.active_scene.frame_seq != fresh.frame_seq || med.active_scene.targets.is_empty() {
                 med.update_scene(fresh.clone());
             }
@@ -148,7 +148,7 @@ impl SpatialInteractionEngine {
 
         // Step 2: WRAPPER A — Spatial Grounding
         let grounding = {
-            let med = self.mediator.lock().unwrap();
+            let med = self.mediator.lock().unwrap_or_else(|e| e.into_inner());
             med.ground_action(contract)
         };
 
@@ -182,11 +182,11 @@ impl SpatialInteractionEngine {
                 "delivery_mode": contract.delivery_mode,
             });
             let scrolled_scene = {
-                let mut disp = self.display.lock().unwrap();
+                let mut disp = self.display.lock().unwrap_or_else(|e| e.into_inner());
                 let _ = disp.execute_action(&pre_scroll_args)?;
                 Self::extract_scene_from_display(&disp)
             };
-            let mut med = self.mediator.lock().unwrap();
+            let mut med = self.mediator.lock().unwrap_or_else(|e| e.into_inner());
             med.update_scene(scrolled_scene.clone());
             let mut reground_contract = contract.clone();
             reground_contract.expected_epoch = None;
@@ -209,7 +209,7 @@ impl SpatialInteractionEngine {
 
         // Step 3: WRAPPER B (Pre) — Execution Assurance Preconditions
         {
-            let med = self.mediator.lock().unwrap();
+            let med = self.mediator.lock().unwrap_or_else(|e| e.into_inner());
             if let Err(pre_err) = med.assure_pre_execution(&grounded, contract) {
                 return Ok(json!({
                     "success": false,
@@ -241,7 +241,7 @@ impl SpatialInteractionEngine {
         });
 
         let raw_res = {
-            let mut disp = self.display.lock().unwrap();
+            let mut disp = self.display.lock().unwrap_or_else(|e| e.into_inner());
             disp.execute_action(&dispatch_args)
         }?;
 
@@ -249,9 +249,9 @@ impl SpatialInteractionEngine {
 
         // Step 5: WRAPPER B (Post) — Observable Postcondition Verification
         let (after_scene, receipt) = {
-            let disp = self.display.lock().unwrap();
+            let disp = self.display.lock().unwrap_or_else(|e| e.into_inner());
             let after = Self::extract_scene_from_display(&disp);
-            let mut med = self.mediator.lock().unwrap();
+            let mut med = self.mediator.lock().unwrap_or_else(|e| e.into_inner());
             let rcpt = med.verify_post_execution(&contract.action_name, Some(&grounded), &before_scene, &after, duration_ms);
             (after, rcpt)
         };
@@ -283,9 +283,9 @@ impl SpatialInteractionEngine {
     /// through the Double-Wrapped Spatial Action Architecture.
     pub extern "Rust" fn execute_plan(&self, contract: &SpatialActionContract) -> Result<Value, String> {
         let plan = {
-            let disp = self.display.lock().unwrap();
+            let disp = self.display.lock().unwrap_or_else(|e| e.into_inner());
             let fresh = Self::extract_scene_from_display(&disp);
-            let mut med = self.mediator.lock().unwrap();
+            let mut med = self.mediator.lock().unwrap_or_else(|e| e.into_inner());
             if med.layout_epoch == 0 || med.active_scene.frame_seq != fresh.frame_seq || med.active_scene.targets.is_empty() {
                 med.update_scene(fresh);
             }
@@ -330,7 +330,7 @@ impl SpatialInteractionEngine {
 
     /// Spatial directional query resolving relationships like `right_of`, `left_of`, `below`, `above`.
     pub fn query_directional(&self, origin_id: &str, direction: &str) -> Option<SpatialTarget> {
-        let med = self.mediator.lock().unwrap();
+        let med = self.mediator.lock().unwrap_or_else(|e| e.into_inner());
         let origin = med.active_scene.find_by_id(origin_id)?;
         let origin_rect = origin.to_spatial_rect();
         let origin_center = origin_rect.center();
@@ -362,7 +362,7 @@ impl SpatialInteractionEngine {
 
     /// Audits health and statistics of the spatial action architecture.
     pub extern "Rust" fn audit_health(&self) -> Value {
-        let med = self.mediator.lock().unwrap();
+        let med = self.mediator.lock().unwrap_or_else(|e| e.into_inner());
         let audit = med.generate_audit();
         json!({
             "healthy": audit.success_rate >= 0.90,

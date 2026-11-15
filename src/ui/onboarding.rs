@@ -457,16 +457,14 @@ pub fn run_init_wizard(cwd: &Path) -> io::Result<()> {
     new_cfg.provider = Some(provider.to_string());
     new_cfg.model = Some(model.clone());
     new_cfg.endpoint = Some(endpoint.clone());
-    if api_key.is_some() {
-        new_cfg.api_key = api_key.clone();
-    }
+    new_cfg.api_key = api_key.clone();
     new_cfg.workspace_root = Some(cwd.display().to_string());
     if let Some(ref k) = api_key {
         new_cfg.set_provider_key(provider, k.clone());
     }
     if endpoint != default_endpoint {
-        let slot = desc.map(|d| d.secret_slot).unwrap_or(provider);
-        new_cfg.provider_endpoints.insert(slot.to_string(), endpoint.clone());
+        let canonical_id = desc.map(|d| d.id).unwrap_or(provider);
+        new_cfg.provider_endpoints.insert(canonical_id.to_string(), endpoint.clone());
     }
 
     new_cfg.save()?;

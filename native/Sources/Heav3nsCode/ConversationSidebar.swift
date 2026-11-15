@@ -99,6 +99,7 @@ final class ConversationSidebar: NSVisualEffectView, NSTableViewDataSource, NSTa
         if id != selected { onSelect?(id) }
     }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard visible.indices.contains(row) else { return nil }
         let item = visible[row], cell = NSTableCellView()
         let name = JourneyStyle.label(item.title, size: 13, weight: item.id == selected ? .medium : .regular)
         name.maximumNumberOfLines = 1; name.lineBreakMode = .byTruncatingTail

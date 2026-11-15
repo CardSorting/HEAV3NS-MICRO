@@ -45,6 +45,18 @@ impl AgentEngine {
                         ),
                         duration_ms: 0,
                     });
+                } else if cancel_token.is_some_and(|t| t.is_cancelled()) {
+                    records.push(ToolExecutionRecord {
+                        name: call.name.clone(),
+                        call_id: Some(call.id.clone()),
+                        args: Some(call.args.clone()),
+                        output: Value::Null,
+                        success: false,
+                        denied: None,
+                        output_limited: None,
+                        error: Some("Cancelled by user".to_string()),
+                        duration_ms: 0,
+                    });
                 } else {
                     records.push(
                         self.tools()
@@ -196,8 +208,8 @@ impl AgentEngine {
             }
 
             let wave_results = futures::future::join_all(wave_futs).await;
-            self.tools().cache.lock().unwrap().clear();
-            self.tools().read_tracker.lock().unwrap().reset_stamps();
+            self.tools().cache.lock().unwrap_or_else(|e| e.into_inner()).clear();
+            self.tools().read_tracker.lock().unwrap_or_else(|e| e.into_inner()).reset_stamps();
             let mut any_failed = false;
             for rep in wave_results {
                 if rep.outcome != EngineTickOutcome::Completed {
@@ -338,13 +350,13 @@ impl AgentEngine {
             }
             "/restore" => {
                 if arg.is_empty() {
-                    let snaps = self.cas.lock().unwrap().snapshots().to_vec();
+                    let snaps = self.cas.lock().unwrap_or_else(|e| e.into_inner()).snapshots().to_vec();
                     json!({ "availableCasSnapshots": snaps }).to_string()
                 } else {
-                    match self.cas.lock().unwrap().restore_full_snapshot(arg) {
+                    match self.cas.lock().unwrap_or_else(|e| e.into_inner()).restore_full_snapshot(arg) {
                         Ok(v) => {
-                            self.tools().cache.lock().unwrap().clear();
-                            self.tools().read_tracker.lock().unwrap().reset_stamps();
+                            self.tools().cache.lock().unwrap_or_else(|e| e.into_inner()).clear();
+                            self.tools().read_tracker.lock().unwrap_or_else(|e| e.into_inner()).reset_stamps();
                             serde_json::to_string_pretty(&json!({ "restored": v })).unwrap_or_default()
                         }
                         Err(e) => format!("CAS snapshot restore error: {e}"),
@@ -354,12 +366,12 @@ impl AgentEngine {
             "/context" => self.render_context_hud(arg),
             "/prompt" => self.render_prompt_inspector(arg),
             "/stats" => {
-                let sess = self.session().lock().unwrap();
-                let mem = self.memory().lock().unwrap();
-                let vfs = self.vfs().lock().unwrap();
+                let sess = self.session().lock().unwrap_or_else(|e| e.into_inner());
+                let mem = self.memory().lock().unwrap_or_else(|e| e.into_inner());
+                let vfs = self.vfs().lock().unwrap_or_else(|e| e.into_inner());
                 let slab = sess.slab_snapshot();
-                let cache = self.tools().cache.lock().unwrap();
-                let journal = self.tools().journal.lock().unwrap();
+                let cache = self.tools().cache.lock().unwrap_or_else(|e| e.into_inner());
+                let journal = self.tools().journal.lock().unwrap_or_else(|e| e.into_inner());
                 json!({
                     "messages": sess.messages().len(),
                     "transcript": sess.transcript().len(),
@@ -373,17 +385,17 @@ impl AgentEngine {
                     "cacheHits": cache.hits,
                     "cacheMisses": cache.misses,
                     "journalMutations": journal.history().len(),
-                    "turnReceipts": self.turn_receipts.lock().unwrap().len(),
+                    "turnReceipts": self.turn_receipts.lock().unwrap_or_else(|e| e.into_inner()).len(),
                 })
                 .to_string()
             }
             "/vfs" => {
-                let vfs = self.vfs().lock().unwrap();
+                let vfs = self.vfs().lock().unwrap_or_else(|e| e.into_inner());
                 let staged = vfs.export_staged();
                 json!({ "count": staged.len(), "staged": staged }).to_string()
             }
             "/diff" => {
-                let vfs = self.vfs().lock().unwrap();
+                let vfs = self.vfs().lock().unwrap_or_else(|e| e.into_inner());
                 let staged = vfs.export_staged();
                 if !staged.is_empty() {
                     staged
@@ -393,30 +405,30 @@ impl AgentEngine {
                         .join("\n")
                 } else if let Some(last) = self.latest_receipt() {
                     if let (Some(b), Some(a)) = (&last.snapshot_before, &last.snapshot_after) {
-                        if let Ok((changes, diff_txt)) = self.cas.lock().unwrap().diff_between(b, Some(a.as_str())) {
+                        if let Ok((changes, diff_txt)) = self.cas.lock().unwrap_or_else(|e| e.into_inner()).diff_between(b, Some(a.as_str())) {
                             if !changes.is_empty() {
                                 return Some(diff_txt);
                             }
                         }
                     }
-                    let j_diff = self.tools().journal.lock().unwrap().generate_session_diff(self.workspace_root(), None);
+                    let j_diff = self.tools().journal.lock().unwrap_or_else(|e| e.into_inner()).generate_session_diff(self.workspace_root(), None);
                     serde_json::to_string_pretty(&j_diff).unwrap_or_else(|_| "No staged VFS or session changes.".to_string())
                 } else {
-                    let j_diff = self.tools().journal.lock().unwrap().generate_session_diff(self.workspace_root(), None);
+                    let j_diff = self.tools().journal.lock().unwrap_or_else(|e| e.into_inner()).generate_session_diff(self.workspace_root(), None);
                     serde_json::to_string_pretty(&j_diff).unwrap_or_else(|_| "No staged VFS or session changes.".to_string())
                 }
             }
-            "/commit" => match self.vfs().lock().unwrap().commit_all() {
+            "/commit" => match self.vfs().lock().unwrap_or_else(|e| e.into_inner()).commit_all() {
                 Ok(paths) => {
                     let path_bufs: Vec<std::path::PathBuf> = paths.iter().map(|p| self.workspace_root().join(p)).collect();
-                    self.tools().cache.lock().unwrap().invalidate_paths(&path_bufs);
-                    self.tools().read_tracker.lock().unwrap().reset_stamps();
+                    self.tools().cache.lock().unwrap_or_else(|e| e.into_inner()).invalidate_paths(&path_bufs);
+                    self.tools().read_tracker.lock().unwrap_or_else(|e| e.into_inner()).reset_stamps();
                     format!("Committed {} staged file(s): {:?}", paths.len(), paths)
                 }
                 Err(e) => format!("VFS commit failed: {e}"),
             },
             "/discard" => {
-                self.vfs().lock().unwrap().clear();
+                self.vfs().lock().unwrap_or_else(|e| e.into_inner()).clear();
                 "Discarded all staged VFS changes.".to_string()
             }
             "/tools" => self.render_tools_status(),
@@ -439,7 +451,7 @@ impl AgentEngine {
             ]
             .join("\n"),
             "/memory" => {
-                let mem = self.memory().lock().unwrap();
+                let mem = self.memory().lock().unwrap_or_else(|e| e.into_inner());
                 if arg.is_empty() {
                     mem.format_memory_envelope().unwrap_or_else(|| "Memory store is empty.".to_string())
                 } else {
@@ -448,28 +460,28 @@ impl AgentEngine {
             }
             "/skills" => {
                 let skills = discover_skills_cached(self.workspace_root());
-                let dag = self.tools().skill_catalog.lock().unwrap().evaluate_dag();
+                let dag = self.tools().skill_catalog.lock().unwrap_or_else(|e| e.into_inner()).evaluate_dag();
                 serde_json::to_string_pretty(&json!({ "workspaceSkills": skills, "skillTreeDag": dag })).unwrap_or_default()
             }
             "/soul" => {
-                let cat = self.tools().skill_catalog.lock().unwrap();
+                let cat = self.tools().skill_catalog.lock().unwrap_or_else(|e| e.into_inner());
                 serde_json::to_string_pretty(&json!({ "activeSoul": cat.active_soul, "competencies": cat.competency_scores })).unwrap_or_default()
             }
             "/forge" => {
                 let prompt = if arg.is_empty() { "sovereign-custom-operator" } else { arg };
-                let mut cat = self.tools().skill_catalog.lock().unwrap();
+                let mut cat = self.tools().skill_catalog.lock().unwrap_or_else(|e| e.into_inner());
                 match cat.forge_skill(&json!({ "prompt": prompt })) {
                     Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_default(),
                     Err(e) => format!("Skill forge error: {e}"),
                 }
             }
             "/doctor" => {
-                let disp_health = self.tools().display_state.lock().unwrap().audit_health();
-                let dag = self.tools().skill_catalog.lock().unwrap().evaluate_dag();
-                let cas_snaps = self.cas.lock().unwrap().snapshots().len();
+                let disp_health = self.tools().display_state.lock().unwrap_or_else(|e| e.into_inner()).audit_health();
+                let dag = self.tools().skill_catalog.lock().unwrap_or_else(|e| e.into_inner()).evaluate_dag();
+                let cas_snaps = self.cas.lock().unwrap_or_else(|e| e.into_inner()).snapshots().len();
                 serde_json::to_string_pretty(&json!({
                     "posture": self.current_posture().slug(),
-                    "prefixStatus": *self.last_prefix_status.lock().unwrap(),
+                    "prefixStatus": *self.last_prefix_status.lock().unwrap_or_else(|e| e.into_inner()),
                     "casSnapshots": cas_snaps,
                     "displayHealth": disp_health,
                     "skillTreeAcyclic": dag.get("acyclic"),
@@ -479,7 +491,7 @@ impl AgentEngine {
             }
             "/computer" => self.handle_computer_slash(arg),
             "/browser" => {
-                let mut disp = self.tools().display_state.lock().unwrap();
+                let mut disp = self.tools().display_state.lock().unwrap_or_else(|e| e.into_inner());
                 let req = if arg.is_empty() { json!({ "action": "snapshot" }) } else { json!({ "action": "navigate", "url": arg }) };
                 match disp.execute_browser_action(&req) {
                     Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_default(),
@@ -507,9 +519,9 @@ impl AgentEngine {
                         target_selector: Some(arg.to_string()),
                         ..Default::default()
                     };
-                    let disp = self.tools().display_state.lock().unwrap();
+                    let disp = self.tools().display_state.lock().unwrap_or_else(|e| e.into_inner());
                     let fresh = crate::core::spatial_engine::SpatialInteractionEngine::extract_scene_from_display(&disp);
-                    let mut med = self.tools().spatial_engine.mediator.lock().unwrap();
+                    let mut med = self.tools().spatial_engine.mediator.lock().unwrap_or_else(|e| e.into_inner());
                     med.update_scene(fresh);
                     serde_json::to_string_pretty(&med.ground_action(&contract)).unwrap_or_default()
                 }
@@ -519,7 +531,7 @@ impl AgentEngine {
                 serde_json::to_string_pretty(&classify_task_for_legion(obj, &[], None, 5)).unwrap_or_default()
             }
             "/compact" => {
-                let mut sess = self.session().lock().unwrap();
+                let mut sess = self.session().lock().unwrap_or_else(|e| e.into_inner());
                 let policy = CompactionPolicy {
                     force: true,
                     preserve_recent_turns: 2,
@@ -562,7 +574,7 @@ impl AgentEngine {
                 let snap = self.create_snapshot();
                 format!(
                     "Created snapshot #{} ({}) at frame {}",
-                    self.snapshot_count() - 1,
+                    self.snapshot_count().saturating_sub(1),
                     snap.snapshot_id,
                     snap.frame_index
                 )
@@ -580,17 +592,17 @@ impl AgentEngine {
                     }
                 }
                 if arg.starts_with("snap-") {
-                    match self.cas.lock().unwrap().restore_full_snapshot(arg) {
+                    match self.cas.lock().unwrap_or_else(|e| e.into_inner()).restore_full_snapshot(arg) {
                         Ok(v) => {
-                            self.tools().cache.lock().unwrap().clear();
-                            self.tools().read_tracker.lock().unwrap().reset_stamps();
+                            self.tools().cache.lock().unwrap_or_else(|e| e.into_inner()).clear();
+                            self.tools().read_tracker.lock().unwrap_or_else(|e| e.into_inner()).reset_stamps();
                             return Some(format!("Restored workspace CAS snapshot {arg}: {v:?}"));
                         }
                         Err(e) => return Some(format!("Snapshot '{arg}' not found: {e}")),
                     }
                 }
                 let count = parsed_idx.unwrap_or(2).max(2);
-                self.session().lock().unwrap().truncate_active_messages(count);
+                self.session().lock().unwrap_or_else(|e| e.into_inner()).truncate_active_messages(count);
                 format!("Truncated last {count} message(s) from active session.")
             }
             "/undo" => {
@@ -602,11 +614,11 @@ impl AgentEngine {
             }
             "/clear" => {
                 let cfg = self.config_snapshot();
-                let mut sess = self.session().lock().unwrap();
+                let mut sess = self.session().lock().unwrap_or_else(|e| e.into_inner());
                 sess.clear();
                 sess.add_message(SessionMessage::new(Role::System, cfg.system_prompt));
-                *self.pinned_system_prompt.lock().unwrap() = None;
-                self.prefix_tracker.lock().unwrap().declare_repin("session_clear");
+                *self.pinned_system_prompt.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                self.prefix_tracker.lock().unwrap_or_else(|e| e.into_inner()).declare_repin("session_clear");
                 self.tools().end_task();
                 "Session cleared and arena reset to offset 0.".to_string()
             }
@@ -616,7 +628,7 @@ impl AgentEngine {
                     "status": "ok",
                     "provider": self.provider_arc().provider_name(),
                     "posture": self.current_posture().slug(),
-                    "prefixStatus": *self.last_prefix_status.lock().unwrap(),
+                    "prefixStatus": *self.last_prefix_status.lock().unwrap_or_else(|e| e.into_inner()),
                     "workspaceRevision": workspace_revision(self.workspace_root()),
                     "queueActive": q.active,
                     "queuePending": q.pending_count,
@@ -640,7 +652,7 @@ impl AgentEngine {
                 serde_json::to_string_pretty(&self.tools().computer_orchestrator.interpret(&obs)).unwrap_or_default()
             }
             "patterns" => {
-                let kstore = self.tools().computer_orchestrator.knowledge_store.lock().unwrap();
+                let kstore = self.tools().computer_orchestrator.knowledge_store.lock().unwrap_or_else(|e| e.into_inner());
                 serde_json::to_string_pretty(&json!({ "patterns": kstore.list_patterns(), "procedures": kstore.list_procedures() })).unwrap_or_default()
             }
             "consult" => {
@@ -665,7 +677,7 @@ impl AgentEngine {
                 }
             }
             _ => {
-                let mut disp = self.tools().display_state.lock().unwrap();
+                let mut disp = self.tools().display_state.lock().unwrap_or_else(|e| e.into_inner());
                 let action = if arg.is_empty() { "capture" } else { arg };
                 match disp.execute_action(&json!({ "action": action })) {
                     Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_default(),

@@ -245,7 +245,7 @@ impl VirtualDisplayState {
                 self.assert_agent_may_act(args)?;
                 let app_name = args.get("app").or_else(|| args.get("target")).and_then(|v| v.as_str()).ok_or_else(|| "Missing 'app' for focus_app".to_string())?;
                 let win_id = self.windows.iter().find(|w| w.app.eq_ignore_ascii_case(app_name)).map(|w| w.id.clone()).ok_or_else(|| format!("App '{app_name}' not found"))?;
-                self.execute_action(&json!({"action": "focus_window", "window_id": win_id}))
+                self.execute_action(&forward_cua_context(json!({"action": "focus_window", "window_id": win_id}), args))
             }
             "read_window_below" => {
                 let win_id = args.get("window_id").and_then(|v| v.as_str()).unwrap_or(&self.active_window_id);
@@ -377,7 +377,7 @@ impl VirtualDisplayState {
                 let hy = parse_coordinate_value(args.get("y"), self.height, self.cursor[1], norm_1000);
                 self.cursor = [hx.clamp(0, self.width as i32), hy.clamp(0, self.height as i32)];
                 let hovered_el = self.windows.iter().find(|w| w.id == self.active_window_id)
-                    .and_then(|w| w.elements.iter().find(|e| self.cursor[0] >= e.bounds[0] && self.cursor[0] <= e.bounds[0] + e.bounds[2] && self.cursor[1] >= e.bounds[1] && self.cursor[1] <= e.bounds[1] + e.bounds[3]))
+                    .and_then(|w| w.elements.iter().find(|e| self.cursor[0] >= e.bounds[0] && self.cursor[0] <= e.bounds[0].saturating_add(e.bounds[2]) && self.cursor[1] >= e.bounds[1] && self.cursor[1] <= e.bounds[1].saturating_add(e.bounds[3])))
                     .map(|e| json!({"id": e.id, "role": e.role, "label": e.label}));
                 self.record_action("hover", "success", 1, json!({"cursor": self.cursor, "hovered": hovered_el}));
                 Ok(json!({ "action": "hover", "cursor": self.cursor, "hovered": hovered_el, "frameSeq": self.frame_seq }))
@@ -405,8 +405,16 @@ impl VirtualDisplayState {
                 if k_norm == "escape" {
                     self.pending_dialog = None;
                     if let Some(pos) = self.windows.iter().position(|w| w.id != "win-main-1" && w.is_modal_window()) {
-                        self.windows.remove(pos);
-                        if let Some(main) = self.windows.iter_mut().find(|w| w.id == "win-main-1") { main.focused = true; self.active_window_id = "win-main-1".into(); }
+                        let removed_id = self.windows.remove(pos).id;
+                        if let Some(main) = self.windows.iter_mut().find(|w| w.id == "win-main-1") {
+                            main.focused = true; self.active_window_id = "win-main-1".into(); self.last_target_app = main.app.clone();
+                        } else if self.active_window_id == removed_id {
+                            if let Some(first) = self.windows.first_mut() {
+                                first.focused = true; self.active_window_id = first.id.clone(); self.last_target_app = first.app.clone();
+                            } else {
+                                self.active_window_id.clear(); self.last_target_app.clear();
+                            }
+                        }
                     } else if let Some(win) = self.windows.iter_mut().find(|w| w.id == self.active_window_id) {
                         win.elements.retain(|e| !matches!(e.role.to_ascii_lowercase().as_str(), "dialog" | "alertdialog" | "modal"));
                         for e in &mut win.elements { e.focused = false; }
@@ -503,6 +511,7 @@ impl VirtualDisplayState {
                         self.last_target_app = other.app.clone();
                     }
                 }
+                self.frame_seq += 1;
                 self.record_action("window_minimize", "success", 1, json!({"windowId": win_id, "active": self.active_window_id}));
                 Ok(self.capture_frame())
             }
@@ -510,6 +519,7 @@ impl VirtualDisplayState {
                 self.assert_agent_may_act(args)?;
                 let win_id = args.get("window_id").and_then(|v| v.as_str()).unwrap_or(&self.active_window_id);
                 if let Some(win) = self.windows.iter_mut().find(|w| w.id == win_id) { win.bounds = [0, 0, self.width as i32, self.height as i32]; }
+                self.frame_seq += 1;
                 self.record_action("window_maximize", "success", 1, json!({"windowId": win_id}));
                 Ok(self.capture_frame())
             }
@@ -517,6 +527,7 @@ impl VirtualDisplayState {
                 self.assert_agent_may_act(args)?;
                 let win_id = args.get("window_id").and_then(|v| v.as_str()).unwrap_or(&self.active_window_id);
                 if let Some(win) = self.windows.iter_mut().find(|w| w.id == win_id) { win.bounds = [120, 120, 1024, 640]; win.focused = true; }
+                self.frame_seq += 1;
                 self.record_action("window_restore", "success", 1, json!({"windowId": win_id}));
                 Ok(self.capture_frame())
             }
@@ -526,15 +537,17 @@ impl VirtualDisplayState {
                 let nw = args.get("width").and_then(|v| v.as_i64()).unwrap_or(800).clamp(1, i32::MAX as i64) as i32;
                 let nh = args.get("height").and_then(|v| v.as_i64()).unwrap_or(600).clamp(1, i32::MAX as i64) as i32;
                 if let Some(win) = self.windows.iter_mut().find(|w| w.id == win_id) { win.bounds[2] = nw; win.bounds[3] = nh; }
+                self.frame_seq += 1;
                 self.record_action("window_resize", "success", 1, json!({"windowId": win_id, "bounds": [nw, nh]}));
                 Ok(self.capture_frame())
             }
             "window_move" | "move_window" => {
                 self.assert_agent_may_act(args)?;
                 let win_id = args.get("window_id").and_then(|v| v.as_str()).unwrap_or(&self.active_window_id);
-                let nx = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-                let ny = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                let nx = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0).clamp(i32::MIN as i64, i32::MAX as i64) as i32;
+                let ny = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0).clamp(i32::MIN as i64, i32::MAX as i64) as i32;
                 if let Some(win) = self.windows.iter_mut().find(|w| w.id == win_id) { win.bounds[0] = nx; win.bounds[1] = ny; }
+                self.frame_seq += 1;
                 self.record_action("window_move", "success", 1, json!({"windowId": win_id, "position": [nx, ny]}));
                 Ok(self.capture_frame())
             }
@@ -552,6 +565,7 @@ impl VirtualDisplayState {
                         self.last_target_app.clear();
                     }
                 }
+                self.frame_seq += 1;
                 self.record_action("window_close", "success", 1, json!({"closedId": win_id, "active": self.active_window_id}));
                 Ok(self.capture_frame())
             }

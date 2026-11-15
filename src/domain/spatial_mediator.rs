@@ -220,10 +220,12 @@ impl SpatialActionMediator {
         if let Some(ref sel) = contract.target_selector {
             let trimmed = sel.trim();
             if let Some(tok) = trimmed.strip_prefix('s') {
-                if let Some((_, sid_str)) = tok.split_once(':') {
-                    if let Ok(sid) = sid_str.parse::<u32>() {
-                        if let Some(t) = self.active_scene.find_by_som(sid) {
-                            return vec![t];
+                if let Some((seq_str, sid_str)) = tok.split_once(':') {
+                    if let (Ok(seq), Ok(sid)) = (u64::from_str_radix(seq_str, 16), sid_str.parse::<u32>()) {
+                        if seq == self.active_scene.frame_seq {
+                            if let Some(t) = self.active_scene.find_by_som(sid) {
+                                return vec![t];
+                            }
                         }
                     }
                 }
@@ -306,7 +308,8 @@ impl SpatialActionMediator {
         after: &SpatialScene,
         duration_ms: u64,
     ) -> SpatialExecutionReceipt {
-        let (verdict, postconditions_met, recovery_suggestion) = match action {
+        let lower_action = action.trim().to_ascii_lowercase();
+        let (verdict, postconditions_met, recovery_suggestion) = match lower_action.as_str() {
             "click" | "double_click" => {
                 if let Some(g) = grounded {
                     let target_focused_after = after.targets.iter().find(|t| t.id == g.target.id).map(|t| t.focused).unwrap_or(false);
@@ -328,7 +331,7 @@ impl SpatialActionMediator {
                 if let Some(g) = grounded {
                     let new_val = after.targets.iter().find(|t| t.id == g.target.id).map(|t| t.value.as_str()).unwrap_or("");
                     let old_val = before.targets.iter().find(|t| t.id == g.target.id).map(|t| t.value.as_str()).unwrap_or("");
-                    if new_val != old_val || !new_val.is_empty() {
+                    if new_val != old_val {
                         (AssuranceVerdict::Confirmed, true, None)
                     } else {
                         (
@@ -381,7 +384,8 @@ impl SpatialActionMediator {
                     ..SpatialActionContract::default()
                 });
             }
-            if contract.action_name == "type" && !g.target.focused {
+            let lower_action = contract.action_name.to_ascii_lowercase();
+            if matches!(lower_action.as_str(), "type" | "set_value" | "fill") && !g.target.focused {
                 steps.push(SpatialActionContract {
                     action_name: "click".into(),
                     target_selector: Some(g.target.id.clone()),

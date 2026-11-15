@@ -29,6 +29,15 @@ pub struct Heav3nsUserConfig {
 }
 
 impl Heav3nsUserConfig {
+    pub fn redacted_for_display(&self) -> Self {
+        let mut out = self.clone();
+        out.api_key = out.api_key.as_deref().map(crate::plumbing::text_tokens::mask_secret_preview);
+        for v in out.provider_keys.values_mut() {
+            *v = crate::plumbing::text_tokens::mask_secret_preview(v);
+        }
+        out
+    }
+
     pub fn config_dir() -> PathBuf {
         if let Ok(home) = env::var("HOME") {
             PathBuf::from(home).join(".heav3ns")

@@ -101,11 +101,11 @@ flowchart LR
 
 ---
 
-## Hardening & Reliability Guarantees (Waves 4–13)
+## Hardening & Reliability Guarantees (Waves 4–21)
 
-- **Workspace & Credential Isolation**: Dangling-symlink resolution (`canonicalize_best_effort` 16-hop `read_link`), `CredentialDenyScope::ModelContext` blocking, child-process credential env scrubbing (`SafetyPolicy::is_sensitive_env_var`), POSIX `>&1`/`>&2`/`>&-` fd-duplication checks in `ShellCommandGuard`, and macOS Seatbelt sandboxing.
-- **Durable Persistence & XML/SSE Safety**: `sync_all()` + temp-rename atomic writes across CAS blobs, manifests, and filesystem tools; fail-closed `WorkspaceSnapshotCas` GC; checkpoint-preserving `TransactionJournal::discard_turn`; bounded `MemoryStore` (`128` entries / `2048`B fields / `24_576`B envelope) with XML fence escaping; $O(N)$ SSE frame tracking and CRLF-preserving `FuzzyPatch` engine.
-- **Turn Serialization & AppKit Lifecycle**: `legacy_turn_gate` serialization across `task.submit` (`32`-task `RUNTIME_QUEUE_FULL` cap), `TURN_IN_PROGRESS` guards on mid-turn conversation switches, posture-checked automation RPC routing, and `client === source` / `closing` / `conversationSwitchGeneration` guards across AppKit windows and stores. See [`CHANGELOG.md`](CHANGELOG.md) and [`docs/SECURITY_BEST_PRACTICES.md`](docs/SECURITY_BEST_PRACTICES.md).
+- **Workspace, Sandbox & Credential Isolation**: Dangling-symlink resolution (`canonicalize_best_effort` 16-hop `read_link`), lexical `..` resolution in `classify_sensitive_path`, parent-symlink & `..` rejection in `SessionVfs::commit_all`, child-process credential env scrubbing (`SafetyPolicy::is_sensitive_env_var`), `@` userinfo rejection in `is_safe_oauth_url`, `USER_CONFIG_IO_LOCK` config serialization, and hardened `inspect_command_security` / `ShellCommandGuard` (16-level `sh -c` cap, `rm` normalization, bundled `curl` short-flag & credential-pipe `Deny`, `sort -o`/`rg --pre`/`git -C ... -c` filtering, `&>`/`&>>` heredocs, POSIX `>&1`/`>&2`/`>&-` handling, and macOS Seatbelt).
+- **Durable Persistence, Bounded I/O & Parser Safety**: `sync_all()` + temp-rename atomic writes across CAS blobs, manifests, and filesystem tools; fail-closed `WorkspaceSnapshotCas` GC and `rewind_to_snapshot` receipt/CAS alignment; `SessionCompactor` active-turn `[User, Assistant(tc), Tool]` preservation; `ProviderChain` `:model` override retention; bounded `is_file()` disk reads; $O(N)$ SSE/JSON stream parsing, UTF-8 char-boundary pagination, and overflow-safe geometry/CUA checks.
+- **Turn Serialization & AppKit Lifecycle**: `legacy_turn_gate` serialization across `task.submit` (`32`-task `RUNTIME_QUEUE_FULL` cap), monotonic `MODEL_SELECT_SEQ` gating, `TURN_IN_PROGRESS` guards on mid-turn conversation switches, posture-checked automation RPC routing, `RuntimeClient.deinit` reservation release, `NSTableView` row bounds guards, viewport clamping/reset on conversation switch, and `client === source` / `closing` / `conversationSwitchGeneration` guards across AppKit windows and stores. See [`CHANGELOG.md`](CHANGELOG.md) and [`docs/SECURITY_BEST_PRACTICES.md`](docs/SECURITY_BEST_PRACTICES.md).
 
 ---
 
@@ -113,14 +113,14 @@ flowchart LR
 
 | Gate | Command | Current Verified Baseline |
 | :--- | :--- | :--- |
-| **1. Rust Test Suite** | `cargo test` | **119 passed**, `0` failed (unit, spatial, computer-use, OAuth E2E, Wave 4–13 hardening) |
+| **1. Rust Test Suite** | `cargo test` | **128 passed**, `0` failed (unit, spatial, computer-use, OAuth E2E, Wave 4–21 hardening) |
 | **2. Agent Flight Suite** | `cargo run -- --flight` | **5 scenarios** (`FT-01..FT-05`, `19/19` checks passing) |
 | **3. Native macOS AppKit** | `cd native && swift test` | **323 executed**, `6` skipped, `0` failed |
 | **4. Joyzoning & Doctor** | `joy-check . --theme strict` / `--doctor` | **100% Stability Index**, `343` files, `0` errors, `0` warnings |
-| **5. Documentation Guardrails** | `node bin/docs-check.mjs` | **72** required docs (`16` ADRs, `6` playbooks, `4` wiki, `5` postmortems, `3` KB), `437` verified links |
+| **5. Documentation Guardrails** | `node bin/docs-check.mjs` | **72** required docs (`16` ADRs, `6` playbooks, `4` wiki, `5` postmortems, `3` KB), `438` verified links |
 
 ```bash
-# 1. Run Rust unit, spatial, computer-use, zenith, codewhale, OAuth & hardening test suites (119 tests)
+# 1. Run Rust unit, spatial, computer-use, zenith, codewhale, OAuth & hardening test suites (128 tests)
 cargo test
 
 # 2. Run Native macOS AppKit test suite (323 tests; 6 skipped)

@@ -29,7 +29,14 @@ final class AccountClient {
             try start()
             callbacks[id] = completion
             var data = try JSONSerialization.data(withJSONObject: params.merging(["v": 1, "id": id, "method": method]) { _, reserved in reserved }); data.append(10)
-            try input?.fileHandleForWriting.write(contentsOf: data)
+            do {
+                try input?.fileHandleForWriting.write(contentsOf: data)
+            } catch {
+                callbacks.removeValue(forKey: id)
+                stop(message: error.localizedDescription)
+                completion(.failure(error))
+                return
+            }
             deadlines[id] = .now() + (method == "signIn" ? 180 : 15)
             scheduleDeadline()
         } catch { callbacks.removeValue(forKey: id); completion(.failure(error)) }

@@ -133,7 +133,8 @@ final class ControlFrameReader {
         repeat { count = data.withUnsafeMutableBytes { Darwin.read(handle.fileDescriptor, $0.baseAddress, $0.count) } } while count < 0 && errno == EINTR
         guard count >= 0 else { throw BridgeError.message("Could not read LUMI's control channel. Reconnect to inspect its recorded state.") }
         // Copy only the bytes read; a small slice must not retain a 64 KiB buffer.
-        return data.withUnsafeBytes { Data(bytes: $0.baseAddress!, count: count) }
+        guard count > 0 else { return Data() }
+        return data.prefix(count)
     }
     private func scheduleDrain() { io.async { [weak self] in self?.drain() } }
     private func drain() {
