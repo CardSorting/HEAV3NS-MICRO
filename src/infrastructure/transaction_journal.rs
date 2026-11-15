@@ -48,14 +48,18 @@ impl TransactionJournal {
         let (previous_content, created_new_file) = match fs::metadata(target_path) {
             Ok(meta) if meta.len() <= 8 * 1024 * 1024 => match fs::read(target_path) {
                 Ok(bytes) => (Some(bytes), false),
-                Err(_) => (None, true),
+                Err(_) => (None, false),
             },
             Ok(_) => (None, false),
-            Err(_) => (None, true),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (None, true),
+            Err(_) => (None, false),
         };
         let active_turn = self.current_turn_id().to_string();
-        if self.transactions.len() >= 512 {
-            self.transactions.remove(0);
+        let new_bytes = previous_content.as_ref().map(|b| b.len()).unwrap_or(0);
+        let mut total_bytes: usize = self.transactions.iter().map(|t| t.previous_content.as_ref().map(|b| b.len()).unwrap_or(0)).sum();
+        while self.transactions.len() >= 512 || (!self.transactions.is_empty() && total_bytes.saturating_add(new_bytes) > 64 * 1024 * 1024) {
+            let evicted = self.transactions.remove(0);
+            total_bytes = total_bytes.saturating_sub(evicted.previous_content.as_ref().map(|b| b.len()).unwrap_or(0));
             for idx in self.checkpoints.values_mut() {
                 *idx = idx.saturating_sub(1);
             }
@@ -128,7 +132,8 @@ impl TransactionJournal {
     }
 
     pub fn create_checkpoint(&mut self, label: &str) -> String {
-        let id = format!("chk_{label}_{}", self.transactions.len());
+        self.seq += 1;
+        let id = format!("chk_{label}_{}", self.seq);
         self.checkpoints.insert(id.clone(), self.transactions.len());
         id
     }

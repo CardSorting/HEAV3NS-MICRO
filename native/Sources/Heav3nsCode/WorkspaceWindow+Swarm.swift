@@ -21,14 +21,9 @@ extension WorkspaceWindow {
     }
 
     @objc func requestCriticalReview() {
+        guard canRequestRecovery else { showNotice("Finish or stop active work before requesting a review."); return }
         let text = "[AGENT_SWARM_CRITICAL_REVIEW] Perform one bounded, evidence-based critical completion review of the latest completed work in this conversation. Check original requirements, architecture and constraints, verification quality, and concrete failure modes. Distinguish demonstrated defects, unverified assumptions, and optional improvements. Do not invent defects or start an unlimited task chain. End with exactly one decision: ACCEPT, REMEDIATE, ESCALATE, or ACCEPT WITH DISCLOSED LIMITATIONS, with concise evidence. This is one review pass only."
-        client.request("task.submit", params: ["text": text, "attachments": []]) { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                if case .success = result { self.showNotice("Critical review queued.") }
-                else if case .failure(let error) = result { self.showNotice(error.localizedDescription) }
-            }
-        }
+        submitInstruction(text)
     }
 
     @objc func engageSpecialists() {
@@ -294,8 +289,9 @@ extension WorkspaceWindow {
                 self.showNotice("Reconciliation was not submitted. Confirm the stopped and reviewed checkbox and add at least 20 characters describing your review.")
                 return
             }
-            self.client.request("agentSwarm.formReconcile", params: ["formationId": formationId, "confirmation": note, "confirmedStopped": true, "decisions": decisions]) { result in
+            self.client.request("agentSwarm.formReconcile", params: ["formationId": formationId, "confirmation": note, "confirmedStopped": true, "decisions": decisions]) { [weak self] result in
                 DispatchQueue.main.async {
+                    guard let self else { return }
                     switch result {
                     case .success(let receipt):
                         let isAutomatic = receipt["automatic"] as? Bool == true
@@ -420,9 +416,11 @@ extension WorkspaceWindow {
                     if case .failure(let error) = settingsResult { self.showNotice(error.localizedDescription) }
                     return
                 }
-                let resumeFormationWork = {
-                    self.client.request("agentSwarm.formResume", params: ["formationId": formationId]) { result in
+                let resumeFormationWork = { [weak self] in
+                    guard let self else { return }
+                    self.client.request("agentSwarm.formResume", params: ["formationId": formationId]) { [weak self] result in
                         DispatchQueue.main.async {
+                            guard let self else { return }
                             switch result {
                             case .success(let report): self.showNotice("Formation resumed.\n\n\(self.formationRoadmapText(report))")
                             case .failure(let error): self.showNotice(error.localizedDescription)
@@ -431,8 +429,9 @@ extension WorkspaceWindow {
                     }
                 }
                 if automatic || self.swarmDeferred || settings["enabled"] as? Bool == true || settings["hierarchicalDefer"] as? Bool == true {
-                    self.client.request("task.resume", params: [:]) { resumed in
+                    self.client.request("task.resume", params: [:]) { [weak self] resumed in
                         DispatchQueue.main.async {
+                            guard let self else { return }
                             guard case .success = resumed else {
                                 if case .failure(let error) = resumed { self.showNotice(error.localizedDescription) }
                                 return
@@ -527,8 +526,9 @@ extension WorkspaceWindow {
                     self.showNotice("The latest formation has no saved specialist stream to inspect.")
                     return
                 }
-                self.client.request("agentSwarm.formStream", params: ["formationId": formationId, "specialistId": specialistId]) { streamResult in
+                self.client.request("agentSwarm.formStream", params: ["formationId": formationId, "specialistId": specialistId]) { [weak self] streamResult in
                     DispatchQueue.main.async {
+                        guard let self else { return }
                         switch streamResult {
                         case .success(let stream):
                             let excerpt = stream["excerpt"] as? String ?? "No transcript excerpt was saved."

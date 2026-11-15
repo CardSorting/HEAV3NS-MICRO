@@ -199,7 +199,7 @@ pub fn compute_action_ledger_health(
 /// so `browser_navigate` can synchronize the window's interactive `UiElement` list.
 pub fn extract_dom_ui_tuples(dom_snap: &Value) -> Vec<(String, u32, String, String, String, [i32; 4])> {
     let mut out = Vec::new();
-    if let Some(arr) = dom_snap.get("elements").and_then(|v| v.as_array()) {
+    if let Some(arr) = dom_snap.get("interactiveElements").or_else(|| dom_snap.get("elements")).and_then(|v| v.as_array()) {
         for (idx, item) in arr.iter().enumerate() {
             let som_id = item.get("somId").and_then(|v| v.as_u64()).unwrap_or((idx + 1) as u64) as u32;
             let raw_id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");

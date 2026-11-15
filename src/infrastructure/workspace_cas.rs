@@ -85,13 +85,15 @@ impl WorkspaceSnapshotCas {
         let path = self.cas_root.join("receipts.jsonl");
         if let Ok(line) = serde_json::to_string(receipt) {
             use std::io::Write;
-            if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(&path) {
+            let mut opts = fs::OpenOptions::new();
+            opts.create(true).append(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                opts.mode(0o600);
+            }
+            if let Ok(mut file) = opts.open(&path) {
                 let _ = writeln!(file, "{line}");
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
-                }
             }
         }
     }
@@ -141,7 +143,9 @@ impl WorkspaceSnapshotCas {
         let hash = Self::sha256_hex(bytes);
         let dest = self.blob_path(&hash);
         if !dest.exists() {
-            let tmp = dest.with_extension(format!("tmp.{}.{}", std::process::id(), now_ms()));
+            static CAS_BLOB_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let seq = CAS_BLOB_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let tmp = dest.with_extension(format!("tmp.{}.{}.{}", std::process::id(), now_ms(), seq));
             fs::write(&tmp, bytes).map_err(|e| format!("CAS blob write failed: {e}"))?;
             if let Err(e) = fs::rename(&tmp, &dest) {
                 let _ = fs::remove_file(&tmp);
@@ -233,7 +237,9 @@ impl WorkspaceSnapshotCas {
             fs::create_dir_all(parent).map_err(|e| format!("mkdir failed for '{}': {e}", parent.display()))?;
         }
         let existing_perms = fs::metadata(&target).ok().map(|m| m.permissions());
-        let tmp = target.with_extension(format!("heav3ns-cas-tmp-{}-{}", std::process::id(), now_ms()));
+        static CAS_WRITE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq = CAS_WRITE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = target.with_extension(format!("heav3ns-cas-tmp-{}-{}-{}", std::process::id(), now_ms(), seq));
         fs::write(&tmp, bytes).map_err(|e| format!("temp write failed for '{rel_path}': {e}"))?;
         if let Some(perms) = existing_perms {
             let _ = fs::set_permissions(&tmp, perms);
@@ -465,7 +471,11 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
                 self.atomic_write_workspace_file(&rel, &bytes)?;
                 actions.push(format!("[Restored] {rel}"));
             } else {
-                let disk_path = self.workspace_root.join(&rel);
+                let rel_p = Path::new(&rel);
+                if rel_p.is_absolute() || rel_p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+                    return Err(format!("Refusing unsafe CAS undo path '{rel}'"));
+                }
+                let disk_path = self.workspace_root.join(rel_p);
                 if disk_path.exists() {
                     fs::remove_file(&disk_path).map_err(|e| format!("Failed to remove '{rel}': {e}"))?;
                     self.prune_empty_parents(&rel);

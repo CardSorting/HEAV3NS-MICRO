@@ -192,8 +192,9 @@ final class RuntimeClient {
             guard !discovery || pendingWrites + data.count <= 2 * 1024 * 1024 else { throw BridgeError.message("Discovery is busy. Try again shortly; task controls and navigation remain available.") }
             guard data.count <= FrameParser.limit, pendingWrites + data.count < 4 * 1024 * 1024 - (control ? 0 : 64 * 1024) else { throw BridgeError.message("The input queue is full. Your draft is preserved; try again after LUMI catches up.") }
             data.append(10)
+            let isSwarmForm = ["agentSwarm.form", "agentSwarm.formResume"].contains(method)
             let checkpointOperation = ["checkpoint.preview", "checkpoint.restore"].contains(method)
-            let deadline = DispatchTime.now() + (method == "side.query" ? max(210, requestTimeout) : checkpointOperation ? max(120, requestTimeout) : requestTimeout)
+            let deadline = DispatchTime.now() + (method == "side.query" ? max(210, requestTimeout) : isSwarmForm ? max(300, requestTimeout) : checkpointOperation ? max(120, requestTimeout) : requestTimeout)
             callbacks[id] = Pending(method: method, completion: completion, deadline: deadline)
             scheduleDeadline()
             pendingWrites += data.count
@@ -420,8 +421,8 @@ final class RuntimeClient {
             if case .success(let response) = result, response["stopped"] as? Bool == true,
                let retention = response["broccoliRetention"] as? [String: Any],
                let charge = retention["chargedBytes"] as? NSNumber, CFGetTypeID(charge) != CFBooleanGetTypeID(),
-               charge.doubleValue == Double(charge.intValue), retention["durable"] as? Bool == true {
-                self.historyCharge = charge.intValue
+               charge.doubleValue == Double(charge.int64Value), retention["durable"] as? Bool == true {
+                self.historyCharge = Int(truncating: charge)
             }
             self.closeInput()
         }

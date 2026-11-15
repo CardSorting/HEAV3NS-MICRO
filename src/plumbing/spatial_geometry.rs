@@ -324,12 +324,12 @@ impl ViewportTransform {
     }
 
     pub fn with_dpr(mut self, dpr: f64) -> Self {
-        self.dpr = if dpr <= 0.0 { 1.0 } else { dpr };
+        self.dpr = if !dpr.is_finite() || dpr <= 0.0 { 1.0 } else { dpr };
         self
     }
 
     pub fn with_scale(mut self, scale: f64) -> Self {
-        self.scale = if scale <= 0.0 { 1.0 } else { scale };
+        self.scale = if !scale.is_finite() || scale <= 0.0 { 1.0 } else { scale };
         self
     }
 
@@ -416,7 +416,7 @@ pub fn normalize_coordinate_value(val: Option<&Value>, dimension: f64, default_v
         Some(f) if f.is_finite() => {
             if f > 0.0 && f <= 1.0 {
                 f * dimension
-            } else if is_norm_1000 && f > 1.0 && f <= 1000.0 && dimension > 1000.0 {
+            } else if is_norm_1000 && f > 1.0 && f <= 1000.0 {
                 (f * dimension) / 1000.0
             } else {
                 f

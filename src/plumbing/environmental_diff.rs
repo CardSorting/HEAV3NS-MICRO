@@ -217,12 +217,12 @@ pub fn calibrate_confidence_score(
     // Penalize occlusion
     score *= (1.0 - (occlusion_ratio as f32 * 0.8)).clamp(0.2, 1.0);
     // Factor in historical track record
-    let total = success_count + failure_count;
+    let total = success_count.saturating_add(failure_count);
     if total > 0 {
         let historical_ratio = success_count as f32 / total as f32;
         score = (score * 0.6) + (historical_ratio * 0.4);
     }
-    score.clamp(0.05, 1.0)
+    if score.is_nan() { 0.05 } else { score.clamp(0.05, 1.0) }
 }
 
 /// Extracts structural relationships (parent, siblings, children, label-for) between elements.

@@ -91,6 +91,9 @@ pub fn build_macos_seatbelt_invocation(
             sbpl.push_str(&format!(" (require-not (subpath (param \"{key}\")))"));
         }
         sbpl.push_str("))\n");
+        for key in &ro_carveouts {
+            sbpl.push_str(&format!("(deny file-write* (subpath (param \"{key}\")))\n"));
+        }
         if !allow_network {
             sbpl.push_str("(deny network-outbound)\n(allow network-outbound (local ip \"localhost:*\"))\n");
         }
@@ -106,7 +109,9 @@ pub fn build_macos_seatbelt_invocation(
             ".gnupg",
             ".aws",
             ".heav3ns/credentials",
+            ".heav3ns/config.json",
             ".codewhale/credentials",
+            ".codewhale/config.json",
             ".codewhale/secrets",
             "Library/Keychains",
             ".npmrc",
@@ -177,23 +182,29 @@ pub fn inspect_command_security(cmd: &str) -> CommandSecurityVerdict {
                 continue;
             };
 
-            // Recursive inspection for `sh -c "..."` / `bash -c "..."`
+            // Recursive inspection for `sh -c "..."` / `sh -c -- "..."` / `bash -c "..."`
             if matches!(bin.as_str(), "sh" | "bash" | "zsh" | "dash" | "ksh") {
                 let mut saw_c_flag = false;
-                for pair in args.windows(2) {
-                    if pair[0] == "-c" || (pair[0].starts_with('-') && pair[0].contains('c')) {
-                        saw_c_flag = true;
-                        match inspect_command_security(&pair[1]) {
-                            d @ (CommandSecurityVerdict::Deny { .. } | CommandSecurityVerdict::RequireApproval { .. }) => {
-                                return d;
-                            }
-                            CommandSecurityVerdict::WorkspaceMutating { summary } => {
-                                all_readonly = false;
-                                if first_mutating.is_empty() {
-                                    first_mutating = summary;
+                for idx in 0..args.len() {
+                    if args[idx] == "-c" || (args[idx].starts_with('-') && !args[idx].starts_with("--") && args[idx].contains('c')) {
+                        let cmd_arg = match args.get(idx + 1).map(String::as_str) {
+                            Some("--") => args.get(idx + 2),
+                            _ => args.get(idx + 1),
+                        };
+                        if let Some(sub_cmd) = cmd_arg {
+                            saw_c_flag = true;
+                            match inspect_command_security(sub_cmd) {
+                                d @ (CommandSecurityVerdict::Deny { .. } | CommandSecurityVerdict::RequireApproval { .. }) => {
+                                    return d;
                                 }
+                                CommandSecurityVerdict::WorkspaceMutating { summary } => {
+                                    all_readonly = false;
+                                    if first_mutating.is_empty() {
+                                        first_mutating = summary;
+                                    }
+                                }
+                                CommandSecurityVerdict::ReadOnlySafe => {}
                             }
-                            CommandSecurityVerdict::ReadOnlySafe => {}
                         }
                     }
                 }
@@ -305,12 +316,32 @@ fn check_network_upload_exfiltration(bin: &str, args: &[String], full_stmt: &str
 
         if is_curl_upload || is_wget_upload || is_header_file {
             upload_flag = Some(arg.clone());
+            let mut val = String::new();
             if let Some((_, eq_val)) = arg.split_once('=') {
-                upload_value.push_str(eq_val);
+                val.push_str(eq_val);
+            } else if bin == "curl"
+                && (arg.starts_with("-d") || arg.starts_with("-F") || arg.starts_with("-T"))
+                && arg.len() > 2
+            {
+                val.push_str(&arg[2..]);
             } else if let Some(next_val) = args.get(i + 1) {
-                upload_value.push_str(next_val);
+                val.push_str(next_val);
                 i += 1;
             }
+            let stripped_path = val.trim_start_matches('@').trim_start_matches('<').split(';').next().unwrap_or("");
+            let clean_path = if let Some((_, rhs)) = stripped_path.split_once('=') {
+                rhs.trim_start_matches('@')
+            } else {
+                stripped_path
+            };
+            if let Some(label) =
+                DeterministicSecretRedactor::classify_sensitive_path(clean_path, CredentialDenyScope::ModelContext)
+            {
+                return Some(CommandSecurityVerdict::Deny {
+                    reason: format!("Blocked `{bin}` upload targeting protected credential store: {label}"),
+                });
+            }
+            upload_value = val;
         }
         i += 1;
     }
@@ -371,10 +402,19 @@ fn is_stage_pure_readonly(bin: &str, args: &[String], raw_stage: &str) -> bool {
         });
     }
     if bin == "git" {
-        return matches!(
-            first_git_subcommand(args).as_deref(),
-            Some("status" | "diff" | "log" | "show" | "branch" | "rev-parse" | "ls-files" | "blame")
-        );
+        if args.iter().any(|a| a == "-c" || a.starts_with("-c=")) {
+            return false;
+        }
+        return match first_git_subcommand(args).as_deref() {
+            Some("status" | "diff" | "log" | "show" | "rev-parse" | "ls-files" | "blame") => true,
+            Some("branch") => !args.iter().any(|a| {
+                matches!(
+                    a.as_str(),
+                    "-d" | "-D" | "-m" | "-M" | "--delete" | "--move" | "-c" | "-C" | "--copy" | "-f" | "--force" | "--set-upstream-to" | "--unset-upstream"
+                )
+            }),
+            _ => false,
+        };
     }
     false
 }
@@ -403,8 +443,8 @@ fn strip_command_wrappers(tokens: &[String]) -> (Option<String>, &[String]) {
         let base = tokens[i].rsplit('/').next().unwrap_or(&tokens[i]).to_ascii_lowercase();
         if matches!(base.as_str(), "sudo" | "doas" | "nohup" | "time" | "exec" | "builtin" | "nice") {
             i += 1;
-            while i < tokens.len() && tokens[i].starts_with('-') && base == "sudo" {
-                if matches!(tokens[i].as_str(), "-u" | "-g" | "-C" | "-p") {
+            while i < tokens.len() && tokens[i].starts_with('-') {
+                if matches!(tokens[i].as_str(), "-u" | "-g" | "-C" | "-p" | "-n") {
                     i += 2;
                 } else {
                     i += 1;

@@ -355,30 +355,51 @@ fn extract_authority_host(authority: &str) -> &str {
     }
 }
 
+fn parse_nonstandard_octet(part: &str) -> Option<u64> {
+    if part.is_empty() {
+        return None;
+    }
+    if let Some(hex) = part.strip_prefix("0x").or_else(|| part.strip_prefix("0X")) {
+        return u64::from_str_radix(hex, 16).ok();
+    }
+    if part.len() > 1 && part.starts_with('0') {
+        return u64::from_str_radix(part, 8).ok();
+    }
+    part.parse::<u64>().ok()
+}
+
 fn parse_nonstandard_ipv4(host: &str) -> Option<std::net::Ipv4Addr> {
-    if let Some(hex) = host.strip_prefix("0x") {
-        return u32::from_str_radix(hex, 16).ok().map(std::net::Ipv4Addr::from);
-    }
-    if host.chars().all(|c| c.is_ascii_digit()) {
-        return host.parse::<u32>().ok().map(std::net::Ipv4Addr::from);
-    }
     let parts: Vec<&str> = host.split('.').collect();
-    if parts.len() == 4 {
-        let mut octets = [0u8; 4];
-        for (i, p) in parts.iter().enumerate() {
-            let v = if let Some(h) = p.strip_prefix("0x") {
-                u32::from_str_radix(h, 16).ok()?
-            } else if p.len() > 1 && p.starts_with('0') {
-                u32::from_str_radix(p, 8).ok()?
-            } else {
-                p.parse::<u32>().ok()?
-            };
-            if v > 255 { return None; }
-            octets[i] = v as u8;
-        }
-        return Some(std::net::Ipv4Addr::from(octets));
+    if parts.is_empty() || parts.len() > 4 {
+        return None;
     }
-    None
+    let mut vals = Vec::with_capacity(parts.len());
+    for p in &parts {
+        vals.push(parse_nonstandard_octet(p)?);
+    }
+    for &v in &vals[..vals.len() - 1] {
+        if v > 255 {
+            return None;
+        }
+    }
+    let last = vals[vals.len() - 1];
+    let addr = match vals.len() {
+        1 => u32::try_from(last).ok()?,
+        2 => {
+            if last > 0x00FF_FFFF { return None; }
+            ((vals[0] as u32) << 24) | (last as u32)
+        }
+        3 => {
+            if last > 0xFFFF { return None; }
+            ((vals[0] as u32) << 24) | ((vals[1] as u32) << 16) | (last as u32)
+        }
+        4 => {
+            if last > 255 { return None; }
+            ((vals[0] as u32) << 24) | ((vals[1] as u32) << 16) | ((vals[2] as u32) << 8) | (last as u32)
+        }
+        _ => return None,
+    };
+    Some(std::net::Ipv4Addr::from(addr))
 }
 
 fn is_blocked_ipv4(v4: std::net::Ipv4Addr) -> bool {
@@ -441,7 +462,7 @@ pub fn redact_cdp_url(url: &str) -> String {
             let pat = format!("{}{}=", sep, key);
             if let Some(pos) = out.to_ascii_lowercase().find(&pat) {
                 let val_start = pos + pat.len();
-                let val_end = out[val_start..].find('&').map(|i| val_start + i).unwrap_or(out.len());
+                let val_end = out[val_start..].find(|c| c == '&' || c == '#').map(|i| val_start + i).unwrap_or(out.len());
                 out.replace_range(val_start..val_end, "[REDACTED]");
             }
         }

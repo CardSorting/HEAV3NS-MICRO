@@ -314,6 +314,10 @@ impl ComputerUseOrchestrator {
         }
 
         // Modal trap check: if modal dialog is trapping interface and target is outside modal, intercept
+        let target_key = initial_contract
+            .target_selector
+            .clone()
+            .unwrap_or_else(|| initial_contract.action_name.clone());
         let mut contract = initial_contract.clone();
         let mut modal_intercepted = false;
         if before_obs.modal_detected {
@@ -330,7 +334,6 @@ impl ComputerUseOrchestrator {
         }
 
         // Check loop breaker: prevent repeated identical failures
-        let target_key = contract.target_selector.clone().unwrap_or_else(|| contract.action_name.clone());
         let current_fails = {
             let fc = self.failure_counts.lock().unwrap();
             fc.get(&target_key).copied().unwrap_or(0)
@@ -388,6 +391,7 @@ impl ComputerUseOrchestrator {
                 if let Ok(res) = self.spatial_engine.execute_spatially_grounded_action(&focus_click_contract) {
                     if res.get("success").and_then(|v| v.as_bool()) == Some(true) {
                         auto_focused = true;
+                        contract.expected_epoch = None;
                     }
                 }
             }
@@ -428,11 +432,11 @@ impl ComputerUseOrchestrator {
                 kstore.record_outcome(&target_key, &after_obs.app_name, true, after_obs.layout_epoch);
                 let step_desc = format!("{}:{}", contract.action_name, target_key);
                 if let Ok(mut steps) = self.session_steps.lock() {
-                    if auto_focused {
-                        steps.push(format!("click:{target_key}"));
-                    }
                     if modal_intercepted {
                         steps.push("key:Escape".into());
+                    }
+                    if auto_focused {
+                        steps.push(format!("click:{target_key}"));
                     }
                     steps.push(step_desc);
                     if steps.len() > 32 {
@@ -440,11 +444,14 @@ impl ComputerUseOrchestrator {
                     }
                     if auto_focused || modal_intercepted {
                         let proc_id = format!("proc_{}_{}", after_obs.app_name.to_ascii_lowercase(), target_key);
-                        let proc_steps = if auto_focused {
-                            vec![format!("click:{target_key}"), format!("{}:{target_key}", contract.action_name)]
-                        } else {
-                            vec!["key:Escape".into(), format!("{}:{target_key}", initial_contract.action_name)]
-                        };
+                        let mut proc_steps = Vec::new();
+                        if modal_intercepted {
+                            proc_steps.push("key:Escape".into());
+                        }
+                        if auto_focused {
+                            proc_steps.push(format!("click:{target_key}"));
+                        }
+                        proc_steps.push(format!("{}:{target_key}", initial_contract.action_name));
                         kstore.register_procedure(LearnedWorkflowProcedure::new(
                             proc_id,
                             &after_obs.app_name,

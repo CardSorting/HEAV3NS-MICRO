@@ -92,7 +92,21 @@ impl SessionMessage {
 
 #[inline]
 pub fn estimate_messages_tokens(messages: &[SessionMessage]) -> usize {
-    messages.iter().map(|m| 4 + estimate_text_tokens(&m.content)).sum()
+    messages
+        .iter()
+        .map(|m| {
+            let tc_tokens: usize = m
+                .tool_calls
+                .as_ref()
+                .map(|tcs| {
+                    tcs.iter()
+                        .map(|tc| 8 + estimate_text_tokens(&tc.function.name) + estimate_text_tokens(&tc.function.arguments))
+                        .sum()
+                })
+                .unwrap_or(0);
+            4 + estimate_text_tokens(&m.content) + tc_tokens
+        })
+        .sum()
 }
 
 /// Extracts `<tool_call>{...}</tool_call>` blocks emitted in plain text by open-weights/local models.

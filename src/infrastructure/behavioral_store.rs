@@ -98,8 +98,13 @@ impl BehavioralKnowledgeStore {
 
     pub fn register_procedure(&mut self, proc: LearnedWorkflowProcedure) {
         if !self.procedures.contains_key(&proc.procedure_id) && self.procedures.len() >= 128 {
-            if let Some(first_key) = self.procedures.keys().next().cloned() {
-                self.procedures.remove(&first_key);
+            if let Some(oldest_key) = self
+                .procedures
+                .iter()
+                .min_by_key(|(_, p)| p.created_epoch)
+                .map(|(k, _)| k.clone())
+            {
+                self.procedures.remove(&oldest_key);
             }
         }
         self.procedures.insert(proc.procedure_id.clone(), proc);
@@ -160,14 +165,20 @@ impl IBehavioralKnowledgeStore for BehavioralKnowledgeStore {
                 "clickable"
             };
             let mut pat = LearnedInteractionPattern::new(pattern_id, app, pattern_id, aff);
+            pat.success_count = 0;
             if success {
                 pat.record_success(epoch, timestamp);
             } else {
                 pat.record_failure(epoch, timestamp);
             }
             if self.patterns.len() >= 256 {
-                if let Some(first_key) = self.patterns.keys().next().cloned() {
-                    self.patterns.remove(&first_key);
+                if let Some(oldest_key) = self
+                    .patterns
+                    .iter()
+                    .min_by_key(|(_, p)| p.last_verified_ms)
+                    .map(|(k, _)| k.clone())
+                {
+                    self.patterns.remove(&oldest_key);
                 }
             }
             self.patterns.insert(composite_key.clone(), pat);

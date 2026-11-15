@@ -21,18 +21,23 @@ fn validate_rpc_read_path(root: &Path, path: &str) -> Option<PathBuf> {
         return None;
     }
     let full_path = root.join(path);
-    if let (Ok(canon_root), Ok(canon_file)) = (root.canonicalize(), full_path.canonicalize()) {
-        if !canon_file.starts_with(&canon_root) || SafetyPolicy::check_path(&canon_file).is_err() {
-            return None;
-        }
+    let (Ok(canon_root), Ok(canon_file)) = (root.canonicalize(), full_path.canonicalize()) else {
+        return None;
+    };
+    if !canon_file.starts_with(&canon_root) || SafetyPolicy::check_path(&canon_file).is_err() {
+        return None;
     }
-    Some(full_path)
+    Some(canon_file)
+}
+
+pub fn sha256_bytes_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
 }
 
 pub fn sha256_hex(input: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(input.as_bytes());
-    format!("{:x}", hasher.finalize())
+    sha256_bytes_hex(input.as_bytes())
 }
 
 pub fn uuid_from_seed(seed: &str) -> String {
@@ -167,8 +172,9 @@ pub fn build_spider_check_multi_response(workspace_root: &Path, requested: &[Str
     let mut seed_concat = String::new();
 
     for (idx, safe_file) in clean_paths.iter().enumerate() {
-        let full_path = workspace_root.join(safe_file);
-        let content = fs::read_to_string(&full_path).unwrap_or_default();
+        let content = validate_rpc_read_path(workspace_root, safe_file)
+            .and_then(|p| fs::read_to_string(&p).ok())
+            .unwrap_or_default();
         let hash_64 = sha256_hex(&content);
         seed_concat.push_str(&hash_64);
         files_meta.push(json!({ "path": safe_file, "hash": hash_64 }));
@@ -415,6 +421,10 @@ pub fn handle_memory_rpc(method: &str, params: &Value, default_conv: &str, engin
         "memory.write" => {
             let key = params.get("key").and_then(|v| v.as_str()).unwrap_or("fact").trim().to_string();
             let value = params.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let threats = crate::plumbing::secret_redactor::SafetyPolicy::scan_for_threats(&value, "all");
+            if !threats.is_empty() {
+                return json!({ "saved": false, "conversation": conv, "error": format!("Blocked memory write containing security threats: {:?}", threats) });
+            }
             let category = params.get("category").and_then(|v| v.as_str()).unwrap_or("fact").to_string();
             let entry = mem.save_memory(key, value, category);
             json!({ "saved": true, "conversation": conv, "entry": format_memory_entry(&entry) })
@@ -454,10 +464,14 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
             let clean_rel = if rel == "." { "" } else { rel.trim_matches('/') };
             let query = params.get("query").and_then(|v| v.as_str()).unwrap_or("").trim().to_lowercase();
             let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let target_dir = if clean_rel.is_empty() || clean_rel.contains("..") {
+            let candidate_dir = if clean_rel.is_empty() || clean_rel.contains("..") {
                 root.to_path_buf()
             } else {
                 root.join(clean_rel)
+            };
+            let target_dir = match (root.canonicalize(), candidate_dir.canonicalize()) {
+                (Ok(cr), Ok(ct)) if ct.starts_with(&cr) && SafetyPolicy::check_path(&ct).is_ok() => ct,
+                _ => return json!({ "entries": [], "total": 0, "offset": offset, "more": false }),
             };
             let mut all_entries = Vec::new();
             if let Ok(rd) = fs::read_dir(&target_dir) {
@@ -526,7 +540,11 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
             };
             let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(65536) as usize;
-            let text_content = fs::read_to_string(&full_path).unwrap_or_default();
+            let text_content = if fs::metadata(&full_path).map(|m| m.len() <= 16 * 1024 * 1024).unwrap_or(false) {
+                fs::read_to_string(&full_path).unwrap_or_default()
+            } else {
+                String::new()
+            };
             let total = text_content.len();
             let mut safe_offset = offset.min(total);
             while safe_offset > 0 && !text_content.is_char_boundary(safe_offset) {
@@ -539,6 +557,7 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
             let rev = format!("rev-{}", &sha256_hex(&text_content)[..12]);
             json!({
                 "text": &text_content[safe_offset..end],
+                "binary": false,
                 "revision": rev,
                 "offset": safe_offset,
                 "nextOffset": end,
@@ -553,12 +572,16 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
             };
             let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(65536) as usize;
-            let bytes = fs::read(&full_path).unwrap_or_default();
+            let bytes = if fs::metadata(&full_path).map(|m| m.len() <= 16 * 1024 * 1024).unwrap_or(false) {
+                fs::read(&full_path).unwrap_or_default()
+            } else {
+                Vec::new()
+            };
             let total = bytes.len();
             let safe_offset = offset.min(total);
             let end = safe_offset.saturating_add(limit).min(total);
             let b64 = encode_base64(&bytes[safe_offset..end]);
-            let rev = format!("bin-{}", bytes.len());
+            let rev = sha256_bytes_hex(&bytes);
             json!({
                 "data": b64,
                 "revision": rev,
@@ -573,36 +596,22 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
             let mut entries: Vec<Value> = staged
                 .into_iter()
                 .map(|f| {
-                    let name = Path::new(&f.path)
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_else(|| f.path.clone());
+                    let name = Path::new(&f.path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| f.path.clone());
                     json!({
-                        "path": f.path,
-                        "name": name,
+                        "path": f.path, "name": name,
                         "status": if f.is_deleted { "deleted" } else { "modified" },
-                        "staged": true,
-                        "unstaged": false,
-                        "untracked": false
+                        "staged": true, "unstaged": false, "untracked": false
                     })
                 })
                 .collect();
             if entries.is_empty() {
                 if let Some(last) = engine.latest_receipt() {
                     for fc in last.file_changes {
-                        let name = Path::new(&fc.path)
-                            .file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or_else(|| fc.path.clone());
+                        let name = Path::new(&fc.path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| fc.path.clone());
                         entries.push(json!({
-                            "path": fc.path,
-                            "name": name,
-                            "status": fc.kind,
-                            "staged": false,
-                            "unstaged": true,
-                            "untracked": fc.kind == "created" || fc.kind == "added",
-                            "addedLines": fc.lines_added,
-                            "removedLines": fc.lines_removed
+                            "path": fc.path, "name": name, "status": fc.kind,
+                            "staged": false, "unstaged": true, "untracked": fc.kind == "created" || fc.kind == "added",
+                            "addedLines": fc.lines_added, "removedLines": fc.lines_removed
                         }));
                     }
                 }
@@ -613,7 +622,7 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
             let path = params.get("path").and_then(|v| v.as_str()).unwrap_or("");
             let staged = lock_unpoison(&engine.vfs()).export_staged();
             let diff = if let Some(f) = staged.into_iter().find(|f| f.path == path) {
-                let old = fs::read_to_string(root.join(path)).unwrap_or_default();
+                let old = validate_rpc_read_path(root, path).and_then(|p| fs::read_to_string(p).ok()).unwrap_or_default();
                 let new = if f.is_deleted { String::new() } else { f.content };
                 render_unified_diff(path, &old, &new)
             } else if let Some(last) = engine.latest_receipt() {
@@ -651,7 +660,7 @@ fn filter_unified_diff_for_path(full_diff: &str, target_path: &str) -> String {
         }
     }
     if out.is_empty() {
-        full_diff.to_string()
+        String::new()
     } else {
         out.join("\n")
     }

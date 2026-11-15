@@ -445,8 +445,8 @@ async fn main() {
             }
             println!("\n{}", res.response);
             println!("{}", format_turn_summary(&res.active_model, res.duration_ms, res.tool_results.len()));
-            if res.outcome == EngineTickOutcome::Failed {
-                std::process::exit(1);
+            if matches!(res.outcome, EngineTickOutcome::Failed | EngineTickOutcome::Cancelled) {
+                std::process::exit(if res.outcome == EngineTickOutcome::Cancelled { 130 } else { 1 });
             }
         }
         RunMode::Interactive => {

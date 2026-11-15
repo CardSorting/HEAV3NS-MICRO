@@ -41,9 +41,8 @@ impl ModelPricingRegistry {
     }
 
     pub fn update_in_memory(&self, next: ModelPricingCatalog) {
-        if let Ok(mut guard) = self.catalog.write() {
-            *guard = next;
-        }
+        let mut guard = self.catalog.write().unwrap_or_else(|p| p.into_inner());
+        *guard = next;
     }
 
     /// Non-blocking auto-refresh hook called on live provider startup / turn orchestration.
@@ -143,9 +142,7 @@ impl IModelPricingRegistry for ModelPricingRegistry {
     }
 
     fn is_stale(&self, current_ms: u64) -> bool {
-        let Ok(guard) = self.catalog.read() else {
-            return true;
-        };
+        let guard = self.catalog.read().unwrap_or_else(|p| p.into_inner());
         if guard.fetched_at_ms == 0 {
             return true;
         }
@@ -202,5 +199,8 @@ fn persist_catalog_atomic(path: &Path, catalog: &ModelPricingCatalog) -> Result<
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(&tmp_path, fs::Permissions::from_mode(0o600));
     }
-    fs::rename(&tmp_path, path).map_err(|e| format!("Atomic rename catalog failed: {e}"))
+    fs::rename(&tmp_path, path).map_err(|e| {
+        let _ = fs::remove_file(&tmp_path);
+        format!("Atomic rename catalog failed: {e}")
+    })
 }

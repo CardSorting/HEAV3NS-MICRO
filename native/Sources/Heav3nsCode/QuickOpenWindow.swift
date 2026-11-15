@@ -284,7 +284,7 @@ final class QuickOpenWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
             let basePath = String(input[..<hashRange.lowerBound])
             let anchor = String(input[hashRange.upperBound...])
             let anchorPrefix = anchor.split(separator: "-").first.map(String.init) ?? anchor
-            let cParts = anchorPrefix.split(separator: "C", omittingEmptySubsequences: false).map(String.init)
+            let cParts = anchorPrefix.split(whereSeparator: { $0 == "C" || $0 == "c" }).map(String.init)
             if let l = cParts.first.flatMap(Int.init), l > 0 {
                 let c = (cParts.count >= 2 ? Int(cParts[1]) : nil).flatMap { $0 > 0 ? $0 : nil }
                 return (basePath, l, c)

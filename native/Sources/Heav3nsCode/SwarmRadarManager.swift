@@ -249,11 +249,22 @@ final class SwarmRadarManager {
     }
 
     private func notifyUpdate() {
-        NotificationCenter.default.post(
-            name: .swarmRadarDidUpdate,
-            object: self,
-            userInfo: ["state": currentState]
-        )
+        if Thread.isMainThread {
+            NotificationCenter.default.post(
+                name: .swarmRadarDidUpdate,
+                object: self,
+                userInfo: ["state": currentState]
+            )
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                NotificationCenter.default.post(
+                    name: .swarmRadarDidUpdate,
+                    object: self,
+                    userInfo: ["state": self.currentState]
+                )
+            }
+        }
     }
 
     private func resolveOrCreateClientID() -> String {

@@ -201,6 +201,15 @@ final class CheckpointWindow: NSWindowController, NSWindowDelegate, NSTableViewD
         return cell
     }
     func windowWillClose(_ notification: Notification) { searchTimer?.invalidate(); generation += 1; if let window { window.parent?.removeChildWindow(window) } }
+    func dispose() {
+        searchTimer?.invalidate(); searchTimer = nil
+        generation += 1; busy = false; pendingReload = false
+        if let sheet = window?.attachedSheet { window?.endSheet(sheet, returnCode: .alertFirstButtonReturn) }
+        if let window {
+            window.parent?.removeChildWindow(window)
+            window.orderOut(nil)
+        }
+    }
     var diagnostics: [String: Any] { ["count": entries.count, "visible": window?.isVisible == true, "status": status.stringValue, "selected": selected?["id"] as? String ?? "", "offset": offset, "restoreEnabled": preview.isEnabled, "filter": filterValue, "query": search.stringValue, "newestEnabled": latest.isEnabled] }
     func navigateProbe(_ step: String) {
         if step == "refresh" { load() }

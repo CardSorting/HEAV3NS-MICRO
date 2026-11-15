@@ -66,8 +66,9 @@ impl Heav3nsUserConfig {
         let path = Self::config_path();
         let json_str = serde_json::to_string_pretty(self)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        let tmp = path.with_extension(format!("json.tmp.{}", std::process::id()));
-        let _ = fs::remove_file(&tmp);
+        static TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq = TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = path.with_extension(format!("json.tmp.{}.{}", std::process::id(), seq));
         #[cfg(unix)]
         {
             use std::io::Write;
@@ -101,7 +102,12 @@ impl Heav3nsUserConfig {
                 let stripped = trimmed.strip_prefix("export ").unwrap_or(trimmed).trim();
                 if let Some((k, v)) = stripped.split_once('=') {
                     let key = k.trim();
-                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    let raw_v = v.trim();
+                    let val = if raw_v.starts_with('"') || raw_v.starts_with('\'') {
+                        raw_v.trim_matches('"').trim_matches('\'')
+                    } else {
+                        raw_v.split_once('#').map(|(a, _)| a.trim()).unwrap_or(raw_v)
+                    };
                     if !key.is_empty() && !val.is_empty() {
                         map.insert(key.to_string(), val.to_string());
                     }
@@ -291,9 +297,11 @@ pub fn parse_args_from(args: Vec<String>) -> CliOptions {
                             opts.mode = RunMode::ConfigShow;
                             i += 1;
                         }
-                    } else {
+                    } else if sub == "show" {
                         opts.mode = RunMode::ConfigShow;
                         i += 1;
+                    } else {
+                        opts.mode = RunMode::ConfigShow;
                     }
                 } else {
                     opts.mode = RunMode::ConfigShow;

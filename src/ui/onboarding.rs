@@ -420,7 +420,8 @@ pub fn run_init_wizard(cwd: &Path) -> io::Result<()> {
             io::stdout().flush()?;
             let mut confirm = String::new();
             io::stdin().read_line(&mut confirm)?;
-            if confirm.trim().eq_ignore_ascii_case("n") {
+            let c = confirm.trim();
+            if c.eq_ignore_ascii_case("n") || c.eq_ignore_ascii_case("no") {
                 print!("Enter API key: ");
                 io::stdout().flush()?;
                 let mut key_in = String::new();
@@ -456,7 +457,9 @@ pub fn run_init_wizard(cwd: &Path) -> io::Result<()> {
     new_cfg.provider = Some(provider.to_string());
     new_cfg.model = Some(model.clone());
     new_cfg.endpoint = Some(endpoint.clone());
-    new_cfg.api_key = api_key.clone();
+    if api_key.is_some() {
+        new_cfg.api_key = api_key.clone();
+    }
     new_cfg.workspace_root = Some(cwd.display().to_string());
     if let Some(ref k) = api_key {
         new_cfg.set_provider_key(provider, k.clone());

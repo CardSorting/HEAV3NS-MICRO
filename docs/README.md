@@ -229,4 +229,4 @@ node bin/docs-check.mjs
 2. **Emergent Systems Intelligence**: Cooperation across `HEAV3NS-MICRO`, `SPIDER`, `REWIND`, `BROCCOLI`, `SYNTHETIC SWARM`, `COMPUTER USE`, and `THE HARNESS`.
 3. **Deterministic Memory, Prefix Stability & Reversibility**: Contiguous 16-MiB arena allocation ($O(1)$ rewind), pure-Rust SHA-256 `WorkspaceSnapshotCas` (`WouldBlock`-safe `/undo`), baseline-verified two-phase VFS staging, and KV-cache-immutable prompt prefixes (`PrefixStabilityTracker` + `RequestManifest`).
 4. **Grounded Embodied Agency & Honest Verification**: Double-Wrapped Spatial Action Mediation (`Wrapper A` Grounding + `Wrapper B` Execution Assurance) and prose-free `TurnReceipt` (`heav3ns.receipt/v1`) verification with honest `BillingMetering`.
-5. **Verifiability**: 100% test pass rate (`107` Rust + `323` executed AppKit tests) and automated documentation parity across the workspace.
+5. **Verifiability**: 100% test pass rate (`112` Rust + `323` executed AppKit tests) and automated documentation parity across the workspace.

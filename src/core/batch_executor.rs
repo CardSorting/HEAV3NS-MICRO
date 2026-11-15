@@ -72,9 +72,12 @@ impl ToolRegistry {
         }
         scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
 
-        let mut unlocked_now = Vec::new();
-        for (_, name, desc) in scored.into_iter().take(capped_limit) {
+        let top_matches: Vec<_> = scored.into_iter().take(capped_limit).collect();
+        for (_, name, _) in top_matches.iter().rev() {
             self.touch_unlocked_lru(name);
+        }
+        let mut unlocked_now = Vec::with_capacity(top_matches.len());
+        for (_, name, desc) in top_matches {
             unlocked_now.push(json!({
                 "name": name,
                 "description": desc,

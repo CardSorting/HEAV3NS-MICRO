@@ -228,8 +228,12 @@ impl SkillTreeCatalog {
 
     pub fn clone_skill(&mut self, source_id: &str, new_id: &str, new_name: Option<&str>) -> Result<Value, String> {
         let src = self.nodes.iter().find(|n| n.id == source_id).cloned().ok_or_else(|| format!("Source skill '{source_id}' not found"))?;
+        let target_id = slugify(new_id);
+        if target_id == src.id {
+            return Err("Target clone ID must differ from source skill ID".to_string());
+        }
         let forked = SkillNode {
-            id: slugify(new_id),
+            id: target_id,
             name: new_name.map(|s| s.to_string()).unwrap_or_else(|| format!("{} (Fork)", src.name)),
             prerequisites: vec![src.id.clone()],
             ..src

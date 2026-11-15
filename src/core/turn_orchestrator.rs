@@ -69,9 +69,20 @@ pub fn accumulate_round_usage(
         accum.is_exact = if first_round { u.is_exact } else { accum.is_exact && u.is_exact };
     } else {
         let req_str = serde_json::to_string(&req.messages).unwrap_or_default();
+        let tools_str = serde_json::to_string(&req.tools).unwrap_or_default();
         let out_str = resp.content.as_deref().unwrap_or("");
-        accum.prompt_tokens = accum.prompt_tokens.saturating_add(estimate_text_tokens(&req_str));
-        accum.completion_tokens = accum.completion_tokens.saturating_add(estimate_text_tokens(out_str));
+        let tc_tokens: usize = resp
+            .tool_calls
+            .iter()
+            .map(|tc| 8 + estimate_text_tokens(&tc.function.name) + estimate_text_tokens(&tc.function.arguments))
+            .sum();
+        accum.prompt_tokens = accum
+            .prompt_tokens
+            .saturating_add(estimate_text_tokens(&req_str) + estimate_text_tokens(&tools_str));
+        accum.completion_tokens = accum
+            .completion_tokens
+            .saturating_add(estimate_text_tokens(out_str) + tc_tokens);
+        accum.is_exact = false;
     }
 }
 
@@ -306,6 +317,13 @@ impl AgentEngine {
                     return Ok(json!({
                         "restoredCount": actions.len(),
                         "actions": actions,
+                        "turnId": receipt.turn_id,
+                    }));
+                } else {
+                    self.turn_receipts.lock().unwrap().pop();
+                    return Ok(json!({
+                        "restoredCount": 0,
+                        "actions": Vec::<String>::new(),
                         "turnId": receipt.turn_id,
                     }));
                 }
@@ -619,8 +637,8 @@ impl AgentEngine {
 
         let file_changes = match (&snap_before, &snap_after) {
             (Some(b), Some(a)) => {
-                let b_hash = b.rsplit('-').next().unwrap_or("");
-                let a_hash = a.rsplit('-').next().unwrap_or("");
+                let b_hash = b.rsplit('_').next().unwrap_or("");
+                let a_hash = a.rsplit('_').next().unwrap_or("");
                 if !b_hash.is_empty() && b_hash == a_hash {
                     Vec::new()
                 } else {
@@ -641,7 +659,7 @@ impl AgentEngine {
                 let cmd = rec
                     .args
                     .as_ref()
-                    .and_then(|a| a.get("command"))
+                    .and_then(|a| a.get("command").or_else(|| a.get("CommandLine")))
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string();

@@ -470,10 +470,12 @@ extension WorkspaceWindow {
         let index = relatedEvidence.indexOfSelectedItem - 1
         if case .savedState(let conversation) = inspectionHistory.current {
             guard canShowSavedState, currentConversation == conversation, let details = savedStateDetails, details.report.runs.indices.contains(index) else { return }
+            relatedEvidence.selectItem(at: 0)
             inspect(.run(details.report.runs[index].id)); return
         }
         if case .spider = inspectionHistory.current {
             guard client.isReady, !switchingConversation, let details = spiderDetails, details.files.indices.contains(index) else { return }
+            relatedEvidence.selectItem(at: 0)
             readFile(details.files[index]); return
         }
         if case .context(let conversation) = inspectionHistory.current {
@@ -521,7 +523,11 @@ extension WorkspaceWindow {
     @objc func jumpToDeclaration() {
         let index = outline.indexOfSelectedItem - 1
         guard declarations.indices.contains(index) else { return }
-        inspection.setSelectedRange(declarations[index].range); inspection.scrollRangeToVisible(declarations[index].range)
+        let range = declarations[index].range
+        let textLength = (inspection.string as NSString).length
+        guard range.location != NSNotFound, range.location <= textLength else { return }
+        let safeRange = NSRange(location: range.location, length: min(range.length, textLength - range.location))
+        inspection.setSelectedRange(safeRange); inspection.scrollRangeToVisible(safeRange)
         window?.makeFirstResponder(inspection)
     }
 

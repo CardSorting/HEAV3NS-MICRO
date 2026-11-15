@@ -305,11 +305,9 @@ impl HttpProvider {
                 }
             }
             WireDialect::ChatCompletions => {
-                if trimmed.ends_with("/chat/completions") {
-                    trimmed.to_string()
-                } else {
-                    format!("{trimmed}/chat/completions")
-                }
+                if trimmed.ends_with("/chat/completions") { trimmed.to_string() }
+                else if trimmed.ends_with("/v1") { format!("{trimmed}/chat/completions") }
+                else { format!("{trimmed}/v1/chat/completions") }
             }
         }
     }
@@ -461,14 +459,16 @@ impl HttpProvider {
     }
 
     fn parse_gemini_response(body: &Value) -> Result<ProviderResponse, ProviderError> {
-        let parts = body
-            .get("candidates")
-            .and_then(|c| c.as_array())
-            .and_then(|a| a.first())
-            .and_then(|c| c.get("content"))
-            .and_then(|c| c.get("parts"))
-            .and_then(|p| p.as_array())
-            .ok_or_else(|| ProviderError::Transport("Missing candidates[0].content.parts in Gemini response".to_string()))?;
+        let candidate = body.get("candidates").and_then(|c| c.as_array()).and_then(|a| a.first());
+        let raw_parts = candidate.and_then(|c| c.get("content")).and_then(|c| c.get("parts")).and_then(|p| p.as_array());
+        if raw_parts.is_none() {
+            if let Some(reason) = candidate.and_then(|c| c.get("finishReason")).and_then(Value::as_str) {
+                if !matches!(reason, "STOP" | "MAX_TOKENS") {
+                    return Err(ProviderError::HttpStatus { status: 200, body: format!("Gemini candidate blocked: finishReason = {reason}"), retryable: false, retry_after_ms: None });
+                }
+            }
+        }
+        let parts = raw_parts.ok_or_else(|| ProviderError::Transport("Missing candidates[0].content.parts in Gemini response".to_string()))?;
         let mut text_parts = Vec::new();
         let mut thought_parts = Vec::new();
         let mut tool_calls = Vec::new();

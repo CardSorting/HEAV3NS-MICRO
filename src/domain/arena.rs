@@ -32,6 +32,12 @@ pub struct ArenaAllocator {
     reset_count: u64,
 }
 
+impl IArenaSlab for ArenaAllocator {
+    fn capacity_bytes(&self) -> usize { self.capacity_bytes() }
+    fn allocated_bytes(&self) -> usize { self.allocated_bytes() }
+    fn snapshot(&self) -> SlabBufferSnapshot { self.snapshot() }
+}
+
 impl Default for ArenaAllocator {
     fn default() -> Self {
         Self::new(DEFAULT_ARENA_CAPACITY_BYTES)
@@ -40,7 +46,7 @@ impl Default for ArenaAllocator {
 
 impl ArenaAllocator {
     pub fn new(capacity_bytes: usize) -> Self {
-        let aligned_cap = (capacity_bytes.max(64) + 3) & !3;
+        let aligned_cap = capacity_bytes.max(64).saturating_add(3) & !3;
         Self {
             buffer: vec![0u8; aligned_cap],
             offset_words: 0,
@@ -75,7 +81,7 @@ impl ArenaAllocator {
 
     pub fn allocate_node(&mut self, id: u32, flags: u32) -> Result<usize, String> {
         let ptr = self.offset_words;
-        if ptr + 2 > self.capacity_words() {
+        if ptr.checked_add(2).is_none_or(|p| p > self.capacity_words()) {
             return Err(format!(
                 "ArenaAllocator slab exhausted (capacity: {} bytes)",
                 self.capacity_bytes()
@@ -113,7 +119,7 @@ impl ArenaAllocator {
         let end = byte_offset
             .checked_add(byte_len)
             .ok_or_else(|| format!("Out of bounds read_str: offset {byte_offset}, len {byte_len}"))?;
-        if end > self.buffer.len() {
+        if end > self.allocated_bytes() {
             return Err(format!("Out of bounds read_str: offset {byte_offset}, len {byte_len}"));
         }
         std::str::from_utf8(&self.buffer[byte_offset..end])

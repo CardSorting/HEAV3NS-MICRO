@@ -100,10 +100,7 @@ impl SpatialActionMediator {
 
         if candidates.len() > 1 && contract.som_id.is_none() && !contract.target_selector.as_deref().unwrap_or("").starts_with('s') {
             let candidate_ids: Vec<String> = candidates.iter().map(|c| c.id.clone()).collect();
-            // If candidates share identical bounds or overlap, flag ambiguity unless disambiguated
-            if candidate_ids.len() > 1 && candidates[0].to_spatial_rect().area() == candidates[1].to_spatial_rect().area() {
-                return SpatialGroundingResult::ambiguous(candidate_ids);
-            }
+            return SpatialGroundingResult::ambiguous(candidate_ids);
         }
 
         let target = &candidates[0];
@@ -313,8 +310,8 @@ impl SpatialActionMediator {
             "click" | "double_click" => {
                 if let Some(g) = grounded {
                     let target_focused_after = after.targets.iter().find(|t| t.id == g.target.id).map(|t| t.focused).unwrap_or(false);
-                    let url_changed = before.window_id != after.window_id || before.frame_seq != after.frame_seq;
-                    if target_focused_after || url_changed {
+                    let state_changed = before.window_id != after.window_id || before.targets != after.targets;
+                    if target_focused_after || state_changed {
                         (AssuranceVerdict::Confirmed, true, None)
                     } else {
                         (

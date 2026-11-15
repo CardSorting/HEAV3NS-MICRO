@@ -85,7 +85,8 @@ final class AccountClient {
         }
         guard let id = frame["id"] as? String, let callback = callbacks.removeValue(forKey: id) else { return }
         deadlines.removeValue(forKey: id); scheduleDeadline()
-        if let error = frame["error"] as? String { callback(.failure(BridgeError.message(error))) }
+        let explanation = (frame["error"] as? String) ?? ((frame["error"] as? [String: Any])?["message"] as? String)
+        if let explanation { callback(.failure(BridgeError.message(explanation))) }
         else if let result = frame["result"] as? [String: Any] { callback(.success(result)) }
         else { callback(.failure(BridgeError.message("The account service returned an invalid response."))) }
     }

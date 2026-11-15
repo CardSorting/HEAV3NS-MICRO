@@ -155,7 +155,8 @@ pub fn build_openai_authorize_url(
 /// Parses a URL query string (`k=v&...`) into decoded key/value pairs.
 pub fn parse_query_params(query: &str) -> BTreeMap<String, String> {
     let mut map = BTreeMap::new();
-    for pair in query.trim_start_matches('?').split('&') {
+    let clean_query = query.split('#').next().unwrap_or(query);
+    for pair in clean_query.trim_start_matches('?').split('&') {
         if pair.is_empty() {
             continue;
         }

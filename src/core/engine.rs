@@ -221,6 +221,8 @@ impl AgentEngine {
         let mut vfs = self.vfs.lock().unwrap();
         let mut memory = self.memory.lock().unwrap();
         session.rewind_to_snapshot(&snap, &mut vfs, &mut memory);
+        *self.pinned_system_prompt.lock().unwrap() = None;
+        self.prefix_tracker.lock().unwrap().declare_repin("snapshot_rewind");
         Ok(snap)
     }
 
@@ -560,7 +562,7 @@ impl AgentEngine {
                         .as_ref()
                         .and_then(|e| e.code.as_deref())
                         == Some(CREDENTIAL_REJECTED_UNSENT_CODE);
-                    if is_unsent_auth {
+                    if is_unsent_auth && !tools_admitted {
                         let mut sess = self.session.lock().unwrap();
                         sess.truncate_active_messages(1);
                     } else {
@@ -709,6 +711,7 @@ impl AgentEngine {
                             "success": false,
                             "error": rec.error.clone().unwrap_or_else(|| "Tool execution failed".to_string()),
                             "output": out_text,
+                            "spillId": spill_id,
                         })
                     };
 

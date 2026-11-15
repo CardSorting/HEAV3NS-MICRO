@@ -32,7 +32,7 @@ USAGE:
 | `doctor` | `doctor` | Runs comprehensive diagnostic audit across credentials, SLA, and substrate. |
 | `init` | `init` | Interactive credential and provider onboarding wizard. |
 | `demo` | `demo` | Runs offline guided tour and substrate self-test. |
-| `-p` | `--prompt <TEXT>` | Executes a single agent turn with the given prompt and exits cleanly. |
+| `-p` | `--prompt <TEXT>` | Executes a single agent turn with the given prompt and exits (`0` on success, `1` on failure, `130` on `SIGINT` cancellation). |
 | *(none)* | `--flight` / `--benchmark-flight` | Runs the 5-scenario Agent Flight benchmark suite (`FT-01..FT-05`). |
 | *(none)* | `--bench` | Runs substrate micro-benchmarks along with the flight suite. |
 | *(none)* | `--smoke` | Executes deterministic runtime self-checks and smoke verification. |

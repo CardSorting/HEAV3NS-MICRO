@@ -199,8 +199,11 @@ impl AgentEngine {
         let tool_toks = estimate_text_tokens(&Value::Array(tools_wire.clone()).to_string());
         let pinned = self.pinned_system_prompt.lock().unwrap().clone();
 
-        let mut msgs = {
-            let sess = self.session().lock().unwrap();
+        let msgs = {
+            let mut sess = self.session().lock().unwrap().clone();
+            if !sample_prompt.trim().is_empty() {
+                sess.add_message(SessionMessage::new(Role::User, sample_prompt.trim()));
+            }
             let mem = self.memory().lock().unwrap();
             let (m, _) = PromptComposer::compose_with_posture(
                 &cfg,
@@ -214,9 +217,6 @@ impl AgentEngine {
             );
             m
         };
-        if !sample_prompt.trim().is_empty() {
-            msgs.push(SessionMessage::new(Role::User, sample_prompt.trim()));
-        }
 
         let base_wire = lookup_provider_descriptor(&cfg.provider)
             .map(|d| d.wire_dialect)
@@ -416,11 +416,13 @@ impl AgentEngine {
                 cfg.provider, sample.selected_model
             )
         } else if let Some((prov_part, model_part)) = trimmed.split_once(':') {
-            if let Some(retired_msg) = retired_provider_remediation(prov_part) {
+            let prov = prov_part.trim();
+            let model = model_part.trim();
+            if let Some(retired_msg) = retired_provider_remediation(prov) {
                 return retired_msg.to_string();
             }
-            if lookup_provider_descriptor(prov_part).is_some() && !model_part.trim().is_empty() {
-                self.switch_http_provider(prov_part.trim(), model_part.trim(), None, None);
+            if lookup_provider_descriptor(prov).is_some() && !model.is_empty() {
+                self.switch_http_provider(prov, model, None, None);
                 let cfg = self.config_snapshot();
                 return format!(
                     "Switched active provider & model to: {} / {} (endpoint: {}, KV-prefix repin declared)",
@@ -520,7 +522,7 @@ impl AgentEngine {
             }
             return lines.join("\n");
         }
-        if let Some(rest) = trimmed.strip_prefix("fallback").or_else(|| trimmed.strip_prefix("fallbacks")) {
+        if let Some(rest) = trimmed.strip_prefix("fallbacks").or_else(|| trimmed.strip_prefix("fallback")) {
             let arg_fb = rest.trim();
             if arg_fb.is_empty() {
                 let fbs = self.config_snapshot().fallback_providers;

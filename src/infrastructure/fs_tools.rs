@@ -35,7 +35,9 @@ pub fn dispatch_fs_tool(
                 }
             })?;
             let offset = args.get("contentOffset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let sliced = if offset > 0 && offset < content.len() {
+            let sliced = if offset >= content.len() && offset > 0 {
+                ""
+            } else if offset > 0 {
                 safe_utf8_slice(&content, offset, content.len())
             } else {
                 content.as_str()
@@ -209,8 +211,10 @@ pub fn dispatch_fs_tool(
                         if let Ok(mut j) = journal.lock() {
                             j.record_mutation("apply_unified_diff", &resolved);
                         }
-                        let _ = fs::remove_file(&resolved);
-                        modified.push(op.file_path.clone());
+                        match fs::remove_file(&resolved) {
+                            Ok(_) => modified.push(op.file_path.clone()),
+                            Err(e) => errors.push(format!("Failed to delete '{}': {e}", op.file_path)),
+                        }
                     }
                     "add" => {
                         let content = op.add_content.clone().unwrap_or_default();
@@ -250,6 +254,10 @@ pub fn dispatch_fs_tool(
         "delete_file" => {
             let raw_path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path'")?;
             let resolved = resolve_and_verify_workspace_path(cwd, raw_path)?;
+            let canon_cwd = cwd.canonicalize().map_err(|e| format!("Failed to resolve workspace root: {e}"))?;
+            if resolved == canon_cwd {
+                return Err("Access denied: cannot delete workspace root directory".to_string());
+            }
             if !resolved.exists() {
                 return Err(format!("File '{}' does not exist", resolved.display()));
             }
@@ -300,7 +308,10 @@ pub fn dispatch_fs_tool(
                 fs::read_dir(&resolved).map_err(|e| format!("Failed to list '{}': {e}", resolved.display()))?;
             let mut entries = Vec::new();
             for entry in rd.flatten() {
-                if verify_model_path_access(&entry.path()).is_err() {
+                let ep = entry.path();
+                if fs::symlink_metadata(&ep).map(|m| m.file_type().is_symlink()).unwrap_or(true)
+                    || verify_model_path_access(&ep).is_err()
+                {
                     continue;
                 }
                 let meta = entry.metadata().ok();
@@ -347,7 +358,13 @@ pub fn dispatch_fs_tool(
                     let mut hasher = Sha256::new();
                     hasher.update(&bytes);
                     sha256_hex = Some(format!("{:x}", hasher.finalize()));
-                    lines_count = Some(bytes.iter().filter(|&&b| b == b'\n').count() + 1);
+                    lines_count = Some(if bytes.is_empty() {
+                        0
+                    } else {
+                        let mut c = bytes.iter().filter(|&&b| b == b'\n').count();
+                        if bytes.last() != Some(&b'\n') { c += 1; }
+                        c
+                    });
                 }
             }
             Ok((

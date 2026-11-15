@@ -138,6 +138,7 @@ impl AgentEngine {
                 let spec = SystemPromptSpec::for_specialist(&assign.role, &objective, assign.assigned_files.clone());
                 child_cfg.system_prompt = spec.render(&child_cfg, self.workspace_root(), &swarm_facts, &swarm_skills);
 
+                let parent_posture = self.current_posture();
                 let child_tools = Arc::new(crate::core::tool_registry::ToolRegistry::new(Arc::clone(self.memory())));
                 let child_engine = AgentEngine::with_shared_substrate(
                     self.workspace_root().to_path_buf(),
@@ -147,6 +148,7 @@ impl AgentEngine {
                     child_tools,
                 )
                 .without_swarm_delegation();
+                child_engine.set_posture(parent_posture);
 
                 let prompt = SystemPromptSpec::format_swarm_task_prompt(&assign.objective, &dep_context);
                 let tok = cancel_token.clone();
@@ -154,7 +156,14 @@ impl AgentEngine {
                 wave_futs.push(async move {
                     let item_start = now_ms();
                     let mut input = EngineTickInput::new(prompt);
-                    input.execution_authority = Some(ExecutionAuthorityLevel::Autonomous);
+                    input.posture = Some(parent_posture);
+                    if matches!(
+                        parent_posture,
+                        crate::domain::types::runtime::ExecutionPosture::AutoReview
+                            | crate::domain::types::runtime::ExecutionPosture::FullAccess
+                    ) {
+                        input.execution_authority = Some(ExecutionAuthorityLevel::Autonomous);
+                    }
                     input.cancel_token = tok;
                     input.should_defer = def;
                     let res = child_engine.tick(input).await;

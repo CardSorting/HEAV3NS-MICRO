@@ -19,7 +19,7 @@ fn is_valid_ipc_model_id(raw: &str) -> bool {
     if !first.is_ascii_alphanumeric() {
         return false;
     }
-    chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '/' | '[' | ']' | '-'))
+    chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '/' | '[' | ']' | '-' | '@' | '+'))
 }
 
 /// Handles ChatGPT multi-account mutations (`switch`, `rename`, `remove`, `signOut`, `clearLimit`, `setAuto`).
@@ -100,7 +100,9 @@ pub fn handle_provider_credential_rpc(
                     apply_clear(provider_keys);
                 } else {
                     provider_keys.insert(slot.clone(), clean.clone());
-                    provider_keys.insert(raw_prefix.to_string(), clean.clone());
+                    if raw_prefix != "provider" {
+                        provider_keys.insert(raw_prefix.to_string(), clean.clone());
+                    }
                     if persist {
                         let mut ucfg = Heav3nsUserConfig::load().unwrap_or_default();
                         ucfg.set_provider_key(&slot, clean.clone());
@@ -119,7 +121,7 @@ pub fn handle_provider_credential_rpc(
 
     let saved_val = provider_keys
         .get(&slot)
-        .or_else(|| provider_keys.get(raw_prefix))
+        .or_else(|| if raw_prefix != "provider" { provider_keys.get(raw_prefix) } else { None })
         .cloned();
     let env_val = desc.and_then(|d| {
         d.env_vars
@@ -129,7 +131,7 @@ pub fn handle_provider_credential_rpc(
     let effective = saved_val.clone().or(env_val);
     let has_oauth = canon_id == "openai-codex" && AgentEngine::default_account_store().has_active_account();
     json!({
-        "provider": raw_prefix,
+        "provider": if raw_prefix == "provider" && !target_raw.is_empty() { target_raw } else { raw_prefix },
         "canonicalProvider": canon_id,
         "configured": effective.is_some() || has_oauth,
         "saved": saved_val.is_some() || has_oauth,

@@ -6,7 +6,6 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
-use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
 const MAX_RUN_OUTPUT_BYTES: usize = 256 * 1024;
@@ -130,10 +129,11 @@ impl IProjectRunner for ProjectRunner {
         let resolved_cwd = resolve_safe_cwd(workspace_root, rel_cwd)?;
 
         {
-            let st = lock_unpoison(&self.inner);
-            if matches!(st.state.as_str(), "running" | "stopping") {
+            let mut st = lock_unpoison(&self.inner);
+            if matches!(st.state.as_str(), "starting" | "running" | "stopping") {
                 return Err("Project is already running. Stop it before starting another run.".to_string());
             }
+            st.state = "starting".to_string();
         }
 
         let mut cmd = Command::new("/bin/sh");
@@ -153,13 +153,27 @@ impl IProjectRunner for ProjectRunner {
             });
         }
 
-        let mut child = cmd.spawn().map_err(|e| format!("Failed to start '{cmd_str}': {e}"))?;
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                let mut st = lock_unpoison(&self.inner);
+                st.state = "failed".to_string();
+                return Err(format!("Failed to start '{cmd_str}': {e}"));
+            }
+        };
         let pid = child.id();
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
 
         let snap = {
             let mut st = lock_unpoison(&self.inner);
+            if st.state == "stopping" {
+                let _ = child.start_kill();
+                st.child_pid = None;
+                st.state = "stopped".to_string();
+                st.revision = st.revision.saturating_add(1);
+                return Err("Project start aborted by stop request".to_string());
+            }
             st.state = "running".to_string();
             st.output.clear();
             st.revision = st.revision.saturating_add(1);
@@ -210,7 +224,7 @@ impl IProjectRunner for ProjectRunner {
     fn stop(&self) -> Value {
         let pid = {
             let mut st = lock_unpoison(&self.inner);
-            if st.state == "running" {
+            if matches!(st.state.as_str(), "running" | "starting") {
                 st.state = "stopping".to_string();
                 st.revision = st.revision.saturating_add(1);
             }
@@ -290,21 +304,41 @@ fn resolve_safe_cwd(workspace_root: &Path, rel_cwd: &str) -> Result<PathBuf, Str
     Ok(canon)
 }
 
-async fn drain_stream<R: tokio::io::AsyncRead + Unpin>(reader: R, inner: Arc<Mutex<ProjectRunState>>) {
-    let mut lines = BufReader::new(reader).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        let mut st = lock_unpoison(&inner);
-        st.output.push_str(&line);
-        st.output.push('\n');
-        if st.output.len() > MAX_RUN_OUTPUT_BYTES {
-            let excess = st.output.len() - MAX_RUN_OUTPUT_BYTES;
-            let mut cut = excess;
-            while cut < st.output.len() && !st.output.is_char_boundary(cut) {
-                cut += 1;
+async fn drain_stream<R: tokio::io::AsyncRead + Unpin>(mut reader: R, inner: Arc<Mutex<ProjectRunState>>) {
+    use tokio::io::AsyncReadExt;
+    let mut buf = [0u8; 4096];
+    let mut pending: Vec<u8> = Vec::new();
+    while let Ok(n) = reader.read(&mut buf).await {
+        if n == 0 {
+            if !pending.is_empty() {
+                let chunk = String::from_utf8_lossy(&pending);
+                let mut st = lock_unpoison(&inner);
+                st.output.push_str(&chunk);
+                st.revision = st.revision.saturating_add(1);
             }
-            st.output.drain(..cut);
+            break;
         }
-        st.revision = st.revision.saturating_add(1);
+        pending.extend_from_slice(&buf[..n]);
+        let valid_up_to = match std::str::from_utf8(&pending) {
+            Ok(_) => pending.len(),
+            Err(e) => e.valid_up_to(),
+        };
+        if valid_up_to > 0 {
+            if let Ok(s) = std::str::from_utf8(&pending[..valid_up_to]) {
+                let mut st = lock_unpoison(&inner);
+                st.output.push_str(s);
+                if st.output.len() > MAX_RUN_OUTPUT_BYTES {
+                    let excess = st.output.len() - MAX_RUN_OUTPUT_BYTES;
+                    let mut cut = excess;
+                    while cut < st.output.len() && !st.output.is_char_boundary(cut) {
+                        cut += 1;
+                    }
+                    st.output.drain(..cut);
+                }
+                st.revision = st.revision.saturating_add(1);
+            }
+            pending.drain(..valid_up_to);
+        }
     }
 }
 

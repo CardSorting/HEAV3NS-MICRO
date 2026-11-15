@@ -100,10 +100,9 @@ impl WorkerSharedState {
 }
 
 pub fn emit_jsonl_line(stdout_lock: &Arc<Mutex<io::Stdout>>, payload: &Value) {
-    if let Ok(mut out) = stdout_lock.lock() {
-        let _ = writeln!(out, "{payload}");
-        let _ = out.flush();
-    }
+    let mut out = lock_unpoison(stdout_lock);
+    let _ = writeln!(out, "{payload}");
+    let _ = out.flush();
 }
 
 /// Switches the active conversation thread while snapshotting and restoring per-thread `SessionStore` history.
@@ -113,13 +112,19 @@ pub fn switch_worker_conversation(state: &mut WorkerSharedState, engine: &AgentE
         return;
     }
     let cfg = engine.config_snapshot();
+    let keep_prev = state
+        .conversations
+        .iter()
+        .any(|c| c.get("id").and_then(Value::as_str) == Some(&prev_id));
     {
         let mut sess = lock_unpoison(&engine.session());
-        state
-            .conversation_messages
-            .insert(prev_id, sess.messages().to_vec());
+        if keep_prev {
+            state
+                .conversation_messages
+                .insert(prev_id, sess.messages().to_vec());
+        }
         sess.clear();
-        if let Some(saved) = state.conversation_messages.get(next_id) {
+        if let Some(saved) = state.conversation_messages.get(next_id).filter(|m| !m.is_empty()) {
             for msg in saved {
                 sess.add_message(msg.clone());
             }
@@ -327,9 +332,7 @@ pub async fn execute_multiplexed_submit(
     posture_override: Option<ExecutionPosture>,
     interactive_approval: bool,
 ) {
-    if let Some(p) = posture_override {
-        engine.set_posture(p);
-    }
+    let effective_posture = posture_override.unwrap_or_else(|| engine.current_posture());
     let before_snap = engine.create_snapshot();
     let seq_start = event_seq.fetch_add(1, Ordering::SeqCst) + 1;
     let run_id = format!("run_{}_{}", now_ms(), seq_start);
@@ -348,7 +351,7 @@ pub async fn execute_multiplexed_submit(
         "text": prompt,
         "session": sess_id,
         "conversation": conv_id,
-        "posture": engine.current_posture().slug(),
+        "posture": effective_posture.slug(),
         "state": "running",
         "revision": 1,
         "createdAt": now,
@@ -427,8 +430,9 @@ pub async fn execute_multiplexed_submit(
                 }),
             );
             let deadline = Instant::now() + Duration::from_secs(120);
-            let wait_decision = || loop {
-                if tok_a.is_cancelled() || Instant::now() >= deadline {
+            let tok_wait = tok_a.clone();
+            let wait_decision = move || loop {
+                if tok_wait.is_cancelled() || Instant::now() >= deadline {
                     break UserApprovalChoice::Deny;
                 }
                 match rx.recv_timeout(Duration::from_millis(100)) {
@@ -442,7 +446,9 @@ pub async fn execute_multiplexed_submit(
             {
                 tokio::task::block_in_place(wait_decision)
             } else {
-                wait_decision()
+                std::thread::spawn(wait_decision)
+                    .join()
+                    .unwrap_or(UserApprovalChoice::Deny)
             };
             let resumed_rev = rev_approve.fetch_add(1, Ordering::SeqCst) + 1;
             let mut resumed_run = waiting_run;

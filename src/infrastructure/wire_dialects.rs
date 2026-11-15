@@ -75,17 +75,16 @@ pub(crate) fn normalize_transcript_tool_continuity(raw: &[SessionMessage]) -> Ve
                 if !pending_calls.is_empty() {
                     flush_dangling(&mut out, &mut pending_calls, &mut deferred_system);
                 }
-                if let Some(calls) = msg.tool_calls.as_ref().filter(|c| !c.is_empty()) {
-                    for (idx, tc) in calls.iter().enumerate() {
-                        let cid = if tc.id.trim().is_empty() {
-                            format!("call_{}", idx + 1)
-                        } else {
-                            tc.id.clone()
-                        };
-                        pending_calls.push((cid, tc.function.name.clone()));
+                let mut norm_msg = msg.clone();
+                if let Some(calls) = norm_msg.tool_calls.as_mut().filter(|c| !c.is_empty()) {
+                    for (idx, tc) in calls.iter_mut().enumerate() {
+                        if tc.id.trim().is_empty() {
+                            tc.id = format!("call_{}", idx + 1);
+                        }
+                        pending_calls.push((tc.id.clone(), tc.function.name.clone()));
                     }
                 }
-                out.push(msg.clone());
+                out.push(norm_msg);
             }
         }
     }
@@ -369,12 +368,10 @@ pub(crate) fn build_anthropic_messages_payload(provider_name: &str, endpoint: &s
                     }
                 }
                 if !blocks.is_empty() {
-                    if messages.is_empty() && m.tool_calls.as_ref().is_some_and(|c| !c.is_empty()) {
+                    if messages.is_empty() {
                         messages.push(json!({ "role": "user", "content": [{ "type": "text", "text": "[resumed session context]" }] }));
                     }
-                    if !messages.is_empty() {
-                        push_or_coalesce_anthropic_assistant_blocks(&mut messages, blocks);
-                    }
+                    push_or_coalesce_anthropic_assistant_blocks(&mut messages, blocks);
                 }
             }
             Role::Tool => {
@@ -505,8 +502,7 @@ fn repair_dangling_anthropic_tool_uses(messages: &mut Vec<Value>) {
                         }
                     }
                     if !missing_blocks.is_empty() {
-                        missing_blocks.append(arr);
-                        *arr = missing_blocks;
+                        arr.append(&mut missing_blocks);
                     }
                 }
             } else {
@@ -616,6 +612,9 @@ pub(crate) fn build_google_gemini_payload(req: &ProviderRequest) -> Value {
             }
             Role::Assistant => {
                 conversation_started = true;
+                if contents.is_empty() {
+                    push_gemini_parts(&mut contents, "user", vec![json!({ "text": "[resumed session context]" })]);
+                }
                 let mut parts = Vec::new();
                 if !m.content.is_empty() {
                     parts.push(json!({ "text": m.content }));

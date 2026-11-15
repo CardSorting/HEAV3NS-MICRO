@@ -98,7 +98,11 @@ pub(crate) fn parse_responses_json(body: &Value, provider_label: &str) -> Result
                         .map(String::from)
                         .unwrap_or_else(|| format!("call_{}", idx + 1));
                     let name = item.get("name").and_then(Value::as_str).unwrap_or("").trim().to_string();
-                    let arguments = item.get("arguments").and_then(Value::as_str).unwrap_or("{}").to_string();
+                    let arguments = match item.get("arguments") {
+                        Some(Value::String(s)) => s.clone(),
+                        Some(other) if !other.is_null() => other.to_string(),
+                        _ => "{}".to_string(),
+                    };
                     if !name.is_empty() {
                         tool_calls.push(ToolCall {
                             id,
@@ -430,8 +434,10 @@ impl IncrementalSseAggregator {
                             if !name.is_empty() {
                                 entry.1 = name;
                             }
-                            if let Some(args) = item.get("arguments").and_then(Value::as_str).filter(|s| !s.is_empty()) {
-                                entry.2 = args.to_string();
+                            match item.get("arguments") {
+                                Some(Value::String(s)) if !s.is_empty() => entry.2 = s.clone(),
+                                Some(other) if !other.is_string() && !other.is_null() => entry.2 = other.to_string(),
+                                _ => {}
                             }
                         }
                     }
@@ -481,7 +487,11 @@ impl IncrementalSseAggregator {
                                     if item.get("type").and_then(Value::as_str) == Some("function_call") {
                                         let cid = item.get("call_id").or_else(|| item.get("id")).and_then(Value::as_str).unwrap_or("").to_string();
                                         let name = item.get("name").and_then(Value::as_str).unwrap_or("").to_string();
-                                        let args = item.get("arguments").and_then(Value::as_str).unwrap_or("{}").to_string();
+                                        let args = match item.get("arguments") {
+                                            Some(Value::String(s)) => s.clone(),
+                                            Some(other) if !other.is_null() => other.to_string(),
+                                            _ => "{}".to_string(),
+                                        };
                                         if !name.is_empty() {
                                             self.tool_map.insert(
                                                 idx,
@@ -581,9 +591,16 @@ impl IncrementalSseAggregator {
                         if let Some(name_chunk) = func.get("name").and_then(|v| v.as_str()) {
                             entry.1 = accumulate_streaming_tool_name(&entry.1, name_chunk);
                         }
-                        if let Some(arg_chunk) = func.get("arguments").and_then(|v| v.as_str()) {
-                            let (_, next_acc) = compute_streaming_arguments_delta(&entry.2, arg_chunk);
-                            entry.2 = next_acc;
+                        match func.get("arguments") {
+                            Some(Value::String(arg_chunk)) => {
+                                let (_, next_acc) = compute_streaming_arguments_delta(&entry.2, arg_chunk);
+                                entry.2 = next_acc;
+                            }
+                            Some(other) if !other.is_string() && !other.is_null() => {
+                                let (_, next_acc) = compute_streaming_arguments_delta(&entry.2, &other.to_string());
+                                entry.2 = next_acc;
+                            }
+                            _ => {}
                         }
                     }
                 }

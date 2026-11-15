@@ -395,10 +395,15 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                 let cid = params.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 let snaps = engine.snapshots_list();
                 if let Some(idx) = snaps.iter().position(|s| s.snapshot_id == cid) {
-                    let _ = engine.rewind_to_snapshot(idx);
+                    if let Err(e) = engine.rewind_to_snapshot(idx) {
+                        emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "error", "id": req_id, "error": { "code": "REWIND_FAILED", "message": e } }));
+                    } else {
+                        let conv = lock_unpoison(&state).current_conversation.clone();
+                        emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "conversation": conv } }));
+                    }
+                } else {
+                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "error", "id": req_id, "error": { "code": "NOT_FOUND", "message": format!("Checkpoint '{cid}' not found") } }));
                 }
-                let conv = lock_unpoison(&state).current_conversation.clone();
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "conversation": conv } }));
             }
             "checkpoint.flag" => {
                 if let Some(cid) = params.get("id").and_then(|v| v.as_str()) {
@@ -785,11 +790,7 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
         }
     }
 
-    if let Some(tok) = active_signin_cancel.take() {
-        tok.cancel();
-    }
+    if let Some(tok) = active_signin_cancel.take() { tok.cancel(); }
     let _ = project_runner.stop();
-    for handle in spawned_turns {
-        let _ = handle.await;
-    }
+    for handle in spawned_turns { let _ = handle.await; }
 }

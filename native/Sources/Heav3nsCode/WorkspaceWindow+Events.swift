@@ -4,7 +4,7 @@ import Foundation
 
 extension WorkspaceWindow {
     func configureClient() {
-        viewportBranchGeneration += 1; viewportBranchCheckPending = false; viewportBranchCheckFailureShown = false
+        viewportBranchGeneration += 1; viewportBranchCheckPending = false; viewportBranchCheckFailureShown = false; sideQuestionPending = nil
         let source = client
         projectTaskRevision = -1; projectTaskDisplayedRevision = -1; projectTaskOffset = 0; projectTaskPreviousOffsets = []; projectTaskMovePending = false; projectTasksLoading = false; projectTasksRefreshPending = false
         client.onNotice = { [weak self, weak source] message in
@@ -162,10 +162,12 @@ extension WorkspaceWindow {
         guard let item = jumpBar.clickedPathItem, let url = item.url else { return }
         var isDir: ObjCBool = false
         if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) {
+            guard url.path == folder.path || url.path.hasPrefix(folder.path + "/") else { return }
+            let relative = url.path == folder.path ? "." : String(url.path.dropFirst(folder.path.count + 1))
             if isDir.boolValue {
                 showFiles()
             } else {
-                readFile(url.path)
+                readFile(relative)
             }
         }
     }

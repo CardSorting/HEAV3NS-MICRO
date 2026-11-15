@@ -203,7 +203,20 @@ impl ToolCallArgParser {
                             args.insert(name.to_string(), Value::String(val.to_string()));
                         }
                     },
-                    ParamType::Number | ParamType::Integer => {
+                    ParamType::Integer => {
+                        if !(val.is_i64() || val.is_u64()) {
+                            if let Some(s) = val.as_str() {
+                                if let Ok(n) = s.trim().parse::<i64>() {
+                                    args.insert(name.to_string(), Value::Number(n.into()));
+                                } else {
+                                    errors.push(format!("Parameter '{name}' expected integer, got '{s}'"));
+                                }
+                            } else {
+                                errors.push(format!("Parameter '{name}' expected integer"));
+                            }
+                        }
+                    }
+                    ParamType::Number => {
                         if !val.is_number() {
                             if let Some(s) = val.as_str() {
                                 if let Ok(n) = s.trim().parse::<i64>() {

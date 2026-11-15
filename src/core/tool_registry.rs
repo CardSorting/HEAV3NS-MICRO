@@ -255,17 +255,36 @@ impl ToolRegistry {
         }
     }
 
-    pub fn extract_target_resources(&self, call: &ScheduledToolCall, cwd: &Path) -> Vec<PathBuf> {
+    pub fn extract_target_resources_from_map(&self, canonical: &str, obj: &serde_json::Map<String, Value>, cwd: &Path) -> Vec<PathBuf> {
         let mut paths = Vec::new();
-        let Some(obj) = call.args.as_object() else { return paths };
-        for key in ["path", "filePath", "file_path", "source", "target", "cwd"] {
+        for key in ["path", "filePath", "file_path", "source", "target", "cwd", "file", "targetFile", "targetPath", "filename", "from", "to", "dest", "destination"] {
             if let Some(Value::String(s)) = obj.get(key) {
                 if !s.trim().is_empty() && !s.contains('\n') {
-                    paths.push(resolve_workspace_path(cwd, s));
+                    let p = resolve_workspace_path(cwd, s);
+                    if !paths.contains(&p) { paths.push(p); }
+                }
+            }
+        }
+        if canonical == "apply_unified_diff" {
+            if let Some(diff_txt) = obj.get("diff").or_else(|| obj.get("patch")).and_then(Value::as_str) {
+                for op in crate::plumbing::fuzzy_patch::DeterministicPatchEngine::parse(diff_txt) {
+                    let p = resolve_workspace_path(cwd, &op.file_path);
+                    if !paths.contains(&p) { paths.push(p); }
                 }
             }
         }
         paths
+    }
+
+    pub fn extract_target_resources(&self, call: &ScheduledToolCall, cwd: &Path) -> Vec<PathBuf> {
+        let canonical = canonical_tool_name(&call.name);
+        if let Some(obj) = call.args.as_object() { return self.extract_target_resources_from_map(canonical, obj, cwd); }
+        if let Some(s) = call.args.as_str() {
+            if let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(s) {
+                return self.extract_target_resources_from_map(canonical, &obj, cwd);
+            }
+        }
+        Vec::new()
     }
 
     pub fn partition_waves(&self, calls: &[ScheduledToolCall], cwd: &Path) -> Vec<Vec<ScheduledToolCall>> {
@@ -300,8 +319,9 @@ impl ToolRegistry {
                     waves.push(std::mem::take(&mut current_wave));
                     current_resources.clear();
                 }
-                let conflict = resources.is_empty() || resources.iter().any(|r| current_resources.contains(r));
-                if is_global || conflict || current_wave.len() >= self.max_concurrency {
+                let isolate = is_global || resources.is_empty();
+                let conflict = isolate || resources.iter().any(|r| current_resources.contains(r));
+                if conflict || current_wave.len() >= self.max_concurrency {
                     if !current_wave.is_empty() {
                         waves.push(std::mem::take(&mut current_wave));
                         current_resources.clear();
@@ -310,7 +330,7 @@ impl ToolRegistry {
                 current_resources.extend(resources);
                 current_wave.push(call.clone());
                 current_has_mutations = true;
-                if is_global {
+                if isolate {
                     waves.push(std::mem::take(&mut current_wave));
                     current_resources.clear();
                     current_has_mutations = false;
@@ -517,7 +537,7 @@ impl ToolRegistry {
             None
         };
 
-        let target_resources = self.extract_target_resources(call, cwd);
+        let target_resources = self.extract_target_resources_from_map(canonical, &prepared_args, cwd);
 
         match self
             .dispatch_builtin(canonical, &prepared_args, cwd, authority, posture, cancel_token)
@@ -573,14 +593,11 @@ impl ToolRegistry {
                         }
                     }
                 }
+                let tool_ok = !denied && val.get("success").and_then(Value::as_bool).unwrap_or(true);
                 ToolExecutionRecord {
-                    name: call.name.clone(),
-                    call_id: Some(call.id.clone()),
-                    args: Some(prepared_val),
-                    output: val,
-                    success: !denied,
-                    denied: if denied { Some(true) } else { None },
-                    output_limited: None,
+                    name: call.name.clone(), call_id: Some(call.id.clone()), args: Some(prepared_val),
+                    output: val, success: tool_ok,
+                    denied: if denied { Some(true) } else { None }, output_limited: None,
                     error: if denied { Some("Permission denied for this operation".to_string()) } else { None },
                     duration_ms: started.elapsed().as_millis() as u64,
                 }
@@ -644,11 +661,9 @@ impl ToolRegistry {
                 SafetyPolicy::check_command(cmd_str)?;
                 let advisory = SafetyPolicy::detect_heredoc_file_redirection(cmd_str)
                     .or_else(|| SafetyPolicy::detect_terminal_file_read(cmd_str));
-                let cmd_cwd = args
-                    .get("cwd")
-                    .and_then(|v| v.as_str())
-                    .map(|s| resolve_workspace_path(cwd, s))
-                    .unwrap_or_else(|| cwd.to_path_buf());
+                let cmd_cwd = args.get("cwd").and_then(|v| v.as_str()).map(|s| resolve_workspace_path(cwd, s)).unwrap_or_else(|| cwd.to_path_buf());
+                let (Ok(cr), Ok(cc)) = (cwd.canonicalize(), cmd_cwd.canonicalize()) else { return Err(format!("Invalid cwd '{}'", cmd_cwd.display())); };
+                if !cc.starts_with(&cr) { return Err(format!("Command cwd '{}' escapes workspace root", cmd_cwd.display())); }
                 let timeout_ms = args
                     .get("timeoutMs")
                     .and_then(|v| v.as_u64())

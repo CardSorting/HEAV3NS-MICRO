@@ -224,6 +224,10 @@ final class ProjectRunView: NSStackView, NSTextFieldDelegate {
         if value { load() } else if running { poll() }
         updateTimer()
     }
+    func dispose() {
+        timer?.invalidate(); timer = nil
+        visible = false; generation += 1
+    }
     private func load(select requestedID: String? = nil, notice: String? = nil) {
         guard connected, !busy else { return }
         let selected = requestedID ?? (options.indices.contains(targets.indexOfSelectedItem) ? options[targets.indexOfSelectedItem]["id"] as? String : nil)

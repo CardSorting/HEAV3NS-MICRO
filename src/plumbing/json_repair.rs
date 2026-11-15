@@ -85,7 +85,7 @@ pub fn repair_json_string(input: &str) -> String {
     let mut cleaned = String::with_capacity(text.len() + 4);
     let chars: Vec<char> = text.chars().collect();
     let (mut i, mut in_str, mut esc) = (0, false, false);
-    let (mut open_braces, mut close_braces, mut open_brackets, mut close_brackets) = (0usize, 0usize, 0usize, 0usize);
+    let mut delim_stack: Vec<char> = Vec::new();
     while i < chars.len() {
         let c = chars[i];
         if in_str {
@@ -117,20 +117,26 @@ pub fn repair_json_string(input: &str) -> String {
             }
         }
         match c {
-            '{' => open_braces += 1,
-            '}' => close_braces += 1,
-            '[' => open_brackets += 1,
-            ']' => close_brackets += 1,
+            '{' => delim_stack.push('}'),
+            '[' => delim_stack.push(']'),
+            '}' | ']' => {
+                if delim_stack.last() == Some(&c) {
+                    delim_stack.pop();
+                }
+            }
             _ => {}
         }
         cleaned.push(c);
         i += 1;
     }
-    for _ in 0..open_braces.saturating_sub(close_braces) {
-        cleaned.push('}');
+    if in_str {
+        if esc {
+            cleaned.push('\\');
+        }
+        cleaned.push('"');
     }
-    for _ in 0..open_brackets.saturating_sub(close_brackets) {
-        cleaned.push(']');
+    while let Some(closing) = delim_stack.pop() {
+        cleaned.push(closing);
     }
     cleaned
 }
@@ -154,14 +160,8 @@ pub fn compute_streaming_arguments_delta(accumulated: &str, incoming: &str) -> (
     if accumulated.is_empty() {
         return (incoming.to_string(), incoming.to_string());
     }
-    if incoming.starts_with(accumulated) {
-        let can_slice = accumulated.len() >= 2 || {
-            let (roots, rem) = extract_json_roots(incoming);
-            accumulated == "{" && roots.len() == 1 && rem.trim().is_empty() && roots[0].is_object()
-        };
-        if can_slice {
-            return (incoming[accumulated.len()..].to_string(), incoming.to_string());
-        }
+    if incoming.starts_with(accumulated) && incoming.len() > accumulated.len() {
+        return (incoming[accumulated.len()..].to_string(), incoming.to_string());
     }
     if accumulated.len() >= 2 {
         let (ex_roots, ex_rem) = extract_json_roots(accumulated);

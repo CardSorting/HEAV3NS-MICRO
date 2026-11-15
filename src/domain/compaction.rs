@@ -30,8 +30,8 @@ impl ContextBudgetInfo {
             reserved_output_tokens: reserved_out,
             safety_margin_tokens: safety,
             available_input_tokens: available_in,
-            compaction_trigger_tokens: (available_in * 80) / 100,
-            target_input_tokens: (available_in * 60) / 100,
+            compaction_trigger_tokens: ((available_in as u64 * 80) / 100) as usize,
+            target_input_tokens: ((available_in as u64 * 60) / 100) as usize,
         }
     }
 }
@@ -46,6 +46,12 @@ pub struct CompactionPolicy {
     pub preserve_recent_turns: usize,
     pub summary_max_tokens: usize,
     pub force: bool,
+}
+
+impl ICompactionPolicy for CompactionPolicy {
+    fn is_forced(&self) -> bool {
+        self.force
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

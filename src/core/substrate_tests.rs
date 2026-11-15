@@ -479,7 +479,7 @@ mod tests {
         assert!(!fenced.success);
         assert!(fenced.error.as_deref().unwrap_or("").contains("human_has_control"));
         let _ = reg.execute_single(
-            &ScheduledToolCall { id: "h11".into(), name: "computer_use".into(), args: json!({"action": "lease_release"}) },
+            &ScheduledToolCall { id: "h11".into(), name: "computer_use".into(), args: json!({"action": "lease_release", "actor": "human"}) },
             &ws.path, ExecutionAuthorityLevel::Autonomous, None,
         ).await;
 

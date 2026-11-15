@@ -259,14 +259,20 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         layoutTimer?.invalidate(); layoutTimer = nil
         if let viewportObserver { NotificationCenter.default.removeObserver(viewportObserver); self.viewportObserver = nil }
         binaryDocumentLoader?.cancel(); binaryDocumentLoader = nil
+        approvalReview?.dispose(); approvalReview = nil
+        queueEditor?.dispose(); queueEditor = nil
+        if queuePopover.isShown { queuePopover.close() }
         memoryWindow?.dismiss(); memoryWindow = nil
         palette?.cancelOperation(nil); palette = nil
         quickOpen?.dispose(); quickOpen = nil
         receiptBar.dispose()
         composer.dispose()
         turnScrubber.dispose()
-        modelPicker?.dismiss(restoreFocus: false); modelPicker = nil
-        checkpointWindow?.close(); checkpointWindow = nil
+        documentView.dispose()
+        projectRun.setVisible(false)
+        projectRun.dispose()
+        modelPicker?.dispose(); modelPicker?.dismiss(restoreFocus: false); modelPicker = nil
+        checkpointWindow?.dispose(); checkpointWindow = nil
     }
 
     func button(_ title: String, _ action: Selector, symbol: String? = nil) -> NSButton {

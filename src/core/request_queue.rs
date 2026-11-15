@@ -185,11 +185,15 @@ impl PromptComposer {
             spec.render(config, workspace_root, &facts, &skills)
         };
 
+        let mem_env = memory.format_memory_envelope();
+        let ctx_block = format_append_only_context_update(mem_env.as_deref(), posture);
+        let ctx_tokens = ctx_block.as_deref().map(estimate_text_tokens).unwrap_or(0);
+
         let system_tokens = estimate_text_tokens(&sys_content);
         let budget = ContextBudgetInfo::calculate(config.context_window_tokens, config.max_output_tokens);
         let available_history_tokens = budget
             .available_input_tokens
-            .saturating_sub(system_tokens + tool_defs_tokens)
+            .saturating_sub(system_tokens + tool_defs_tokens + ctx_tokens)
             .max(512);
 
         let mut raw_messages = vec![SessionMessage::new(Role::System, sys_content)];
@@ -204,8 +208,7 @@ impl PromptComposer {
 
         // Append-only volatile context delta (`LUMI-MEMORY/1` + `ExecutionPosture`) on the final User turn
         // so index 0 (`Role::System`) stays byte-pinned AND index 1 is NEVER an orphaned `Role::Assistant`!
-        let mem_env = memory.format_memory_envelope();
-        if let Some(ctx_block) = format_append_only_context_update(mem_env.as_deref(), posture) {
+        if let Some(ctx_block) = ctx_block {
             if let Some(last_user) = composed.iter_mut().rev().find(|m| m.role == Role::User) {
                 last_user.content = format!("{}\n\n{}", last_user.content, ctx_block);
             }

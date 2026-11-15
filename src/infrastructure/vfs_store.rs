@@ -48,7 +48,13 @@ impl SessionVfs {
     }
 
     fn normalize_key(path: &str) -> String {
-        Path::new(path).to_string_lossy().into_owned()
+        let mut out = std::path::PathBuf::new();
+        for comp in Path::new(path).components() {
+            if !matches!(comp, std::path::Component::CurDir) {
+                out.push(comp);
+            }
+        }
+        out.to_string_lossy().into_owned()
     }
 
     pub fn stage_write(
@@ -120,12 +126,23 @@ impl SessionVfs {
             }
         }
         let mut committed = Vec::with_capacity(overlays.len());
-        for ov in overlays {
+        for (idx, ov) in overlays.into_iter().enumerate() {
             let target = Path::new(&ov.path);
-            if ov.is_deleted {
-                let _ = fs::remove_file(target);
+            let res = if ov.is_deleted {
+                match fs::remove_file(target) {
+                    Ok(()) => Ok(()),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                    Err(e) => Err(format!("Failed deleting '{}': {e}", ov.path)),
+                }
             } else {
-                crate::infrastructure::search_tools::atomic_write_file(target, ov.content.as_bytes())?;
+                crate::infrastructure::search_tools::atomic_write_file(target, ov.content.as_bytes())
+            };
+            if let Err(e) = res {
+                for done in &committed {
+                    self.staged.remove(done);
+                }
+                let _ = idx;
+                return Err(e);
             }
             committed.push(ov.path);
         }
@@ -151,7 +168,10 @@ impl SkillsIngestor {
             }
             let Ok(entries) = fs::read_dir(root) else { continue };
             for entry in entries.flatten() {
-                let p = entry.path();
+                if entry.file_type().map(|t| t.is_symlink()).unwrap_or(true) {
+                continue;
+            }
+            let p = entry.path();
                 let skill_md = if p.is_dir() {
                     p.join("SKILL.md")
                 } else if p.file_name().and_then(|n| n.to_str()) == Some("SKILL.md") {
@@ -238,7 +258,10 @@ impl SkillsIngestor {
             }
             let Ok(entries) = fs::read_dir(vault) else { continue };
             for entry in entries.flatten() {
-                let p = entry.path();
+                if entry.file_type().map(|t| t.is_symlink()).unwrap_or(true) {
+                continue;
+            }
+            let p = entry.path();
                 if p.is_dir() {
                     let skill_md = p.join("SKILL.md");
                     if let Ok(raw) = fs::read_to_string(&skill_md) {
@@ -286,6 +309,9 @@ pub fn workspace_revision(workspace_root: &Path) -> String {
                     "node_modules" | "target" | "dist" | "build" | "vendor" | "coverage"
                 )
             {
+                continue;
+            }
+            if entry.file_type().map(|t| t.is_symlink()).unwrap_or(true) {
                 continue;
             }
             let p = entry.path();

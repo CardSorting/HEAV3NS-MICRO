@@ -202,10 +202,12 @@ impl VirtualDisplayState {
         match action.as_str() {
             "lease_acquire" | "lease_release" | "lease_status" => {
                 if action == "lease_acquire" {
+                    self.assert_agent_may_act(args)?;
                     self.lease_holder = args.get("holder").and_then(|v| v.as_str()).unwrap_or("human").to_string();
                     self.lease_viewer_id = args.get("viewer_id").and_then(|v| v.as_str()).map(|s| s.to_string());
                     self.lease_epoch += 1;
                 } else if action == "lease_release" {
+                    self.assert_agent_may_act(args)?;
                     self.lease_holder = "agent".into();
                     self.lease_viewer_id = None;
                     self.lease_epoch += 1;
@@ -521,8 +523,8 @@ impl VirtualDisplayState {
             "window_resize" | "resize_window" => {
                 self.assert_agent_may_act(args)?;
                 let win_id = args.get("window_id").and_then(|v| v.as_str()).unwrap_or(&self.active_window_id);
-                let nw = args.get("width").and_then(|v| v.as_i64()).unwrap_or(800) as i32;
-                let nh = args.get("height").and_then(|v| v.as_i64()).unwrap_or(600) as i32;
+                let nw = args.get("width").and_then(|v| v.as_i64()).unwrap_or(800).max(1) as i32;
+                let nh = args.get("height").and_then(|v| v.as_i64()).unwrap_or(600).max(1) as i32;
                 if let Some(win) = self.windows.iter_mut().find(|w| w.id == win_id) { win.bounds[2] = nw; win.bounds[3] = nh; }
                 self.record_action("window_resize", "success", 1, json!({"windowId": win_id, "bounds": [nw, nh]}));
                 Ok(self.capture_frame())
@@ -602,8 +604,8 @@ impl VirtualDisplayState {
                 }
                 Ok(compute_preview_delta(&current, &mut self.preview_inventory, full))
             }
-            "click" => self.execute_action(&json!({"action": "click", "ref": args.get("ref").or_else(|| args.get("element_id"))})),
-            "fill" => self.execute_action(&json!({"action": "set_value", "ref": args.get("ref").or_else(|| args.get("element_id")), "value": args.get("value").or_else(|| args.get("text"))})),
+            "click" => self.execute_action(&forward_cua_context(json!({"action": "click", "ref": args.get("ref").or_else(|| args.get("element_id"))}), args)),
+            "fill" => self.execute_action(&forward_cua_context(json!({"action": "set_value", "ref": args.get("ref").or_else(|| args.get("element_id")), "value": args.get("value").or_else(|| args.get("text"))}), args)),
             _ => Ok(self.capture_frame()),
         }
     }
@@ -656,8 +658,8 @@ impl VirtualDisplayState {
                 let max_el = args.get("max_elements").and_then(|v| v.as_u64()).unwrap_or(64) as usize;
                 Ok(snapshot_html_dom(html, url, max_el))
             }
-            "click" => self.execute_action(&json!({ "action": "click", "element_id": args.get("selector").or_else(|| args.get("element_id")).and_then(|v| v.as_str()).unwrap_or(""), "som_id": args.get("som_id") })),
-            "type" | "fill" => self.execute_action(&json!({ "action": "set_value", "element_id": args.get("selector").or_else(|| args.get("element_id")).and_then(|v| v.as_str()).unwrap_or(""), "som_id": args.get("som_id"), "text": args.get("text").or_else(|| args.get("value")).and_then(|v| v.as_str()).unwrap_or("") })),
+            "click" => self.execute_action(&forward_cua_context(json!({ "action": "click", "element_id": args.get("selector").or_else(|| args.get("element_id")).and_then(|v| v.as_str()).unwrap_or(""), "som_id": args.get("som_id") }), args)),
+            "type" | "fill" => self.execute_action(&forward_cua_context(json!({ "action": "set_value", "element_id": args.get("selector").or_else(|| args.get("element_id")).and_then(|v| v.as_str()).unwrap_or(""), "som_id": args.get("som_id"), "text": args.get("text").or_else(|| args.get("value")).and_then(|v| v.as_str()).unwrap_or("") }), args)),
             "dialog" => {
                 let accept = args.get("accept").and_then(|v| v.as_bool()).unwrap_or(true);
                 let prev = self.pending_dialog.take();
@@ -705,4 +707,15 @@ impl VirtualDisplayState {
             self.lease_epoch,
         )
     }
+}
+
+fn forward_cua_context(mut base: Value, args: &Value) -> Value {
+    if let Some(obj) = base.as_object_mut() {
+        for key in ["actor", "expected_epoch", "delivery_mode"] {
+            if let Some(v) = args.get(key) {
+                obj.insert(key.to_string(), v.clone());
+            }
+        }
+    }
+    base
 }

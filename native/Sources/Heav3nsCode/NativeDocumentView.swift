@@ -113,5 +113,11 @@ final class NativeDocumentView: NSView {
         else if kind == .image { imageScroll.magnification = min(20, max(0.05, imageScroll.magnification * factor)) }
         changed()
     }
-    func dispose() {}
+    func dispose() {
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
+        observers.removeAll()
+        pdf.document = nil
+        imageView.image = nil
+        onChange = nil
+    }
 }

@@ -74,12 +74,13 @@ pub fn resolve_and_verify_workspace_path(cwd: &Path, raw: &str) -> Result<PathBu
             cwd.display()
         ));
     }
-    verify_model_path_access(&candidate)?;
-    Ok(candidate)
+    verify_model_path_access(&canon_target)?;
+    Ok(canon_target)
 }
 
-/// Reads a UTF-8 text file up to `max_bytes`, failing cleanly before allocating on oversized files.
+/// Reads a UTF-8 text file up to `max_bytes`, failing cleanly before allocating on oversized files or special streams.
 pub fn read_text_file_bounded(path: &Path, max_bytes: usize) -> Result<String, String> {
+    use std::io::Read;
     let meta = fs::metadata(path).map_err(|e| format!("Failed to stat '{}': {e}", path.display()))?;
     if meta.len() > max_bytes as u64 {
         return Err(format!(
@@ -89,7 +90,19 @@ pub fn read_text_file_bounded(path: &Path, max_bytes: usize) -> Result<String, S
             max_bytes
         ));
     }
-    fs::read_to_string(path).map_err(|e| format!("Failed to read '{}': {e}", path.display()))
+    let f = fs::File::open(path).map_err(|e| format!("Failed to open '{}': {e}", path.display()))?;
+    let mut buf = Vec::new();
+    f.take(max_bytes as u64 + 1)
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("Failed to read '{}': {e}", path.display()))?;
+    if buf.len() > max_bytes {
+        return Err(format!(
+            "File '{}' is too large (> {} byte limit)",
+            path.display(),
+            max_bytes
+        ));
+    }
+    String::from_utf8(buf).map_err(|e| format!("Failed to read '{}' as UTF-8: {e}", path.display()))
 }
 
 /// Checks a path and its canonicalized symlink target against `CredentialDenyScope::ModelContext`
@@ -109,7 +122,9 @@ pub fn atomic_write_file(target: &Path, bytes: &[u8]) -> Result<(), String> {
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("file");
-    let tmp_path = target.with_file_name(format!(".{file_name}.heav3ns-tmp-{}-{}", std::process::id(), now_ms()));
+    static FS_TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = FS_TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp_path = target.with_file_name(format!(".{file_name}.heav3ns-tmp-{}-{}-{}", std::process::id(), now_ms(), seq));
     fs::write(&tmp_path, bytes).map_err(|e| format!("Failed to write temp file for '{}': {e}", target.display()))?;
     if let Some(perms) = existing_perms {
         let _ = fs::set_permissions(&tmp_path, perms);
@@ -175,6 +190,9 @@ pub fn walk_find_files(
         }
         let file_name = entry.file_name().to_string_lossy().into_owned();
         let path = entry.path();
+        if fs::symlink_metadata(&path).map(|m| m.file_type().is_symlink()).unwrap_or(true) {
+            continue;
+        }
         if path.is_dir() {
             if !is_ignored_dir(&file_name) && verify_model_path_access(&path).is_ok() {
                 walk_find_files(root, &path, query, depth + 1, max_depth, out);
@@ -204,7 +222,12 @@ pub fn build_directory_tree(
     let Ok(rd) = fs::read_dir(dir) else { return };
     let mut filtered: Vec<_> = rd
         .flatten()
-        .filter(|e| !is_ignored_dir(&e.file_name().to_string_lossy()) && verify_model_path_access(&e.path()).is_ok())
+        .filter(|e| {
+            let p = e.path();
+            !fs::symlink_metadata(&p).map(|m| m.file_type().is_symlink()).unwrap_or(true)
+                && !is_ignored_dir(&e.file_name().to_string_lossy())
+                && verify_model_path_access(&p).is_ok()
+        })
         .collect();
     filtered.sort_by(|a, b| match (a.path().is_dir(), b.path().is_dir()) {
         (true, false) => std::cmp::Ordering::Less,
@@ -226,7 +249,14 @@ pub fn build_directory_tree(
 }
 
 pub fn collect_source_files(target: &Path, out: &mut Vec<PathBuf>) {
-    if out.len() >= 1_500 {
+    collect_source_files_bounded(target, out, 0);
+}
+
+fn collect_source_files_bounded(target: &Path, out: &mut Vec<PathBuf>, depth: usize) {
+    if out.len() >= 1_500 || depth >= 16 {
+        return;
+    }
+    if fs::symlink_metadata(target).map(|m| m.file_type().is_symlink()).unwrap_or(true) {
         return;
     }
     if target.is_file() {
@@ -242,8 +272,11 @@ pub fn collect_source_files(target: &Path, out: &mut Vec<PathBuf>) {
             continue;
         }
         let p = entry.path();
+        if fs::symlink_metadata(&p).map(|m| m.file_type().is_symlink()).unwrap_or(true) {
+            continue;
+        }
         if p.is_dir() {
-            collect_source_files(&p, out);
+            collect_source_files_bounded(&p, out, depth + 1);
         } else if p.is_file() && verify_model_path_access(&p).is_ok() {
             out.push(p);
         }
@@ -259,35 +292,41 @@ pub fn batch_replace_regex_files(
     journal: &Mutex<TransactionJournal>,
 ) -> Result<(Value, bool), String> {
     let re = Regex::new(find_pat).map_err(|e| format!("Invalid regex '{find_pat}': {e}"))?;
+    let canon_cwd = canonicalize_best_effort(cwd);
     let mut files = Vec::new();
     collect_source_files(resolved, &mut files);
     let mut modified = Vec::new();
+    let mut errors = Vec::new();
     let mut total_replacements = 0usize;
     for file in files {
         if verify_model_path_access(&file).is_err() {
             continue;
         }
-        if let Ok(content) = fs::read_to_string(&file) {
+        if let Ok(content) = read_text_file_bounded(&file, 2 * 1024 * 1024) {
             let count = re.find_iter(&content).count();
             if count > 0 {
-                total_replacements += count;
-                let rel = file.strip_prefix(cwd).unwrap_or(&file).to_string_lossy().into_owned();
-                modified.push(json!({ "path": rel, "matches": count }));
+                let rel = file.strip_prefix(&canon_cwd).or_else(|_| file.strip_prefix(cwd)).unwrap_or(&file).to_string_lossy().into_owned();
                 if !dry_run {
                     if let Ok(mut j) = journal.lock() {
                         j.record_mutation("batch_replace_regex", &file);
                     }
                     let updated = re.replace_all(&content, replace_with).into_owned();
-                    let _ = atomic_write_file(&file, updated.as_bytes());
+                    if let Err(e) = atomic_write_file(&file, updated.as_bytes()) {
+                        errors.push(format!("Failed writing '{rel}': {e}"));
+                        continue;
+                    }
                 }
+                total_replacements += count;
+                modified.push(json!({ "path": rel, "matches": count }));
             }
         }
     }
     Ok((
         json!({
-            "success": true,
+            "success": errors.is_empty(),
             "dryRun": dry_run,
             "filesMatched": modified.len(),
+            "errors": errors,
             "totalReplacements": total_replacements,
             "files": modified
         }),
@@ -421,6 +460,9 @@ fn walk_grep(
         }
         let name = entry.file_name().to_string_lossy().into_owned();
         let path = entry.path();
+        if fs::symlink_metadata(&path).map(|m| m.file_type().is_symlink()).unwrap_or(true) {
+            continue;
+        }
         if path.is_dir() {
             if !is_ignored_dir(&name) && verify_model_path_access(&path).is_ok() {
                 walk_grep(root, &path, re, depth + 1, max_depth, max_results, hits);

@@ -299,9 +299,12 @@ pub fn resolve_compatible_fallback_model_with_catalog(
 ) -> Option<String> {
     let p = provider.trim().to_ascii_lowercase();
     if p == "scripted" || p == "ollama" {
-        return configured_fallback
-            .filter(|f| *f != primary_model && p == "scripted")
-            .map(String::from);
+        if let Some(fb) = configured_fallback.filter(|f| *f != primary_model) {
+            return Some(fb.to_string());
+        }
+        if p == "scripted" {
+            return None;
+        }
     }
     if let Some(fb) = configured_fallback {
         let fb_low = fb.to_ascii_lowercase();

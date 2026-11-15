@@ -249,7 +249,10 @@ extension WorkspaceWindow {
             guard let self, self.declarations.indices.contains(index) else { return }
             self.contextTabs.selectedSegment = 2; self.showingInspector = true; self.surfaces.selectedSegment = 1; self.adapt()
             let range = self.declarations[index].range
-            self.inspection.setSelectedRange(range); self.inspection.scrollRangeToVisible(range)
+            let textLength = (self.inspection.string as NSString).length
+            guard range.location != NSNotFound, range.location <= textLength else { return }
+            let safeRange = NSRange(location: range.location, length: min(range.length, textLength - range.location))
+            self.inspection.setSelectedRange(safeRange); self.inspection.scrollRangeToVisible(safeRange)
             self.window?.makeFirstResponder(self.inspection)
         }
         picker.onSelectCheckpoint = { [weak self] checkpoint in self?.openCheckpoints(selected: checkpoint) }

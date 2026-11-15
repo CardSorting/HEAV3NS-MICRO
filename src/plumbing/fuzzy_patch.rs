@@ -138,9 +138,10 @@ pub fn heal_fuzzy_patch(file_content: &str, target_snippet: &str) -> Option<(Str
         return None;
     }
 
+    let sep = if file_content.contains("\r\n") { "\r\n" } else { "\n" };
     for i in 0..=(file_lines.len() - target_lines.len()) {
         if (0..target_lines.len()).all(|j| file_lines[i + j].trim() == target_lines[j].trim()) {
-            let matched = file_lines[i..i + target_lines.len()].join("\n");
+            let matched = file_lines[i..i + target_lines.len()].join(sep);
             if file_content.contains(&matched) {
                 return Some((matched, 0.95));
             }
@@ -285,7 +286,7 @@ impl DeterministicPatchEngine {
             if !cur_hunk.is_empty() {
                 cur_hunks.push(std::mem::take(cur_hunk));
             }
-            if !cur_file.is_empty() && (!cur_hunks.is_empty() || *cur_type == "delete") {
+            if !cur_file.is_empty() && (!cur_hunks.is_empty() || *cur_type == "delete" || *cur_type == "add") {
                 let add_content = if *cur_type == "add" {
                     let lines: Vec<String> = cur_hunks
                         .iter()
@@ -293,7 +294,7 @@ impl DeterministicPatchEngine {
                         .filter(|l| l.prefix == '+')
                         .map(|l| l.content.clone())
                         .collect();
-                    Some(lines.join("\n") + "\n")
+                    Some(if lines.is_empty() { String::new() } else { lines.join("\n") + "\n" })
                 } else {
                     None
                 };
@@ -311,13 +312,13 @@ impl DeterministicPatchEngine {
         for line in diff_text.lines() {
             if let Some(rest) = line.strip_prefix("--- ") {
                 flush(&mut ops, &mut cur_file, &mut cur_type, &mut cur_hunks, &mut cur_hunk);
-                let p = rest.trim();
+                let p = rest.split('\t').next().unwrap_or(rest).trim();
                 is_old_null = p == "/dev/null";
                 old_file = p.strip_prefix("a/").or_else(|| p.strip_prefix("b/")).unwrap_or(p).to_string();
                 continue;
             }
             if let Some(rest) = line.strip_prefix("+++ ") {
-                let p = rest.trim();
+                let p = rest.split('\t').next().unwrap_or(rest).trim();
                 let is_new_null = p == "/dev/null";
                 let new_file = p.strip_prefix("b/").or_else(|| p.strip_prefix("a/")).unwrap_or(p).to_string();
                 cur_file = if is_new_null { old_file.clone() } else { new_file };
@@ -360,8 +361,11 @@ impl DeterministicPatchEngine {
             let target_block = target_lines.join("\n");
             let replacement_block = replacement_lines.join("\n");
             if target_block.is_empty() {
-                current.push_str(&replacement_block);
-                continue;
+                if current.is_empty() {
+                    current.push_str(&replacement_block);
+                    continue;
+                }
+                return Err(format!("Hunk #{} contains pure additions without context anchors", idx + 1));
             }
             if let Some((matched, _)) = heal_fuzzy_patch(&current, &target_block) {
                 current = current.replacen(&matched, &replacement_block, 1);

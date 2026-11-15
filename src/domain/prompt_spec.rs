@@ -71,7 +71,10 @@ impl ModelPromptFamily {
             Self::Gemini
         } else if m.contains("claude") || p.contains("anthropic") || p.contains("claude") {
             Self::Anthropic
-        } else if m.contains("gpt-6") || m.contains("gpt-5") || m.starts_with("o1") || m.starts_with("o3") || m.starts_with("o4") {
+        } else if {
+            let unvendored = m.split_once('/').map(|(_, s)| s).unwrap_or(&m);
+            m.contains("gpt-6") || m.contains("gpt-5") || unvendored.starts_with("o1") || unvendored.starts_with("o3") || unvendored.starts_with("o4")
+        } {
             Self::OpenAiReasoning
         } else {
             Self::General
@@ -379,11 +382,9 @@ impl SystemPromptSpec {
         lines.push("<available_skills trust=\"untrusted-catalog\">".to_string());
         for s in skills.iter().take(max_items) {
             let desc = truncate_text_to_token_budget(s.description.trim(), 36);
-            lines.push(format!(
-                "  - \"{}\": \"{}\"",
-                escape_angle_brackets(&s.name),
-                escape_angle_brackets(&desc)
-            ));
+            let clean_name = escape_angle_brackets(&s.name).replace('"', "\\\"").replace(['\n', '\r'], " ");
+            let clean_desc = escape_angle_brackets(&desc).replace('"', "\\\"").replace(['\n', '\r'], " ");
+            lines.push(format!("  - \"{clean_name}\": \"{clean_desc}\""));
         }
         if skills.len() > max_items {
             lines.push(format!("  [{} additional skills omitted]", skills.len() - max_items));
@@ -418,15 +419,12 @@ pub fn format_bounded_handoff_item(raw: &str, max_bytes: usize) -> String {
     }
     let marker = "\n[Report truncated; inspect workspace files directly for full details.]";
     let cap = max_bytes.saturating_sub(marker.len()).max(32);
-    let mut cut = raw.len().min(cap);
-    while cut > 0 && !raw.is_char_boundary(cut) {
-        cut -= 1;
-    }
-    while cut > 0 && escape_angle_brackets(&raw[..cut]).len() > cap {
-        cut -= 1;
-        while cut > 0 && !raw.is_char_boundary(cut) {
-            cut -= 1;
-        }
+    let (mut escaped_len, mut cut) = (0usize, 0usize);
+    for (idx, ch) in raw.char_indices() {
+        let ch_len = match ch { '&' => 5, '<' | '>' => 4, _ => ch.len_utf8() };
+        if escaped_len + ch_len > cap { break; }
+        escaped_len += ch_len;
+        cut = idx + ch.len_utf8();
     }
     format!("{}{marker}", escape_angle_brackets(&raw[..cut]))
 }

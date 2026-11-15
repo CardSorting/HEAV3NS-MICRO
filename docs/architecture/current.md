@@ -109,13 +109,13 @@ The system operates across two tightly interlaced layers uniting the seven sover
 | `src/infrastructure/http_provider.rs` | `INFRASTRUCTURE` | `HEAV3NS-MICRO`: Multi-dialect `HttpProvider` (`ChatCompletions`, `OpenAiResponses`, `AnthropicMessages`, `GoogleGemini`), universal non-loopback cleartext API-key block, timeout/cancel-scoped Codex OAuth fetch, and live model discovery probes |
 | `src/infrastructure/wire_dialects.rs` | `INFRASTRUCTURE` | `HEAV3NS-MICRO`: Outbound payload builders for all 4 wire dialects, Anthropic dangling `tool_use` repair, adaptive thinking, and schema sanitization |
 | `src/infrastructure/sse_and_response_parsers.rs` | `INFRASTRUCTURE` | `HEAV3NS-MICRO`: Unified multi-dialect SSE stream accumulator (8 MiB frame overflow errors, monotonic Gemini `functionCall` indexing) and `/v1/responses` JSON parser |
-| `src/infrastructure/codex_oauth.rs` | `INFRASTRUCTURE` | `THE HARNESS`: `CodexAccountStore` implementing `ICodexAccountStore`, `127.0.0.1:1455` loopback OAuth callback (with HTML escaping & 5s read timeout), single-flight token refresh, and `429` auto-switch |
+| `src/infrastructure/codex_oauth.rs` | `INFRASTRUCTURE` | `THE HARNESS`: `CodexAccountStore` implementing `ICodexAccountStore`, `127.0.0.1:1455` loopback OAuth callback (with HTML escaping & 5s read timeout), exact-host OAuth URL validation, monotonic-nonce atomic `0600` store writes, single-flight token refresh, and `429` auto-switch |
 | `src/infrastructure/project_runner.rs` | `INFRASTRUCTURE` | `THE HARNESS`: `ProjectRunner` implementing `IProjectRunner` for `project.*` target discovery, `256 KiB` bounded output streaming, `cwd` escape guard, and `-TERM` → `-KILL` teardown |
 | `src/infrastructure/pricing_updater.rs` | `INFRASTRUCTURE` | `HEAV3NS-MICRO`: `ModelPricingRegistry` implementing `IModelPricingRegistry`, 4 MiB bounded catalog streaming, PID+timestamp atomic `0600` cache at `~/.heav3ns/pricing_catalog.json`, 12h TTL, `Drop`-guarded background refreshing |
 | `src/infrastructure/scripted_provider.rs` | `INFRASTRUCTURE` | `THE HARNESS`: Deterministic `ScriptedProvider` & `ProviderStep` for Flight Tests |
-| `src/infrastructure/vfs_store.rs` | `INFRASTRUCTURE` | `REWIND`: `SessionVfs` (`VfsDiskBaseline` verification), `SkillsIngestor`, `FileSessionPersistence` |
-| `src/infrastructure/workspace_cas.rs` | `INFRASTRUCTURE` | `REWIND`: `WorkspaceSnapshotCas` implementing `IWorkspaceSnapshotCas` (pure-Rust SHA-256 pre/post-turn snapshots, `/diff`, `/restore`, `WouldBlock`-safe `/undo`) |
-| `src/infrastructure/transaction_journal.rs` | `INFRASTRUCTURE` | `REWIND`: `TransactionJournal` atomic pre-mutation file backups and rollback |
+| `src/infrastructure/vfs_store.rs` | `INFRASTRUCTURE` | `REWIND`: `SessionVfs` (`./`-normalized keys, `VfsDiskBaseline` verification, symlink-safe revision scans, incremental `commit_all` cleanup), `SkillsIngestor`, `FileSessionPersistence` |
+| `src/infrastructure/workspace_cas.rs` | `INFRASTRUCTURE` | `REWIND`: `WorkspaceSnapshotCas` implementing `IWorkspaceSnapshotCas` (pure-Rust SHA-256 pre/post-turn snapshots, `/diff`, `/restore`, `WouldBlock`- & traversal-safe `/undo`, `0600` receipts, monotonic-nonce atomic writes) |
+| `src/infrastructure/transaction_journal.rs` | `INFRASTRUCTURE` | `REWIND`: `TransactionJournal` atomic pre-mutation file backups (`64 MiB` buffer cap, `EACCES` non-clobber guard, monotonic checkpoint IDs) and rollback |
 | `src/infrastructure/behavioral_store.rs` | `INFRASTRUCTURE` | `BROCCOLI` & `REWIND`: `BehavioralKnowledgeStore` (app-scoped `(app, pattern_id)` Laplace confidence calibration, workflow procedure registry, `reconcile_state` epoch drift check) |
 | `src/infrastructure/shell_runner.rs` | `INFRASTRUCTURE` | `THE HARNESS`: `execute_shell_command_sandboxed` with concurrent pipe drain, Seatbelt containment, and Unix `-pgid` process-group termination |
 | `src/infrastructure/fs_tools.rs` | `INFRASTRUCTURE` | `THE HARNESS`: `dispatch_fs_tool` (filesystem read/write/patch/rollback tool handlers) |
@@ -127,19 +127,19 @@ The system operates across two tightly interlaced layers uniting the seven sover
 | `src/core/context_inspector.rs` | `CORE` | `HEAV3NS-MICRO`: `ContextInspectionSnapshot`, `/context` token budget HUD, `/prompt` prefix/profile inspector, and `/preview-request` manifest inspector |
 | `src/core/computer_use_orchestrator.rs` | `CORE` | `COMPUTER USE` · `SPIDER` · `SYNTHETIC SWARM`: `ComputerUseOrchestrator` 9-stage closed loop, modal auto-intercept, auto-focus planning, and 5-specialist Swarm consultation |
 | `src/core/spatial_engine.rs` | `CORE` | `COMPUTER USE`: `SpatialInteractionEngine` (Double-Wrapped dispatch, automatic off-screen pre-scroll, multi-step `execute_plan`, DOM/visual reconciliation, directional queries) |
-| `src/core/slash_and_swarm.rs` | `CORE` | `SYNTHETIC SWARM`: `AgentEngine::run_swarm` topological wave execution & 35 interactive slash command arms |
+| `src/core/slash_and_swarm.rs` | `CORE` | `SYNTHETIC SWARM`: `AgentEngine::run_swarm` topological wave execution (inheriting parent `ExecutionPosture` into specialist engines) & 35 interactive slash command arms |
 | `src/core/session_store.rs` | `CORE` | `REWIND`: `SessionStore` (Arena + JSONL persistence) & `SessionCompactor` |
 | `src/core/tool_governor.rs` | `CORE` | `THE HARNESS`: `ToolOutputGovernor`, `FileReadTracker` (read-before-write & external disk staleness), `ToolLoopBreaker`, `ToolExecutionCache` |
 | `src/core/tool_specs.rs` | `CORE` | `THE HARNESS`: `IToolSpecProvider`, `builtin_tool_specs` (31 built-in tool schemas including `tool_search` & `execute_tools`) |
-| `src/core/tool_registry.rs` | `CORE` | `THE HARNESS`: `ToolRegistry`, sticky on-demand specialist schema routing (`15` core + `16` on-demand), & parallel read / exclusive write wave scheduler (`partition_waves`) |
-| `src/core/request_queue.rs` | `CORE` | `THE HARNESS`: `RuntimeRequestQueue` & `PromptComposer` (`compose_with_spec`, `LUMI-MEMORY/1`, `LUMI-CONTEXT/1`) |
+| `src/core/tool_registry.rs` | `CORE` | `THE HARNESS`: `ToolRegistry`, sticky on-demand specialist schema routing (`15` core + `16` on-demand), `run_command` workspace `cwd` containment & non-zero exit propagation, & parallel read / exclusive write wave scheduler (`partition_waves` with alias/patch target extraction & unknown-resource mutation isolation) |
+| `src/core/request_queue.rs` | `CORE` | `THE HARNESS`: `RuntimeRequestQueue` & `PromptComposer` (`compose_with_spec`, pre-compaction `ctx_tokens` reservation, `LUMI-MEMORY/1`, `LUMI-CONTEXT/1`) |
 | `src/core/flight_runner.rs` & `benchmark_runner.rs` | `CORE` | `THE HARNESS`: `run_agent_flight_test` (`FT-01..FT-05`), `run_micro_benchmarks`, & full benchmark suite |
-| `src/core/substrate_tests.rs`, `spatial_tests.rs`, `computer_use_tests.rs`, `zenith_tests.rs`, `codewhale_zenith_tests.rs`, `codex_oauth_e2e_tests.rs`, `zenith_hardening_tests.rs`, `mod.rs` | `CORE` | 107 unit, spatial, computer-use, OAuth E2E, credential env-scrubbing, SSRF/lease/epoch hardening, prompt/shell-guard zenith, and Codewhale zenith test suites |
+| `src/core/substrate_tests.rs`, `spatial_tests.rs`, `computer_use_tests.rs`, `zenith_tests.rs`, `codewhale_zenith_tests.rs`, `codex_oauth_e2e_tests.rs`, `zenith_hardening_tests.rs`, `mod.rs` | `CORE` | 112 unit, spatial, computer-use, OAuth E2E, credential env-scrubbing, SSRF/lease/epoch hardening, Wave 4–7 registry/swarm/parser/CAS/posture/Seatbelt/RPC hardening, prompt/shell-guard zenith, and Codewhale zenith test suites |
 | `src/ui/cli_presenter.rs` & `onboarding.rs` | `UI` | CLI parser (`context`, `doctor`, `demo`, `init`, `models`, `receipts`, `preview-request`), terminal REPL presenter, permissions enforcer |
-| `src/ui/stdio_worker.rs` | `UI` | Multiplexed Stdio JSON-RPC worker protocol engine (`v: 1` framing, `tokio::spawn` multi-tasking, `UNKNOWN_METHOD` error responses, bounded `shutdown`) |
+| `src/ui/stdio_worker.rs` | `UI` | Multiplexed Stdio JSON-RPC worker protocol engine (`v: 1` framing, `tokio::spawn` multi-tasking, `NOT_FOUND`/`REWIND_FAILED` & `UNKNOWN_METHOD` error responses, bounded `shutdown`) |
 | `src/ui/worker_handlers.rs` & `provider_rpc.rs` | `UI` | Worker request handlers for `task.*`, `approval.resolve`, `posture.*`, `cas.*`, `receipts.*`, `models.*`, and ChatGPT OAuth / provider credential RPCs |
-| `src/ui/rpc_dispatch.rs` | `UI` | Desktop JSON-RPC method handlers (`files.*`, `changes.*`, `spider.*`, `memory.*`, `context.inspect`, `prompt.inspect`, `task.*`, `swarm.*`, `spatial.*`, `cua.*`, `models.*`) |
-| `src/ui/mod.rs`, `src/lib.rs`, `src/main.rs` | `UI` | UI module and binary/library Composition Roots |
+| `src/ui/rpc_dispatch.rs` | `UI` | Desktop JSON-RPC method handlers (`files.read` with `"binary": false`, `files.readBinary` with 64-hex SHA-256 revision & `16 MiB` bounded reads, `changes.*` scoped diff filtering, `spider.*` with canonical root & `SafetyPolicy` containment, `memory.*` with threat scanning, `context.inspect`, `prompt.inspect`, `task.*`, `swarm.*`, `spatial.*`, `cua.*`, `models.*`) |
+| `src/ui/mod.rs`, `src/lib.rs`, `src/main.rs` | `UI` | UI module and binary/library Composition Roots (`SinglePrompt` exits `130` on `SIGINT` cancellation) |
 
 ### Native macOS Client Modules (`native/Sources/Heav3nsCode/`)
 
@@ -149,14 +149,14 @@ The system operates across two tightly interlaced layers uniting the seven sover
 | `WorkspaceAttachmentViews.swift` | `AttachmentTokenBar`, `ComposerView`, `TranscriptScrollView`, `TurnScrubberRail` | Tier 1 Optimal (`< 800` lines) |
 | `WorkspacePostureAndReceiptViews.swift` | 5-stop posture dial (`Shift+Tab`), 3-choice session approval bar, live `TurnReceiptSummaryBar`, and receipts inspector | Tier 1 Optimal (`< 800` lines) |
 | `WorkspaceWindow+OmnibarAndPosture.swift` | Unified Omnibar, shortcut badges (`F3`, `⌥⌘Z`, `⇧⌘I`, `⇧⌘K`), and posture step controller | Tier 1 Optimal (`< 800` lines) |
-| `WorkspaceWindow+Swarm.swift` | Swarm formation graphs, specialist reconciliation loops, and radar state | Tier 1 Optimal (`< 800` lines) |
+| `WorkspaceWindow+Swarm.swift` | Swarm formation graphs, `[weak self]` RPC closures, specialist reconciliation loops, and `submitInstruction`-routed critical review | Tier 1 Optimal (`< 800` lines) |
 | `WorkspaceWindow+SwarmSettings.swift` | Swarm configuration popovers, command recovery sheets, and `MasterToggleController` | Tier 1 Optimal (`< 800` lines) |
 | `WorkspaceWindow+Navigation.swift` | Unified left navigator (`[Chats \| Files \| Changes]`), file tree browser, and Git change navigator | Tier 1 Optimal (`< 800` lines) |
-| `WorkspaceWindow+Inspection.swift` | File, diff, saved-state, spider check, request preview, and context report viewports | Tier 1 Optimal (`< 800` lines) |
-| `WorkspaceWindow+Execution.swift` | Instruction submission, queue reordering, draft preservation, and checkpoint restoration | Tier 1 Optimal (`< 800` lines) |
+| `WorkspaceWindow+Inspection.swift` | File, diff, saved-state, spider check, request preview, and context report viewports with bounds-clamped declaration jumps | Tier 1 Optimal (`< 800` lines) |
+| `WorkspaceWindow+Execution.swift` | Instruction submission, queue reordering, draft preservation, side-question/restore state recovery, and checkpoint restoration | Tier 1 Optimal (`< 800` lines) |
 | `WorkspaceWindow+Events.swift` | JSON-RPC event routing, action palette (`Cmd+K`), toolbar delegate, and Pod snapshots | Tier 1 Optimal (`< 800` lines) |
 | `CodeOutline.swift` & `InspectionNavigation.swift` | Unicode-safe UTF-16 intra-line diff highlighter, lexical outline, `jump(to:)`, and `recentFiles(limit:)` | Tier 1 Optimal (`< 800` lines) |
-| `RuntimeClient.swift` & `ControlFrameReader.swift` | Child process lifecycle management, `"v": 1` IPC stream transport, and promise resolution | Tier 1 Optimal (`< 800` lines) |
+| `RuntimeClient.swift`, `AccountClient.swift` & `ControlFrameReader.swift` | Child process lifecycle management, `"v": 1` IPC stream transport, 64-bit retention accounting, structured RPC error parsing, and promise resolution | Tier 1 Optimal (`< 800` lines) |
 | `WalkthroughView.swift` & `PodsWindow.swift` | Live turn-by-turn agent activity inspector (Timeline/List/Kanban) and Multi-Project Pods command station | Tier 1 Optimal (`< 800` lines) |
 
 ---
@@ -167,5 +167,5 @@ The system operates across two tightly interlaced layers uniting the seven sover
 2. **Rule 2 (Geographic Alignment)**: Physical disk layout strictly matches architectural zone boundaries (`SPI-208`).
 3. **Rule 3 (Import Discipline)**: Single-line `use` and `import` declarations; zero cyclic dependency loops (`SPI-201`).
 4. **Rule 4 (Contractual Sovereignty)**: All concrete infrastructure adapters and domain entities adhere to `64` formal `I<Name>` traits (`SPI-107`).
-5. **Rule 5 (Simplicity Caps)**: All `309+` workspace files remain in **Tier 1 Optimal (`< 800` lines, `SPI-203`)**; domain files contain `<= 3` structs (`<= 1` struct if `> 500` lines).
+5. **Rule 5 (Simplicity Caps)**: All `343` workspace files remain in **Tier 1 Optimal (`< 800` lines, `SPI-203`)**; domain files contain `<= 3` structs (`<= 1` struct if `> 500` lines).
 6. **Rule 6 (Resource Lifecycle Hygiene)**: Every Swift class in `native/` implements explicit `dispose()` teardown (`0` `SPI-603` advisories).

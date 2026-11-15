@@ -106,6 +106,12 @@ impl PrefixStabilityTracker {
                     if pin.tools_hash != current.tools_hash {
                         parts.push("tool_catalog_changed");
                     }
+                    if pin.tool_count != current.tool_count {
+                        parts.push("tool_count_changed");
+                    }
+                    if parts.is_empty() {
+                        parts.push("prefix_bytes_changed");
+                    }
                     PrefixPinStatus::Drift {
                         detail: parts.join("+"),
                     }

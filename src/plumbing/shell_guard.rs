@@ -316,16 +316,38 @@ pub fn split_top_level_statements(cmd: &str) -> Vec<String> {
             state = 2;
         } else if c == b'\\' && i + 1 < bytes.len() {
             i += next_char_len(cmd, i + 1);
-        } else if c == b'$' && next == b'(' && bytes.get(i + 2) != Some(&b'(') {
-            let (mut depth, mut j) = (1i32, i + 2);
+        } else if (c == b'$' || c == b'<' || c == b'>') && next == b'(' && bytes.get(i + 2) != Some(&b'(') {
+            let (mut depth, mut j, mut sub_state) = (1i32, i + 2, 0u8);
             while j < bytes.len() && depth > 0 {
-                if bytes[j] == b'\\' && j + 1 < bytes.len() {
+                let b = bytes[j];
+                if sub_state == 1 {
+                    if b == b'\'' {
+                        sub_state = 0;
+                    }
+                    j += 1;
+                    continue;
+                } else if sub_state == 2 {
+                    if b == b'\\' && j + 1 < bytes.len() {
+                        j += 1 + next_char_len(cmd, j + 1);
+                        continue;
+                    }
+                    if b == b'"' {
+                        sub_state = 0;
+                    }
+                    j += 1;
+                    continue;
+                }
+                if b == b'\\' && j + 1 < bytes.len() {
                     j += 1 + next_char_len(cmd, j + 1);
                     continue;
                 }
-                if bytes[j] == b'(' {
+                if b == b'\'' {
+                    sub_state = 1;
+                } else if b == b'"' {
+                    sub_state = 2;
+                } else if b == b'(' {
                     depth += 1;
-                } else if bytes[j] == b')' {
+                } else if b == b')' {
                     depth -= 1;
                 }
                 j += 1;
@@ -336,6 +358,24 @@ pub fn split_top_level_statements(cmd: &str) -> Vec<String> {
                 stmts.extend(split_top_level_statements(inner));
             }
             i = j;
+            continue;
+        } else if c == b'`' {
+            let mut j = i + 1;
+            while j < bytes.len() {
+                if bytes[j] == b'\\' && j + 1 < bytes.len() {
+                    j += 1 + next_char_len(cmd, j + 1);
+                    continue;
+                }
+                if bytes[j] == b'`' {
+                    break;
+                }
+                j += 1;
+            }
+            let inner = cmd.get(i + 1..j).unwrap_or("").trim();
+            if !inner.is_empty() {
+                stmts.extend(split_top_level_statements(inner));
+            }
+            i = (j + 1).min(bytes.len());
             continue;
         } else if c == b';' || c == b'\n' || c == b'\r' || c == b'(' || c == b')' || (c == b'&' && next == b'&') || (c == b'|' && next == b'|') {
             let seg = cmd[start..i].trim();
@@ -494,9 +534,9 @@ fn parse_stage(stage: &str) -> ParsedStage {
             let (_, end) = extract_redir_target(stage, i + op_len);
             i = end;
         } else if c == b'>' {
-            let is_dup = next == b'&';
+            let is_dup = next == b'&' && (cur == "1" || cur == "2");
             let is_append = next == b'>';
-            let op_len = if is_dup || is_append { 2 } else { 1 };
+            let op_len = if next == b'&' || is_append { 2 } else { 1 };
             let is_err_fd = cur == "2";
             if is_err_fd || cur == "1" {
                 cur.clear();

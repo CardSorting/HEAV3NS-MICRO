@@ -57,7 +57,7 @@ impl FileReadTracker {
     ) -> Result<(), String> {
         let is_file_edit = matches!(
             canonical_tool,
-            "write_file" | "replace_file_content" | "multi_replace_file_content" | "edit_file_anchored"
+            "write_file" | "replace_file_content" | "multi_replace_file_content" | "edit_file_anchored" | "move_file" | "apply_unified_diff" | "delete_file"
         );
         if !is_file_edit {
             return Ok(());
@@ -100,7 +100,17 @@ impl FileReadTracker {
 }
 
 fn normalize_tracker_key(path: &Path) -> PathBuf {
-    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    if let Ok(c) = fs::canonicalize(path) {
+        c
+    } else if let (Some(parent), Some(file_name)) = (path.parent(), path.file_name()) {
+        if let Ok(c_parent) = fs::canonicalize(parent) {
+            c_parent.join(file_name)
+        } else {
+            path.to_path_buf()
+        }
+    } else {
+        path.to_path_buf()
+    }
 }
 
 /// Deterministic SHA-256 keyed in-memory read cache with path invalidation.
@@ -178,6 +188,7 @@ impl ToolExecutionCache {
 #[derive(Debug, Default)]
 pub struct ToolOutputGovernor {
     spills: BTreeMap<String, Vec<String>>,
+    spill_order: VecDeque<String>,
     pub max_chars: usize,
     pub max_lines: usize,
     seq: u64,
@@ -187,6 +198,7 @@ impl ToolOutputGovernor {
     pub const fn new() -> Self {
         Self {
             spills: BTreeMap::new(),
+            spill_order: VecDeque::new(),
             max_chars: 16_000,
             max_lines: 250,
             seq: 0,
@@ -210,15 +222,25 @@ impl ToolOutputGovernor {
         self.seq += 1;
         let spill_id = format!("spill_{}", self.seq);
         let owned_lines: Vec<String> = lines.iter().map(|s| (*s).to_string()).collect();
-        if self.spills.len() >= 64 {
-            let oldest_id = format!("spill_{}", self.seq.saturating_sub(64));
-            if self.spills.remove(&oldest_id).is_none() {
-                if let Some(first_key) = self.spills.keys().next().cloned() {
-                    self.spills.remove(&first_key);
-                }
+        while self.spills.len() >= 64 {
+            if let Some(oldest_id) = self.spill_order.pop_front() {
+                self.spills.remove(&oldest_id);
+            } else {
+                break;
             }
         }
+        self.spill_order.push_back(spill_id.clone());
         self.spills.insert(spill_id.clone(), owned_lines);
+
+        if lines.len() <= 1 && raw.len() > self.max_chars {
+            let notice = format!("\n... [output truncated; call retrieve_spill_content with spillId '{spill_id}'] ...");
+            let prefix = safe_utf8_prefix(&raw, self.max_chars.saturating_sub(notice.len()));
+            return GovernedOutput {
+                output_text: format!("{prefix}{notice}"),
+                was_truncated: true,
+                spill_id: Some(spill_id),
+            };
+        }
 
         let head_count = (self.max_lines / 2).max(20).min(lines.len());
         let tail_count = (self.max_lines / 4).max(10).min(lines.len().saturating_sub(head_count));
@@ -242,9 +264,9 @@ impl ToolOutputGovernor {
     pub fn retrieve_spill(&self, spill_id: &str, start_line: usize, end_line: Option<usize>) -> Option<Value> {
         let lines = self.spills.get(spill_id)?;
         let total = lines.len();
-        let start = start_line.max(1).min(total.max(1));
+        let start = start_line.max(1);
         let end = end_line.unwrap_or(start + 150).min(total);
-        let slice = if start <= end && total > 0 {
+        let slice = if start <= total && start <= end && total > 0 {
             lines[start - 1..end].join("\n")
         } else {
             String::new()
@@ -261,6 +283,7 @@ impl ToolOutputGovernor {
 
     pub extern "Rust" fn clear(&mut self) {
         self.spills.clear();
+        self.spill_order.clear();
     }
 }
 

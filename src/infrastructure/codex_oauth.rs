@@ -31,35 +31,27 @@ const TOKEN_REFRESH_SKEW_MS: u64 = 60_000;
 
 fn is_safe_oauth_url(url: &str) -> bool {
     let lower = url.to_ascii_lowercase();
-    lower.starts_with("https://") || lower.starts_with("http://127.0.0.1") || lower.starts_with("http://localhost") || lower.starts_with("http://[::1]")
+    if lower.starts_with("https://") { return true; }
+    let Some(rest) = lower.strip_prefix("http://") else { return false; };
+    let host_port = rest.split(['/', '?', '#']).next().unwrap_or("");
+    matches!(host_port.split(':').next().unwrap_or(""), "127.0.0.1" | "localhost") || host_port == "[::1]" || host_port.starts_with("[::1]:")
 }
 
 pub(crate) fn resolve_token_url() -> String {
-    std::env::var("HEAV3NS_OPENAI_TOKEN_URL")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty() && is_safe_oauth_url(s))
-        .unwrap_or_else(|| OPENAI_OAUTH_TOKEN_URL.to_string())
+    std::env::var("HEAV3NS_OPENAI_TOKEN_URL").ok().map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty() && is_safe_oauth_url(s)).unwrap_or_else(|| OPENAI_OAUTH_TOKEN_URL.to_string())
 }
 
 pub(crate) fn resolve_codex_base_url() -> String {
-    std::env::var("HEAV3NS_CODEX_BASE_URL")
-        .ok()
-        .map(|s| s.trim().trim_end_matches('/').to_string())
-        .filter(|s| !s.is_empty() && is_safe_oauth_url(s))
-        .unwrap_or_else(|| CHATGPT_CODEX_BASE_URL.to_string())
+    std::env::var("HEAV3NS_CODEX_BASE_URL").ok().map(|s| s.trim().trim_end_matches('/').to_string())
+        .filter(|s| !s.is_empty() && is_safe_oauth_url(s)).unwrap_or_else(|| CHATGPT_CODEX_BASE_URL.to_string())
 }
 
-/// Persistent OpenAI / ChatGPT OAuth account store and loopback PKCE client.
 #[derive(Debug, Clone)]
-pub struct CodexAccountStore {
-    path: PathBuf,
-}
+pub struct CodexAccountStore { path: PathBuf }
 
 impl CodexAccountStore {
-    pub fn default_store() -> Self {
-        Self { path: resolve_accounts_path() }
-    }
+    pub fn default_store() -> Self { Self { path: resolve_accounts_path() } }
 
     pub fn at_path(path: impl Into<PathBuf>) -> Self {
         Self { path: path.into() }
@@ -77,7 +69,9 @@ impl CodexAccountStore {
             fs::create_dir_all(parent).map_err(|e| format!("Failed to create accounts dir: {e}"))?;
         }
         let serialized = serde_json::to_string_pretty(data).map_err(|e| format!("Failed to serialize accounts: {e}"))?;
-        let tmp = self.path.with_extension(format!("json.tmp.{}", std::process::id()));
+        static TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq = TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = self.path.with_extension(format!("json.tmp.{}.{}", std::process::id(), seq));
         let _ = fs::remove_file(&tmp);
         #[cfg(unix)]
         {

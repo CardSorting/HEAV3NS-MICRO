@@ -50,7 +50,7 @@ cargo run -- --smoke
 
 Expected output:
 ```text
-running 107 tests
+running 112 tests
 test core::substrate_tests::tests::test_arena_allocator_alignment_and_o1_rewind ... ok
 test core::substrate_tests::tests::test_wave_scheduler_partitioning ... ok
 test core::substrate_tests::tests::test_self_healing_parser_and_streaming_dedup ... ok

@@ -89,6 +89,7 @@ impl DeterministicSecretRedactor {
         // ModelContext-level secrets (blocked in model read/search/diff tools)
         if file_name == ".env"
             || (file_name.starts_with(".env.") && !ALLOWED_DOTENV_TEMPLATES.contains(&file_name))
+            || segments.iter().any(|s| s == ".env" || (s.starts_with(".env.") && !ALLOWED_DOTENV_TEMPLATES.contains(&s.as_str())))
         {
             return Some("Environment secret file (.env)");
         }
@@ -491,6 +492,11 @@ impl SafetyPolicy {
             "MONGODB_URI",
             "MONGO_URI",
             "GOOGLE_APPLICATION_CREDENTIALS",
+            "SSH_AUTH_SOCK",
+            "KUBECONFIG",
+            "GPG_AGENT_INFO",
+            "AWS_PROFILE",
+            "AWS_SHARED_CREDENTIALS_FILE",
         ];
         if EXACT.contains(&upper.as_str()) {
             return true;

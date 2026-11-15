@@ -38,7 +38,12 @@ impl SpatialInteractionEngine {
         scene.frame_seq = display.frame_seq;
         scene.scroll_offset = display.scroll_offset;
 
-        if let Some(win) = display.windows.iter().find(|w| w.id == display.active_window_id) {
+        let active_win = display
+            .windows
+            .iter()
+            .find(|w| w.id == display.active_window_id)
+            .or_else(|| display.windows.first());
+        if let Some(win) = active_win {
             for el in &win.elements {
                 let mut target = SpatialTarget::new(
                     el.id.clone(),
@@ -131,7 +136,7 @@ impl SpatialInteractionEngine {
     /// Native Dispatch -> Wrapper B Post (Observable Postcondition Verification).
     pub fn execute_spatially_grounded_action(&self, contract: &SpatialActionContract) -> Result<Value, String> {
         // Step 1: Refresh scene state from display only when frame_seq changed or mediator has no active scene
-        let before_scene = {
+        let mut before_scene = {
             let disp = self.display.lock().unwrap();
             let fresh = Self::extract_scene_from_display(&disp);
             let mut med = self.mediator.lock().unwrap();
@@ -182,12 +187,13 @@ impl SpatialInteractionEngine {
                 Self::extract_scene_from_display(&disp)
             };
             let mut med = self.mediator.lock().unwrap();
-            med.update_scene(scrolled_scene);
+            med.update_scene(scrolled_scene.clone());
             let mut reground_contract = contract.clone();
             reground_contract.expected_epoch = None;
             if let Some(regrounded) = med.ground_action(&reground_contract).grounded {
                 grounded = regrounded;
                 auto_scrolled = true;
+                before_scene = scrolled_scene;
             }
         }
 

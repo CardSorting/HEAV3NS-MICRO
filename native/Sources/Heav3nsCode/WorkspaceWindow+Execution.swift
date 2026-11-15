@@ -92,9 +92,10 @@ extension WorkspaceWindow {
         var starting = true
         var immediateFailure: Error?
         source.request("side.query", params: ["conversation": conversation, "question": question], id: id) { [weak self, weak source] result in
-            guard let self, let source, self.client === source else { return }
+            guard let self else { return }
+            if self.sideQuestionPending == id { self.sideQuestionPending = nil }
+            guard let source, self.client === source else { return }
             if starting, case .failure(let error) = result { immediateFailure = error; return }
-            self.sideQuestionPending = nil
             guard let index = self.sideQuestions.firstIndex(where: { $0.id == id }) else { self.updateStatus(); return }
             switch result {
             case .success(let data):
@@ -513,7 +514,10 @@ extension WorkspaceWindow {
                 self.expectedConversation = data["conversation"] as? String
                 self.client.requestSnapshot(afterPending: true) { [weak self] in
                     guard let self else { return }
-                    guard self.currentConversation == self.expectedConversation else { self.client.closeInput(); complete(.failure(BridgeError.message("Restore could not be confirmed. Reconnect before sending."))); return }
+                    guard self.currentConversation == self.expectedConversation else {
+                        self.switchingConversation = false; self.expectedConversation = nil; self.updateStatus()
+                        self.client.closeInput(); complete(.failure(BridgeError.message("Restore could not be confirmed. Reconnect before sending."))); return
+                    }
                     self.switchingConversation = false; self.expectedConversation = nil
                     self.showNotice(data["message"] as? String ?? "Restored in a new conversation."); self.loadConversations(); self.refreshNavigation(); self.updateStatus(); complete(.success(())); self.focusComposer()
                 }

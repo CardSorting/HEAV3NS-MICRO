@@ -181,18 +181,29 @@ impl SessionCompactor {
             hasher.update(Self::reference_for(m).as_bytes());
         }
         let checkpoint_id = format!("{:x}", hasher.finalize())[..16].to_string();
-        let per_msg_budget = ((max_tokens.saturating_sub(64)) / messages.len().max(1)).clamp(12, 180);
-        let records: Vec<serde_json::Value> = messages
-            .iter()
-            .map(|m| {
-                serde_json::json!({
-                    "role": m.role.as_str(),
-                    "at": m.timestamp,
-                    "ref": Self::reference_for(m),
-                    "content": truncate_text_to_token_budget(&m.content, per_msg_budget),
-                })
-            })
-            .collect();
+        let max_records = (max_tokens.saturating_sub(64) / 24).clamp(1, 64);
+        let covered_slice = if messages.len() > max_records {
+            &messages[messages.len() - max_records..]
+        } else {
+            messages
+        };
+        let per_msg_budget = ((max_tokens.saturating_sub(64)) / covered_slice.len().max(1)).clamp(8, 180);
+        let mut records = Vec::with_capacity(covered_slice.len());
+        let mut used_tokens = 48usize;
+        for m in covered_slice {
+            let snippet = truncate_text_to_token_budget(&m.content, per_msg_budget);
+            let rec_tokens = 12 + estimate_text_tokens(&snippet);
+            if !records.is_empty() && used_tokens + rec_tokens > max_tokens.saturating_sub(16) {
+                break;
+            }
+            used_tokens += rec_tokens;
+            records.push(serde_json::json!({
+                "role": m.role.as_str(),
+                "at": m.timestamp,
+                "ref": Self::reference_for(m),
+                "content": snippet,
+            }));
+        }
         let payload = serde_json::json!({
             "checkpoint": checkpoint_id,
             "covered_messages": messages.len(),
@@ -244,6 +255,7 @@ impl SessionCompactor {
             } else if kept_rev.is_empty() && msg.role != Role::Tool {
                 let mut clamped = msg.clone();
                 clamped.content = truncate_text_to_token_budget(&msg.content, remaining_budget.saturating_sub(4));
+                clamped.tool_calls = None;
                 kept_rev.push(clamped);
                 break;
             } else {
@@ -253,6 +265,14 @@ impl SessionCompactor {
         kept_rev.reverse();
         while kept_rev.first().is_some_and(|m| m.role == Role::Tool) {
             kept_rev.remove(0);
+        }
+        if kept_rev.is_empty() {
+            if let Some(fallback) = non_system.iter().rev().find(|m| m.role == Role::User) {
+                let mut clamped = fallback.clone();
+                clamped.content = truncate_text_to_token_budget(&fallback.content, remaining_budget.saturating_sub(4));
+                clamped.tool_calls = None;
+                kept_rev.push(clamped);
+            }
         }
         let mut out = system;
         out.extend(kept_rev);
@@ -385,6 +405,7 @@ impl SessionStore {
         }
         self.messages = parsed.clone();
         self.transcript = parsed;
+        self.turn_count = self.messages.iter().filter(|m| m.role == Role::User).count() as u64;
         self.rebuild_transcript_index();
         self.context_generation += 1;
         self.rebuild_arena();
