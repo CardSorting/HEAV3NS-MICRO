@@ -312,7 +312,8 @@ impl AgentEngine {
                 if !receipt.file_changes.is_empty() {
                     let actions = self.cas.lock().unwrap_or_else(|e| e.into_inner()).undo_turn_changes(before, after, force)?;
                     self.turn_receipts.lock().unwrap_or_else(|e| e.into_inner()).pop();
-                    self.tools().journal.lock().unwrap_or_else(|e| e.into_inner()).discard_turn(&receipt.turn_id);
+                    let journal_turn_id = receipt.turn_id.replace('-', "_");
+                    self.tools().journal.lock().unwrap_or_else(|e| e.into_inner()).discard_turn(&journal_turn_id);
                     self.tools().cache.lock().unwrap_or_else(|e| e.into_inner()).clear();
                     self.tools().read_tracker.lock().unwrap_or_else(|e| e.into_inner()).reset_stamps();
                     return Ok(json!({

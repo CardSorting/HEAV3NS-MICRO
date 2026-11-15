@@ -365,6 +365,16 @@ fn extract_all_paths(canonical: &str, args: &Value) -> Vec<String> {
             }
         }
     }
+    if canonical == "run_command" {
+        if let Some(cmd) = args.get("command").and_then(Value::as_str) {
+            for tok in cmd.split(|c: char| c.is_whitespace() || matches!(c, '=' | '<' | '>' | ';' | '|' | '(' | ')')) {
+                let cleaned = tok.trim_matches(|c| c == '"' || c == '\'');
+                if !cleaned.is_empty() {
+                    paths.push(cleaned.to_string());
+                }
+            }
+        }
+    }
     if canonical == "apply_unified_diff" {
         if let Some(diff) = args.get("diff").or_else(|| args.get("patch")).and_then(Value::as_str) {
             for line in diff.lines() {

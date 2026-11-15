@@ -86,6 +86,7 @@ final class AccountClient {
             try child.run()
             process = child
         } catch {
+            try? writer.fileHandleForReading.close(); try? reader.fileHandleForWriting.close()
             stop(message: error.localizedDescription)
             throw error
         }
@@ -128,5 +129,5 @@ final class AccountClient {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { if child?.isRunning == true { child?.terminate() } }
         for callback in pending.values { callback(.failure(BridgeError.message(message))) }
     }
-    deinit { reader?.stop(); deadlineTimer?.cancel(); output?.fileHandleForReading.readabilityHandler = nil; try? input?.fileHandleForWriting.close(); if process?.isRunning == true { process?.terminate() } }
+    deinit { reader?.stop(); deadlineTimer?.cancel(); output?.fileHandleForReading.readabilityHandler = nil; try? output?.fileHandleForReading.close(); try? input?.fileHandleForWriting.close(); if process?.isRunning == true { process?.terminate() } }
 }

@@ -56,12 +56,10 @@ impl CodexAccountStore {
         Self { path: path.into() }
     }
 
-    pub fn load_accounts_store(&self) -> ChatGptAccountStoreData {
-        let Ok(raw) = fs::read_to_string(&self.path) else {
-            return ChatGptAccountStoreData::default();
-        };
-        serde_json::from_str(&raw).unwrap_or_default()
+    pub fn try_load_accounts_store(&self) -> Result<ChatGptAccountStoreData, String> {
+        match fs::read_to_string(&self.path) { Ok(raw) => serde_json::from_str(&raw).map_err(|e| format!("Corrupt accounts store: {e}")), Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(ChatGptAccountStoreData::default()), Err(e) => Err(format!("Failed reading accounts store: {e}")) }
     }
+    pub fn load_accounts_store(&self) -> ChatGptAccountStoreData { self.try_load_accounts_store().unwrap_or_default() }
 
     pub fn save_accounts_store(&self, data: &ChatGptAccountStoreData) -> Result<(), String> {
         if let Some(parent) = self.path.parent() {
@@ -90,7 +88,7 @@ impl CodexAccountStore {
 
     pub fn switch_account(&self, target_id: &str) -> Result<Value, String> {
         let _io = lock_unpoison(store_io_lock());
-        let mut data = self.load_accounts_store();
+        let mut data = self.try_load_accounts_store()?;
         if !data.accounts.iter().any(|a| a.id == target_id) { return Err(format!("Account '{target_id}' was not found.")); }
         data.active_id = Some(target_id.to_string());
         self.save_accounts_store(&data)?;
@@ -101,7 +99,7 @@ impl CodexAccountStore {
         let trimmed = new_label.trim();
         if trimmed.is_empty() { return Err("Account name cannot be empty.".to_string()); }
         let _io = lock_unpoison(store_io_lock());
-        let mut data = self.load_accounts_store();
+        let mut data = self.try_load_accounts_store()?;
         let Some(acc) = data.accounts.iter_mut().find(|a| a.id == target_id) else { return Err(format!("Account '{target_id}' was not found.")); };
         acc.label = trimmed.chars().take(100).collect(); acc.updated_at_ms = now_ms();
         self.save_accounts_store(&data)?;
@@ -110,7 +108,7 @@ impl CodexAccountStore {
 
     pub fn remove_account(&self, target_id: &str) -> Result<Value, String> {
         let _io = lock_unpoison(store_io_lock());
-        let mut data = self.load_accounts_store();
+        let mut data = self.try_load_accounts_store()?;
         let before = data.accounts.len();
         data.accounts.retain(|a| a.id != target_id);
         if data.accounts.len() == before { return Err(format!("Account '{target_id}' was not found.")); }
@@ -121,7 +119,7 @@ impl CodexAccountStore {
 
     pub fn sign_out(&self, all: bool) -> Result<Value, String> {
         let _io = lock_unpoison(store_io_lock());
-        let mut data = self.load_accounts_store();
+        let mut data = self.try_load_accounts_store()?;
         if all { data.accounts.clear(); data.active_id = None; }
         else if let Some(active) = data.active_id.clone() { data.accounts.retain(|a| a.id != active); data.active_id = data.accounts.first().map(|a| a.id.clone()); }
         self.save_accounts_store(&data)?;
@@ -130,7 +128,7 @@ impl CodexAccountStore {
 
     pub fn clear_limit(&self, target_id: &str) -> Result<Value, String> {
         let _io = lock_unpoison(store_io_lock());
-        let mut data = self.load_accounts_store();
+        let mut data = self.try_load_accounts_store()?;
         let Some(acc) = data.accounts.iter_mut().find(|a| a.id == target_id) else { return Err(format!("Account '{target_id}' was not found.")); };
         acc.limited_until_ms = None; acc.limit_estimated = false; acc.updated_at_ms = now_ms();
         self.save_accounts_store(&data)?;
@@ -139,7 +137,7 @@ impl CodexAccountStore {
 
     pub fn set_auto_switch(&self, enabled: bool) -> Result<Value, String> {
         let _io = lock_unpoison(store_io_lock());
-        let mut data = self.load_accounts_store();
+        let mut data = self.try_load_accounts_store()?;
         data.auto_switch = enabled;
         self.save_accounts_store(&data)?;
         Ok(snapshot_value(&data))
@@ -243,7 +241,7 @@ impl CodexAccountStore {
         let refreshed = refresh_oauth_token(&refresh_tok, &current).await?;
         let result = (refreshed.access_token.clone(), refreshed.account_id.clone());
         let _io = lock_unpoison(store_io_lock());
-        let mut data = self.load_accounts_store();
+        let mut data = self.try_load_accounts_store()?;
         if let Some(slot) = data.accounts.iter_mut().find(|a| a.id == id) {
             slot.access_token = refreshed.access_token;
             slot.refresh_token = refreshed.refresh_token;
@@ -258,7 +256,7 @@ impl CodexAccountStore {
     /// Records a 429 usage limit on the active account and auto-switches if another ready account exists.
     pub fn record_rate_limit(&self, retry_after_ms: Option<u64>) {
         let _io = lock_unpoison(store_io_lock());
-        let mut data = self.load_accounts_store();
+        let Ok(mut data) = self.try_load_accounts_store() else { return; };
         let now = now_ms();
         let until = now.saturating_add(retry_after_ms.unwrap_or(15 * 60_000).max(5_000));
         if let Some(active_id) = data.active_id.clone() {
@@ -274,7 +272,7 @@ impl CodexAccountStore {
                     data.active_id = Some(next.id.clone());
                 }
             }
-            let _ = self.save_accounts_store(&data);
+            if let Err(e) = self.save_accounts_store(&data) { eprintln!("[heav3ns] Failed to persist rate limit: {e}"); }
         }
     }
 }

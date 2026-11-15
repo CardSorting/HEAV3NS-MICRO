@@ -166,5 +166,7 @@ final class ProjectTaskBoardView: NSView, NSComboBoxDelegate {
         let size = NSSize(width: width, height: max(scroll.contentSize.height, documentHeight))
         if document.frame.size != size { document.setFrameSize(size) }
     }
-    func dispose() {}
+    func dispose() {
+        NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(applyFilters), object: nil)
+    }
 }

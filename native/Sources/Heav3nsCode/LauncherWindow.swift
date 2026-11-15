@@ -349,6 +349,7 @@ final class LauncherWindow: NSWindowController, NSTableViewDataSource, NSTableVi
     }
     func numberOfRows(in tableView: NSTableView) -> Int { entries.count }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard entries.indices.contains(row) else { return nil }
         let project = entries[row], cell = NSTableCellView()
         let name = JourneyStyle.label(project.name + (project.pinned ? " · Pinned" : ""), size: 15, weight: .semibold)
         name.maximumNumberOfLines = 1; name.lineBreakMode = .byTruncatingMiddle

@@ -38,7 +38,7 @@ final class ConversationSidebar: NSVisualEffectView, NSTableViewDataSource, NSTa
         material = .sidebar; blendingMode = .withinWindow; state = .followsWindowActiveState
         title.stringValue = folder.lastPathComponent; title.maximumNumberOfLines = 1; title.lineBreakMode = .byTruncatingMiddle
         title.toolTip = folder.path
-        let icon = NSImageView(image: NSImage(systemSymbolName: "folder", accessibilityDescription: nil)!)
+        let icon = NSImageView(image: NSImage(systemSymbolName: "folder", accessibilityDescription: nil) ?? NSImage())
         icon.contentTintColor = .controlAccentColor; icon.widthAnchor.constraint(equalToConstant: 20).isActive = true
         let heading = JourneyStyle.stack([icon, title], vertical: false, spacing: 10)
         search.placeholderString = "Find on this page"; search.delegate = self
@@ -105,7 +105,7 @@ final class ConversationSidebar: NSVisualEffectView, NSTableViewDataSource, NSTa
         name.maximumNumberOfLines = 1; name.lineBreakMode = .byTruncatingTail
         let detail = JourneyStyle.label(item.detail, size: 11, secondary: true); detail.maximumNumberOfLines = 1
         let labels = JourneyStyle.stack([name, detail], spacing: 4)
-        let icon = NSImageView(image: NSImage(systemSymbolName: "bubble.left", accessibilityDescription: nil)!)
+        let icon = NSImageView(image: NSImage(systemSymbolName: "bubble.left", accessibilityDescription: nil) ?? NSImage())
         icon.widthAnchor.constraint(equalToConstant: 18).isActive = true
         let delete = JourneyButton("", symbol: "trash") { [weak self] in
             guard let self, self.table.isEnabled else { return }

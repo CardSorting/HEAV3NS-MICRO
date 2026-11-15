@@ -35,9 +35,13 @@ fn normalize_lexical_path(path: &Path) -> PathBuf {
     out
 }
 
-fn canonicalize_best_effort(path: &Path) -> PathBuf {
+pub fn canonicalize_best_effort(path: &Path) -> PathBuf {
+    canonicalize_best_effort_checked(path).unwrap_or_else(|_| normalize_lexical_path(path))
+}
+
+fn canonicalize_best_effort_checked(path: &Path) -> Result<PathBuf, String> {
     if let Ok(c) = path.canonicalize() {
-        return c;
+        return Ok(c);
     }
     let mut current = normalize_lexical_path(path);
     for _ in 0..16 {
@@ -59,7 +63,7 @@ fn canonicalize_best_effort(path: &Path) -> PathBuf {
             for seg in suffix.into_iter().rev() {
                 base.push(seg);
             }
-            return normalize_lexical_path(&base);
+            return Ok(normalize_lexical_path(&base));
         }
         if let Ok(meta) = fs::symlink_metadata(cursor) {
             if meta.file_type().is_symlink() {
@@ -82,17 +86,17 @@ fn canonicalize_best_effort(path: &Path) -> PathBuf {
         for seg in suffix.into_iter().rev() {
             base.push(seg);
         }
-        return normalize_lexical_path(&base);
+        return Ok(normalize_lexical_path(&base));
     }
-    current
+    Err(format!("Symlink resolution exceeded 16-hop limit for '{}'", path.display()))
 }
 
 /// Resolves `raw` relative to `cwd`, enforces workspace containment (blocking `..` and symlink
 /// escapes outside `cwd`), and verifies `CredentialDenyScope::ModelContext`.
 pub fn resolve_and_verify_workspace_path(cwd: &Path, raw: &str) -> Result<PathBuf, String> {
     let candidate = resolve_workspace_path(cwd, raw);
-    let canon_cwd = canonicalize_best_effort(cwd);
-    let canon_target = canonicalize_best_effort(&candidate);
+    let canon_cwd = canonicalize_best_effort_checked(cwd)?;
+    let canon_target = canonicalize_best_effort_checked(&candidate)?;
     if !canon_target.starts_with(&canon_cwd) {
         return Err(format!(
             "Access denied: path '{}' escapes workspace root '{}'",
@@ -108,6 +112,9 @@ pub fn resolve_and_verify_workspace_path(cwd: &Path, raw: &str) -> Result<PathBu
 pub fn read_text_file_bounded(path: &Path, max_bytes: usize) -> Result<String, String> {
     use std::io::Read;
     let meta = fs::metadata(path).map_err(|e| format!("Failed to stat '{}': {e}", path.display()))?;
+    if !meta.is_file() {
+        return Err(format!("'{}' is not a regular file", path.display()));
+    }
     if meta.len() > max_bytes as u64 {
         return Err(format!(
             "File '{}' is too large ({} bytes > {} byte limit)",

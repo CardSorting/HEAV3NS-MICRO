@@ -76,7 +76,7 @@ final class NativeDocumentView: NSView {
         restoring = true
         defer { restoring = false; updateControls() }
         layoutSubtreeIfNeeded()
-        if kind == .pdf, let document = pdf.document, let page = document.page(at: min(state.pdfPage, document.pageCount - 1)) {
+        if kind == .pdf, let document = pdf.document, let page = document.page(at: max(0, min(state.pdfPage, document.pageCount - 1))) {
             pdf.autoScales = false; pdf.scaleFactor = state.zoom; pdf.go(to: page)
         } else if kind == .image {
             imageScroll.magnification = state.zoom

@@ -505,7 +505,8 @@ fn repair_dangling_anthropic_tool_uses(messages: &mut Vec<Value>) {
                         }
                     }
                     if !missing_blocks.is_empty() {
-                        arr.append(&mut missing_blocks);
+                        let insert_pos = arr.iter().position(|b| b.get("type").and_then(Value::as_str) != Some("tool_result")).unwrap_or(arr.len());
+                        arr.splice(insert_pos..insert_pos, missing_blocks);
                     }
                 }
             } else {

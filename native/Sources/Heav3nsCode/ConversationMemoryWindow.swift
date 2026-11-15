@@ -170,6 +170,7 @@ final class ConversationMemoryWindow: NSWindowController, NSWindowDelegate, NSTa
         let entry = shownEntries[table.selectedRow]; if entry.id != state.selected?.id { state.select(entry.id) }
     }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard shownEntries.indices.contains(row) else { return nil }
         let entry = shownEntries[row], cell = NSTableCellView()
         let title = JourneyStyle.label(entry.key, size: 13, weight: .medium)
         let detail = JourneyStyle.label(entry.preview, size: 11, secondary: true)
@@ -216,7 +217,7 @@ final class ConversationMemoryWindow: NSWindowController, NSWindowDelegate, NSTa
     @objc private func copyDraft() { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(state.key + "\n\n" + state.value, forType: .string) }
     @objc private func discardDraft() { state.discard() }
     @objc private func removeMemory() {
-        guard state.canRemove, let selected = state.selected, let window else { return }
+        guard state.canRemove, let selected = state.selected, let window, window.attachedSheet == nil else { return }
         let alert = NSAlert(); alert.messageText = "Remove “\(selected.key)” from memory?"
         alert.informativeText = "LUMI will stop including this entry in future instructions in this conversation. Earlier messages and checkpoints remain unchanged."
         alert.addButton(withTitle: "Cancel"); alert.addButton(withTitle: "Remove Memory")
@@ -225,7 +226,7 @@ final class ConversationMemoryWindow: NSWindowController, NSWindowDelegate, NSTa
         }
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        guard !state.saving else { return false }
+        guard !state.saving, sender.attachedSheet == nil else { return false }
         if state.dirty || state.uncertain {
             let alert = NSAlert(); alert.messageText = "Discard this memory draft?"; alert.informativeText = "Copy the draft first if you want to keep it."
             alert.addButton(withTitle: "Keep Editing"); alert.addButton(withTitle: "Discard Draft")

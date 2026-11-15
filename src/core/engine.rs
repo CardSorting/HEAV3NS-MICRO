@@ -683,9 +683,11 @@ impl AgentEngine {
                 }),
             );
 
-            let records = self
-                .execute_turn_tool_batch(&scheduled_calls, authority, input.cancel_token.as_ref())
-                .await;
+            let unlocked_before_batch: Vec<&str> = self.tools.unlocked_tools.lock().unwrap_or_else(|e| e.into_inner()).iter().copied().collect();
+            let records = self.execute_turn_tool_batch(&scheduled_calls, authority, input.cancel_token.as_ref()).await;
+            if self.tools.unlocked_tools.lock().unwrap_or_else(|e| e.into_inner()).iter().copied().collect::<Vec<_>>() != unlocked_before_batch {
+                self.prefix_tracker.lock().unwrap_or_else(|e| e.into_inner()).declare_repin("tool_schema_unlock");
+            }
 
             {
                 let mut sess = self.session.lock().unwrap_or_else(|e| e.into_inner());
@@ -705,9 +707,6 @@ impl AgentEngine {
                         }
                         (governed.output_text, governed.spill_id)
                     };
-                    if canonical_tool_name(&rec.name) == "tool_search" {
-                        self.prefix_tracker.lock().unwrap_or_else(|e| e.into_inner()).declare_repin("tool_search_unlock");
-                    }
 
                     let wire_payload = if rec.success {
                         json!({ "success": true, "output": out_text, "spillId": spill_id })

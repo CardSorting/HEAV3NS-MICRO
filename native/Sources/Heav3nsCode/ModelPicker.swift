@@ -584,9 +584,9 @@ final class ModelPicker: NSWindowController, NSWindowDelegate, NSTextFieldDelega
     /// A reconnect replaces the runtime and its revision space, never the user's draft.
     /// Invalidate in-flight callbacks before allowing the new client to reconcile.
     func connectionChanged() {
-        if connected() { load(); return }
         loadID = UUID(); pending = false; keyPending = false; apiKey.stringValue = ""; reconciled = false; resetRevision = true
         discoveryRequests.removeAll(); discoveries.removeAll()
+        if connected() { load(); return }
         refreshAvailability()
     }
     func dismiss(restoreFocus: Bool = true) {
@@ -634,10 +634,14 @@ final class ModelPicker: NSWindowController, NSWindowDelegate, NSTextFieldDelega
         }
     }
     func dispose() {
+        dismissed = true; loadID = UUID(); pending = false; keyPending = false; discoveryRequests.removeAll()
         if let obs = accountsObserver {
             NotificationCenter.default.removeObserver(obs)
             accountsObserver = nil
         }
-        window?.orderOut(nil)
+        if let window {
+            window.parent?.removeChildWindow(window)
+            window.orderOut(nil)
+        }
     }
 }

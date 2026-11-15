@@ -762,4 +762,35 @@ mod tests {
         let receipt = med.verify_post_execution("type", grounded.grounded.as_ref(), &scene, &scene, 5);
         assert_eq!(receipt.verdict, AssuranceVerdict::SuspectedNoop);
     }
+
+    #[test]
+    fn test_zenith_wave22_undo_prefix_governor_and_wire_repair() {
+        use crate::core::tool_governor::ToolOutputGovernor;
+        use crate::domain::types::messages::SessionMessage;
+        use crate::domain::{Role, ToolCall, ToolCallFunction};
+        use crate::infrastructure::wire_dialects::build_anthropic_messages_payload;
+
+        let mut gov = ToolOutputGovernor::default();
+        gov.max_chars = 180;
+        let big_multiline = format!("{}\nline2\nline3\nline4", "A".repeat(300));
+        let governed = gov.govern(&Value::String(big_multiline));
+        assert!(governed.was_truncated);
+        let sid = governed.spill_id.expect("spill_id");
+        assert!(governed.output_text.contains(&sid));
+
+        let mut asst = SessionMessage::new(Role::Assistant, "");
+        asst.tool_calls = Some(vec![ToolCall { id: "tu_1".into(), r#type: "function".into(), thought_signature: None, function: ToolCallFunction { name: "view_file".into(), arguments: "{}".into() } }]);
+        use crate::domain::types::tick_result::ProviderRequest;
+        let payload = build_anthropic_messages_payload("anthropic", "https://api.anthropic.com/v1", &ProviderRequest { model: "claude-3-7-sonnet".into(), messages: vec![SessionMessage::new(Role::User, "start"), asst, SessionMessage::new(Role::User, "continue")], temperature: 0.0, max_tokens: 100, tools: vec![], reasoning_effort: None });
+        let user_blocks = payload["messages"][2]["content"].as_array().unwrap();
+        assert_eq!(user_blocks[0]["type"], "tool_result");
+        assert_eq!(user_blocks[0]["tool_use_id"], "tu_1");
+        assert_eq!(user_blocks[1]["type"], "text");
+
+        assert!(crate::plumbing::vision_and_dom::validate_navigation_url("file:///Users/me/.npmrc").is_err());
+        assert_eq!(crate::plumbing::spatial_geometry::normalize_coordinate_value(Some(&serde_json::json!(1)), 1000.0, 0.0, true), 1.0);
+        assert!(crate::plumbing::secret_redactor::SafetyPolicy::check_command("rm -r -f /").is_err());
+        assert_eq!(crate::plumbing::text_tokens::canonical_tool_name("browser_action"), "browser_use");
+        assert!(matches!(crate::plumbing::seatbelt_profile::inspect_command_security("git --exec-path=/tmp status"), crate::plumbing::seatbelt_profile::CommandSecurityVerdict::WorkspaceMutating { .. }));
+    }
 }

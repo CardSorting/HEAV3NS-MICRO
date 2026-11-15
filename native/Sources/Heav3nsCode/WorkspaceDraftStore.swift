@@ -62,7 +62,8 @@ final class WorkspaceDraftStore {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let tmp = root.appendingPathComponent(".draft-\(UUID().uuidString).tmp")
         guard FileManager.default.createFile(atPath: tmp.path, contents: data, attributes: [.posixPermissions: 0o600]) else { throw DraftError.invalid }
-        _ = try FileManager.default.replaceItemAt(file, withItemAt: tmp)
+        do { _ = try FileManager.default.replaceItemAt(file, withItemAt: tmp) }
+        catch { try? FileManager.default.removeItem(at: tmp); throw error }
     }
 
     enum DraftError: LocalizedError {

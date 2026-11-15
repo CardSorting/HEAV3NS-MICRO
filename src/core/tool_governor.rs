@@ -256,15 +256,18 @@ impl ToolOutputGovernor {
 
         let head_count = (self.max_lines / 2).max(20).min(lines.len());
         let tail_count = (self.max_lines / 4).max(10).min(lines.len().saturating_sub(head_count));
+        let notice = format!("... [output truncated; call retrieve_spill_content with spillId '{spill_id}' to inspect more] ...");
         let mut preview = Vec::with_capacity(head_count + tail_count + 1);
         preview.extend_from_slice(&lines[..head_count]);
-        preview.push("... [output truncated; call retrieve_spill_content with spillId to inspect more] ...");
+        preview.push(notice.as_str());
         if tail_count > 0 {
             preview.extend_from_slice(&lines[lines.len() - tail_count..]);
         }
         let mut joined = preview.join("\n");
         if joined.len() > self.max_chars {
-            joined = safe_utf8_prefix(&joined, self.max_chars).to_string();
+            let keep = self.max_chars.saturating_sub(notice.len() + 1);
+            let prefix = safe_utf8_prefix(&joined, keep);
+            joined = if prefix.is_empty() { safe_utf8_prefix(&notice, self.max_chars).to_string() } else { format!("{prefix}\n{notice}") };
         }
         GovernedOutput {
             output_text: joined,

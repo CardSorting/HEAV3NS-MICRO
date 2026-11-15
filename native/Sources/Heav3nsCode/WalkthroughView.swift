@@ -590,11 +590,13 @@ final class WalkthroughView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     private func updateLatest() { latest.isHidden = visibleActivities.isEmpty || scroll.documentVisibleRect.maxY >= table.bounds.height - 35 }
     func numberOfRows(in tableView: NSTableView) -> Int { visibleActivities.count }
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        guard visibleActivities.indices.contains(row) else { return 58 }
         let activity = visibleActivities[row]
         let extraLink = activity.preview != nil || activity.isIssue ? 1 : 0
         return expanded.contains(activity.id) ? 74 + ActivityCell.detailHeight(activity.presentedDetail(live: runIsLive, connected: connected, paused: selectedState == "awaiting_approval"), width: tableView.bounds.width) + CGFloat(activity.files.count + extraLink) * 27 + (activity.preview == nil ? 0 : 147) : 58
     }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard visibleActivities.indices.contains(row) else { return nil }
         let activity = visibleActivities[row]
         let cell = tableView.makeView(withIdentifier: .init("activity"), owner: self) as? ActivityCell ?? ActivityCell()
         cell.identifier = .init("activity")

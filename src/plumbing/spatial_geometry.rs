@@ -424,9 +424,9 @@ pub fn normalize_coordinate_value(val: Option<&Value>, dimension: f64, default_v
 
     match parsed {
         Some(f) if f.is_finite() => {
-            if f > 0.0 && f <= 1.0 {
+            if !is_norm_1000 && f > 0.0 && f <= 1.0 {
                 f * dimension
-            } else if is_norm_1000 && f > 1.0 && f <= 1000.0 {
+            } else if is_norm_1000 && f > 0.0 && f <= 1000.0 {
                 (f * dimension) / 1000.0
             } else {
                 f

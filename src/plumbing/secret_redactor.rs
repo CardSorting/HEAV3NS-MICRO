@@ -234,6 +234,23 @@ impl SafetyPolicy {
                 return Err(format!("Safety policy blocked destructive command pattern: '{pat}'"));
             }
         }
+        let tokens: Vec<String> = cmd.split_whitespace().map(|t| t.trim_matches(|c| c == '"' || c == '\'').to_string()).collect();
+        if tokens.first().map(|s| s.as_str()) == Some("rm") {
+            let rec = tokens.iter().any(|t| t == "--recursive" || (t.starts_with('-') && !t.starts_with("--") && (t.contains('r') || t.contains('R'))));
+            let force = tokens.iter().any(|t| t == "--force" || (t.starts_with('-') && !t.starts_with("--") && t.contains('f')));
+            let root = tokens.iter().skip(1).any(|t| matches!(t.as_str(), "/" | "/*" | "~"));
+            if rec && force && root {
+                return Err("Safety policy blocked destructive recursive rm targeting root/home".to_string());
+            }
+        }
+        if tokens.first().map(|s| s.as_str()) == Some("chmod") {
+            let rec = tokens.iter().any(|t| t == "-R" || t == "--recursive");
+            let open_777 = tokens.iter().any(|t| t == "777" || t == "0777");
+            let root = tokens.iter().skip(1).any(|t| matches!(t.as_str(), "/" | "/*"));
+            if rec && open_777 && root {
+                return Err("Safety policy blocked recursive chmod 777 on root".to_string());
+            }
+        }
         Ok(())
     }
 

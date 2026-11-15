@@ -268,17 +268,17 @@ pub fn validate_navigation_url(url: &str) -> Result<String, String> {
         }
     }
     for secret_prefix in ["sk-ant-", "sk-proj-", "ghp_", "gho_", "akia", "aiza", "xoxb-", "xoxp-"] {
-        if lower.contains(secret_prefix) {
-            return Err("Blocked URL containing embedded API key or secret token (exfiltration guard)".to_string());
-        }
+        if lower.contains(secret_prefix) { return Err("Blocked URL containing embedded API key or secret token (exfiltration guard)".to_string()); }
     }
     if lower.starts_with("file://") {
         let decoded = percent_decode_ascii(&lower).replace('\\', "/");
         if decoded.contains("/../") || decoded.ends_with("/..") {
             return Err("Blocked path traversal in file:// URL".to_string());
         }
-        let sensitive = ["/etc/", "/root/", "/var/run/", "/proc/", "/sys/", "/private/etc/", ".ssh", ".aws", ".env", "id_rsa"];
-        if sensitive.iter().any(|s| decoded.contains(s)) {
+        let path_part = decoded.strip_prefix("file://localhost").or_else(|| decoded.strip_prefix("file://")).unwrap_or(&decoded);
+        let sensitive = ["/etc/", "/root/", "/var/run/", "/proc/", "/sys/", "/private/etc/"];
+        let cred_hit = crate::plumbing::secret_redactor::DeterministicSecretRedactor::classify_sensitive_path(path_part, crate::plumbing::secret_redactor::CredentialDenyScope::ModelContext).is_some();
+        if path_part == "/etc" || path_part == "/private/etc" || sensitive.iter().any(|s| decoded.contains(s)) || cred_hit {
             return Err("Blocked sensitive local file:// path".to_string());
         }
         return Ok(trimmed.to_string());
@@ -673,9 +673,9 @@ pub fn parse_coordinate_value(val: Option<&Value>, dim: u32, default: i32, is_no
 
     match parsed {
         Some(f) if f.is_finite() => {
-            if f > 0.0 && f <= 1.0 {
+            if !is_norm_1000 && f > 0.0 && f <= 1.0 {
                 (f * (dim as f64)).round() as i32
-            } else if is_norm_1000 && f > 1.0 && f <= 1000.0 {
+            } else if is_norm_1000 && f > 0.0 && f <= 1000.0 {
                 ((f * (dim as f64)) / 1000.0).round() as i32
             } else {
                 f.round() as i32

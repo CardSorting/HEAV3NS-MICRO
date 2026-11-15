@@ -325,6 +325,7 @@ pub fn canonical_tool_name(name: &str) -> &str {
         | "browser_eval"
         | "cdp_navigate"
         | "cdp_snapshot"
+        | "browser_action"
         | "browser_use" => "browser_use",
         "vision_describe" | "vision_generate" | "inspect_image" | "decode_image" | "vision_inspect" => "vision_inspect",
         "skill_forge_custom"

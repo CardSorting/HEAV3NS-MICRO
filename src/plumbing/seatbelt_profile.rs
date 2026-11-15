@@ -492,7 +492,7 @@ fn is_stage_pure_readonly(bin: &str, args: &[String], raw_stage: &str) -> bool {
         let mut i = 0usize;
         while i < args.len() {
             let a = args[i].as_str();
-            if a == "-c" || a.starts_with("-c") || a == "--config-env" || a.starts_with("--config-env=") {
+            if a == "-c" || a.starts_with("-c") || a == "--config-env" || a.starts_with("--config-env=") || a == "--exec-path" || a.starts_with("--exec-path=") {
                 return false;
             }
             if matches!(a, "-C" | "--git-dir" | "--work-tree" | "--namespace") {

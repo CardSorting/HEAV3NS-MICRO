@@ -148,8 +148,16 @@ final class NavigationSidebar: NSView, NSTableViewDataSource, NSTableViewDelegat
         else if table === items, previewsSelection, items.isEnabled, entries.indices.contains(table.selectedRow), entries[table.selectedRow].value["directory"] as? Bool != true { onOpen?(entries[table.selectedRow]) }
     }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        let entry: SidebarEntry
+        if tableView === destinations {
+            guard WorkspaceDestination.allCases.indices.contains(row) else { return nil }
+            let dest = WorkspaceDestination.allCases[row]
+            entry = SidebarEntry(id: "", title: dest.title, detail: "", symbol: dest.symbol, value: [:])
+        } else {
+            guard entries.indices.contains(row) else { return nil }
+            entry = entries[row]
+        }
         let cell = NSTableCellView()
-        let entry = tableView === destinations ? SidebarEntry(id: "", title: WorkspaceDestination.allCases[row].title, detail: "", symbol: WorkspaceDestination.allCases[row].symbol, value: [:]) : entries[row]
         let icon = NSImageView(image: NSImage(systemSymbolName: entry.symbol, accessibilityDescription: nil) ?? NSImage())
         icon.contentTintColor = .controlAccentColor
         let title = NSTextField(labelWithString: entry.title); title.font = .systemFont(ofSize: 12); title.lineBreakMode = .byTruncatingMiddle

@@ -301,7 +301,7 @@ pub async fn handle_automation_rpc(method: &str, req_id: &str, params: &Value, e
             } else {
                 let call = crate::domain::types::tool_schedule::ScheduledToolCall {
                     id: format!("req-{req_id}"),
-                    name: "browser_action".into(),
+                    name: "browser_use".into(),
                     args: req,
                 };
                 let res = engine.tools().execute_single(&call, engine.workspace_root(), ExecutionAuthorityLevel::Autonomous, None).await;
