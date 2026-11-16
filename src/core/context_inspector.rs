@@ -5,11 +5,17 @@ use crate::core::session_store::SessionCompactor;
 use crate::core::tool_specs::builtin_tool_specs;
 use crate::domain::compaction::ContextBudgetInfo;
 use crate::domain::prefix_and_manifest::{PrefixFingerprint, RequestManifest};
-use crate::domain::pricing_and_taxonomy::{select_auto_routed_model, BillingMetering, ProviderTokenUsage};
+use crate::domain::pricing_and_taxonomy::{
+    select_auto_routed_model, BillingMetering, ProviderTokenUsage,
+};
 use crate::domain::prompt_spec::{ModelPromptFamily, PromptProfile, SystemPromptSpec};
 use crate::domain::types::messages::{estimate_messages_tokens, Role, SessionMessage};
-use crate::domain::types::provider_registry::{infer_wire_dialect_from_endpoint, lookup_provider_descriptor, resolve_model_aware_wire_and_model, retired_provider_remediation, suggest_provider_slug, ProviderBillingClass, ReasoningEffortLevel, WireDialect, PROVIDER_DESCRIPTORS};
 use crate::domain::types::posture_types::ExecutionPosture;
+use crate::domain::types::provider_registry::{
+    infer_wire_dialect_from_endpoint, lookup_provider_descriptor,
+    resolve_model_aware_wire_and_model, retired_provider_remediation, suggest_provider_slug,
+    ProviderBillingClass, ReasoningEffortLevel, WireDialect, PROVIDER_DESCRIPTORS,
+};
 use crate::domain::types::runtime::ExecutionAuthorityLevel;
 use crate::infrastructure::vfs_store::WorkspacePromptProbe;
 use crate::plumbing::schema_and_sse::redact_endpoint_for_display;
@@ -64,8 +70,18 @@ impl AgentEngine {
     pub fn inspect_context_snapshot(&self, sample_prompt: &str) -> ContextInspectionSnapshot {
         let cfg = self.config_snapshot();
         let posture = self.current_posture();
-        let soul = Some(self.tools().skill_catalog.lock().unwrap_or_else(|e| e.into_inner()).active_soul.clone());
-        let authority = if matches!(posture, ExecutionPosture::AutoReview | ExecutionPosture::FullAccess) {
+        let soul = Some(
+            self.tools()
+                .skill_catalog
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .active_soul
+                .clone(),
+        );
+        let authority = if matches!(
+            posture,
+            ExecutionPosture::AutoReview | ExecutionPosture::FullAccess
+        ) {
             ExecutionAuthorityLevel::Autonomous
         } else if matches!(posture, ExecutionPosture::Plan) {
             ExecutionAuthorityLevel::Strict
@@ -80,25 +96,42 @@ impl AgentEngine {
         let dynamic_suffix = spec.dynamic_suffix(&cfg, self.workspace_root(), &facts, &skills);
         let full_system = self
             .pinned_system_prompt
-            .lock().unwrap_or_else(|e| e.into_inner())
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
             .clone()
             .unwrap_or_else(|| spec.render(&cfg, self.workspace_root(), &facts, &skills));
         let static_prefix_tokens = estimate_text_tokens(&static_prefix);
         let dynamic_workspace_tokens = estimate_text_tokens(&dynamic_suffix);
         let system_total_tokens = estimate_text_tokens(&full_system);
 
-        let probe = if sample_prompt.trim().is_empty() { "inspect workspace" } else { sample_prompt };
-        let active_schemas = self.tools().peek_tool_schemas_for(probe, self.forbids_swarm_delegation());
+        let probe = if sample_prompt.trim().is_empty() {
+            "inspect workspace"
+        } else {
+            sample_prompt
+        };
+        let active_schemas = self
+            .tools()
+            .peek_tool_schemas_for(probe, self.forbids_swarm_delegation());
         let full_schemas = self.tools().openai_tool_schemas();
-        let tool_schema_tokens = estimate_text_tokens(&Value::Array(active_schemas.clone()).to_string());
-        let tool_full_schema_tokens = estimate_text_tokens(&Value::Array(full_schemas.clone()).to_string());
+        let tool_schema_tokens =
+            estimate_text_tokens(&Value::Array(active_schemas.clone()).to_string());
+        let tool_full_schema_tokens =
+            estimate_text_tokens(&Value::Array(full_schemas.clone()).to_string());
 
         let unlocked_set: Vec<String> = {
-            let guard = self.tools().unlocked_lru.lock().unwrap_or_else(|e| e.into_inner());
+            let guard = self
+                .tools()
+                .unlocked_lru
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             guard.iter().map(|s| (*s).to_string()).collect()
         };
         let evicted_set: Vec<String> = {
-            let guard = self.tools().evicted_tools.lock().unwrap_or_else(|e| e.into_inner());
+            let guard = self
+                .tools()
+                .evicted_tools
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             guard.iter().map(|s| (*s).to_string()).collect()
         };
         let mut deferred = Vec::new();
@@ -111,40 +144,65 @@ impl AgentEngine {
         let (memory_entries, memory_tokens) = {
             let mem = self.memory().lock().unwrap_or_else(|e| e.into_inner());
             let count = mem.list_memories().len();
-            let toks = mem.format_memory_envelope().map(|e| estimate_text_tokens(&e)).unwrap_or(0);
+            let toks = mem
+                .format_memory_envelope()
+                .map(|e| estimate_text_tokens(&e))
+                .unwrap_or(0);
             (count, toks)
         };
 
         let (history_messages, rolling_summaries, history_tokens) = {
             let sess = self.session().lock().unwrap_or_else(|e| e.into_inner());
-            let non_sys: Vec<_> = sess.messages().iter().filter(|m| m.role != Role::System).cloned().collect();
-            let sums = non_sys.iter().filter(|m| SessionCompactor::is_checkpoint(m)).count();
+            let non_sys: Vec<_> = sess
+                .messages()
+                .iter()
+                .filter(|m| m.role != Role::System)
+                .cloned()
+                .collect();
+            let sums = non_sys
+                .iter()
+                .filter(|m| SessionCompactor::is_checkpoint(m))
+                .count();
             let toks = estimate_messages_tokens(&non_sys);
             (non_sys.len(), sums, toks)
         };
 
         let budget = ContextBudgetInfo::calculate(cfg.context_window_tokens, cfg.max_output_tokens);
-        let used_input_tokens = system_total_tokens + tool_schema_tokens + memory_tokens + history_tokens;
-        let headroom_tokens = budget.available_input_tokens.saturating_sub(used_input_tokens);
-        let signed_headroom_tokens = (budget.available_input_tokens as i64) - (used_input_tokens as i64);
+        let used_input_tokens =
+            system_total_tokens + tool_schema_tokens + memory_tokens + history_tokens;
+        let headroom_tokens = budget
+            .available_input_tokens
+            .saturating_sub(used_input_tokens);
+        let signed_headroom_tokens =
+            (budget.available_input_tokens as i64) - (used_input_tokens as i64);
         let utilization_pct = if budget.available_input_tokens == 0 {
             0.0
         } else {
-            ((used_input_tokens as f64 / budget.available_input_tokens as f64) * 1000.0).round() / 10.0
+            ((used_input_tokens as f64 / budget.available_input_tokens as f64) * 1000.0).round()
+                / 10.0
         };
 
         let model_family = ModelPromptFamily::classify(&cfg).as_str().to_string();
         let fp = PrefixFingerprint::from_wire_prefix(&full_system, &active_schemas);
         let cache_prefix_hash = fp.combined_hash;
-        let prefix_pin_status = self.last_prefix_status.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let prefix_pin_status = self
+            .last_prefix_status
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         let sample_usage = ProviderTokenUsage {
             prompt_tokens: used_input_tokens,
             completion_tokens: 0,
             cached_prompt_tokens: 0,
             is_exact: false,
         };
-        let billing_estimate =
-            BillingMetering::evaluate(&cfg.provider, &cfg.model_name, &cfg.api_endpoint, &sample_usage).format_honest();
+        let billing_estimate = BillingMetering::evaluate(
+            &cfg.provider,
+            &cfg.model_name,
+            &cfg.api_endpoint,
+            &sample_usage,
+        )
+        .format_honest();
 
         ContextInspectionSnapshot {
             profile: spec.profile.as_str().to_string(),
@@ -191,8 +249,18 @@ impl AgentEngine {
     pub fn build_request_manifest(&self, sample_prompt: &str) -> RequestManifest {
         let cfg = self.config_snapshot();
         let posture = self.current_posture();
-        let soul = Some(self.tools().skill_catalog.lock().unwrap_or_else(|e| e.into_inner()).active_soul.clone());
-        let authority = if matches!(posture, ExecutionPosture::AutoReview | ExecutionPosture::FullAccess) {
+        let soul = Some(
+            self.tools()
+                .skill_catalog
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .active_soul
+                .clone(),
+        );
+        let authority = if matches!(
+            posture,
+            ExecutionPosture::AutoReview | ExecutionPosture::FullAccess
+        ) {
             ExecutionAuthorityLevel::Autonomous
         } else if matches!(posture, ExecutionPosture::Plan) {
             ExecutionAuthorityLevel::Strict
@@ -202,13 +270,27 @@ impl AgentEngine {
         let spec = SystemPromptSpec::for_turn(&cfg, authority, soul);
 
         // Read-only tool schema projection (does not mutate unlocked_lru)
-        let probe = if sample_prompt.trim().is_empty() { "inspect workspace" } else { sample_prompt };
-        let tools_wire = self.tools().peek_tool_schemas_for(probe, self.forbids_swarm_delegation());
+        let probe = if sample_prompt.trim().is_empty() {
+            "inspect workspace"
+        } else {
+            sample_prompt
+        };
+        let tools_wire = self
+            .tools()
+            .peek_tool_schemas_for(probe, self.forbids_swarm_delegation());
         let tool_toks = estimate_text_tokens(&Value::Array(tools_wire.clone()).to_string());
-        let pinned = self.pinned_system_prompt.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let pinned = self
+            .pinned_system_prompt
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
 
         let msgs = {
-            let mut sess = self.session().lock().unwrap_or_else(|e| e.into_inner()).clone();
+            let mut sess = self
+                .session()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
             if !sample_prompt.trim().is_empty() {
                 sess.add_message(SessionMessage::new(Role::User, sample_prompt.trim()));
             }
@@ -229,16 +311,36 @@ impl AgentEngine {
         let base_wire = lookup_provider_descriptor(&cfg.provider)
             .map(|d| d.wire_dialect)
             .unwrap_or_else(|| infer_wire_dialect_from_endpoint(&cfg.api_endpoint));
-        let (model_wire, wire_model) =
-            resolve_model_aware_wire_and_model(&cfg.provider, &cfg.model_name, &cfg.api_endpoint, base_wire);
+        let (model_wire, wire_model) = resolve_model_aware_wire_and_model(
+            &cfg.provider,
+            &cfg.model_name,
+            &cfg.api_endpoint,
+            base_wire,
+        );
         let active_wire = cfg
             .wire_dialect
             .as_deref()
             .and_then(WireDialect::parse_override)
             .unwrap_or(model_wire);
-        let status = self.last_prefix_status.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        RequestManifest::build(&wire_model, posture, &msgs, &tools_wire, cfg.context_window_tokens, &status)
-            .with_route_metadata(&cfg.provider, active_wire.as_str(), &cfg.api_endpoint, cfg.reasoning_effort.as_deref())
+        let status = self
+            .last_prefix_status
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        RequestManifest::build(
+            &wire_model,
+            posture,
+            &msgs,
+            &tools_wire,
+            cfg.context_window_tokens,
+            &status,
+        )
+        .with_route_metadata(
+            &cfg.provider,
+            active_wire.as_str(),
+            &cfg.api_endpoint,
+            cfg.reasoning_effort.as_deref(),
+        )
     }
 
     pub fn render_request_manifest(&self, arg: &str) -> String {
@@ -264,9 +366,17 @@ impl AgentEngine {
         if matches!(trimmed, "json" | "--json") {
             return serde_json::to_string_pretty(&snap).unwrap_or_default();
         }
-        let filled = ((snap.utilization_pct / 100.0) * 20.0).round().clamp(0.0, 20.0) as usize;
-        let bar = format!("{}{}", "█".repeat(filled), "░".repeat(20usize.saturating_sub(filled)));
-        let saved_tool_toks = snap.tool_full_schema_tokens.saturating_sub(snap.tool_schema_tokens);
+        let filled = ((snap.utilization_pct / 100.0) * 20.0)
+            .round()
+            .clamp(0.0, 20.0) as usize;
+        let bar = format!(
+            "{}{}",
+            "█".repeat(filled),
+            "░".repeat(20usize.saturating_sub(filled))
+        );
+        let saved_tool_toks = snap
+            .tool_full_schema_tokens
+            .saturating_sub(snap.tool_schema_tokens);
         let gov_label = if snap.governance_sources.is_empty() {
             "none".to_string()
         } else {
@@ -323,10 +433,16 @@ impl AgentEngine {
             format!("On-Demand Tools : {}", snap.deferred_specialist_tools.join(", ")),
         ];
         if !snap.evicted_specialist_tools.is_empty() {
-            lines.push(format!("Evicted (LRU-8) : {}", snap.evicted_specialist_tools.join(", ")));
+            lines.push(format!(
+                "Evicted (LRU-8) : {}",
+                snap.evicted_specialist_tools.join(", ")
+            ));
         }
         if !snap.governance_warnings.is_empty() {
-            lines.push(format!("Quarantined     : {}", snap.governance_warnings.join("; ")));
+            lines.push(format!(
+                "Quarantined     : {}",
+                snap.governance_warnings.join("; ")
+            ));
         }
         lines.join("\n")
     }
@@ -335,7 +451,14 @@ impl AgentEngine {
         let cfg = self.config_snapshot();
         let facts = WorkspacePromptProbe::probe_cached(self.workspace_root());
         let skills = discover_skills_cached(self.workspace_root());
-        let soul = Some(self.tools().skill_catalog.lock().unwrap_or_else(|e| e.into_inner()).active_soul.clone());
+        let soul = Some(
+            self.tools()
+                .skill_catalog
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .active_soul
+                .clone(),
+        );
         let trimmed = mode.trim().to_ascii_lowercase();
 
         let spec = match trimmed.as_str() {
@@ -381,7 +504,12 @@ impl AgentEngine {
 
     pub fn render_tools_status(&self) -> String {
         let specs = builtin_tool_specs();
-        let unlocked = self.tools().unlocked_tools.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let unlocked = self
+            .tools()
+            .unlocked_tools
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         let snap = self.inspect_context_snapshot("");
         let mut lines = vec![format!(
             "Registered Built-in Tools ({} available · {} active [{}t] / {}t full):",
@@ -467,8 +595,12 @@ impl AgentEngine {
             let base_wire = desc
                 .map(|d| d.wire_dialect)
                 .unwrap_or_else(|| infer_wire_dialect_from_endpoint(&cfg.api_endpoint));
-            let (model_wire, _) =
-                resolve_model_aware_wire_and_model(&cfg.provider, &cfg.model_name, &cfg.api_endpoint, base_wire);
+            let (model_wire, _) = resolve_model_aware_wire_and_model(
+                &cfg.provider,
+                &cfg.model_name,
+                &cfg.api_endpoint,
+                base_wire,
+            );
             let wire = cfg
                 .wire_dialect
                 .as_deref()
@@ -510,11 +642,21 @@ impl AgentEngine {
                     continue;
                 }
                 let marker = if d.id == active { "▸" } else { " " };
-                let vault_ready = cfg.provider_keys.get(d.secret_slot).is_some_and(|v| !v.trim().is_empty())
-                    || (d.id == active && cfg.api_key.as_ref().is_some_and(|v| !v.trim().is_empty()));
-                let ready = if d.billing_class == ProviderBillingClass::LocalNoBill || !d.requires_api_key {
+                let vault_ready = cfg
+                    .provider_keys
+                    .get(d.secret_slot)
+                    .is_some_and(|v| !v.trim().is_empty())
+                    || (d.id == active
+                        && cfg.api_key.as_ref().is_some_and(|v| !v.trim().is_empty()));
+                let ready = if d.billing_class == ProviderBillingClass::LocalNoBill
+                    || !d.requires_api_key
+                {
                     "LOCAL"
-                } else if vault_ready || d.env_vars.iter().any(|ev| std::env::var(ev).ok().is_some_and(|v| !v.trim().is_empty())) {
+                } else if vault_ready
+                    || d.env_vars
+                        .iter()
+                        .any(|ev| std::env::var(ev).ok().is_some_and(|v| !v.trim().is_empty()))
+                {
                     "READY"
                 } else {
                     "  -- "
@@ -530,7 +672,10 @@ impl AgentEngine {
             }
             return lines.join("\n");
         }
-        if let Some(rest) = trimmed.strip_prefix("fallbacks").or_else(|| trimmed.strip_prefix("fallback")) {
+        if let Some(rest) = trimmed
+            .strip_prefix("fallbacks")
+            .or_else(|| trimmed.strip_prefix("fallback"))
+        {
             let arg_fb = rest.trim();
             if arg_fb.is_empty() {
                 let fbs = self.config_snapshot().fallback_providers;
@@ -540,14 +685,20 @@ impl AgentEngine {
                     format!("Fallback provider chain: {}", fbs.join(" -> "))
                 };
             }
-            if matches!(arg_fb.to_ascii_lowercase().as_str(), "clear" | "off" | "none") {
+            if matches!(
+                arg_fb.to_ascii_lowercase().as_str(),
+                "clear" | "off" | "none"
+            ) {
                 self.set_fallback_providers(Vec::new());
                 return "Cleared fallback provider chain.".to_string();
             }
             let parsed: Vec<String> = arg_fb
                 .split(|c: char| c == ',' || c.is_whitespace())
                 .map(str::trim)
-                .filter(|s| !s.is_empty() && retired_provider_remediation(s.split(':').next().unwrap_or(s)).is_none())
+                .filter(|s| {
+                    !s.is_empty()
+                        && retired_provider_remediation(s.split(':').next().unwrap_or(s)).is_none()
+                })
                 .map(String::from)
                 .collect();
             self.set_fallback_providers(parsed.clone());
@@ -560,7 +711,9 @@ impl AgentEngine {
         if let Some(retired_msg) = retired_provider_remediation(target_prov) {
             return retired_msg.to_string();
         }
-        if lookup_provider_descriptor(target_prov).is_none() && !target_prov.eq_ignore_ascii_case("custom") {
+        if lookup_provider_descriptor(target_prov).is_none()
+            && !target_prov.eq_ignore_ascii_case("custom")
+        {
             let active_count = PROVIDER_DESCRIPTORS.iter().filter(|d| !d.retired).count();
             if let Some(suggested) = suggest_provider_slug(target_prov) {
                 return format!(
@@ -576,15 +729,23 @@ impl AgentEngine {
         let base_wire = lookup_provider_descriptor(&cfg.provider)
             .map(|d| d.wire_dialect)
             .unwrap_or_else(|| infer_wire_dialect_from_endpoint(&cfg.api_endpoint));
-        let (wire, _) =
-            resolve_model_aware_wire_and_model(&cfg.provider, &cfg.model_name, &cfg.api_endpoint, base_wire);
+        let (wire, _) = resolve_model_aware_wire_and_model(
+            &cfg.provider,
+            &cfg.model_name,
+            &cfg.api_endpoint,
+            base_wire,
+        );
         format!(
             "Switched provider -> {} (model: {}, wire: {}, endpoint: {}, key: {})",
             cfg.provider,
             cfg.model_name,
             wire.as_str(),
             redact_endpoint_for_display(&cfg.api_endpoint),
-            if cfg.api_key.is_some() { "configured" } else { "unset" }
+            if cfg.api_key.is_some() {
+                "configured"
+            } else {
+                "unset"
+            }
         )
     }
 
@@ -600,11 +761,15 @@ impl AgentEngine {
         match ReasoningEffortLevel::parse_flexible(trimmed) {
             Ok(Some(ReasoningEffortLevel::None)) => {
                 self.set_reasoning_effort(Some("none".to_string()));
-                "Reasoning effort set to 'none' (thinking disabled) for subsequent turns.".to_string()
+                "Reasoning effort set to 'none' (thinking disabled) for subsequent turns."
+                    .to_string()
             }
             Ok(Some(level)) => {
                 self.set_reasoning_effort(Some(level.as_str().to_string()));
-                format!("Reasoning effort set to '{}' for subsequent turns.", level.as_str())
+                format!(
+                    "Reasoning effort set to '{}' for subsequent turns.",
+                    level.as_str()
+                )
             }
             Ok(None) => {
                 self.set_reasoning_effort(None);

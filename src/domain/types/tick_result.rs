@@ -103,8 +103,9 @@ pub fn finalize_provider_response(
     provider_label: &str,
 ) -> ProviderResponse {
     for tc in &mut tool_calls {
-        tc.function.arguments = normalize_completed_tool_call_arguments(&tc.function.arguments, provider_label)
-            .unwrap_or_else(|_| tc.function.arguments.clone());
+        tc.function.arguments =
+            normalize_completed_tool_call_arguments(&tc.function.arguments, provider_label)
+                .unwrap_or_else(|_| tc.function.arguments.clone());
     }
     if tool_calls.is_empty() {
         if let Some(ref text) = content {

@@ -2,8 +2,13 @@
 use crate::core::compute_workspace_revision;
 use crate::core::engine::AgentEngine;
 use crate::core::tool_specs::builtin_tool_specs;
-use crate::domain::types::progress::{EngineProgressEvent, EngineProgressPhase, EngineProgressStatus};
-use crate::domain::types::provider_registry::{lookup_provider_descriptor, retired_provider_remediation, suggest_provider_slug, PROVIDER_DESCRIPTORS};
+use crate::domain::types::progress::{
+    EngineProgressEvent, EngineProgressPhase, EngineProgressStatus,
+};
+use crate::domain::types::provider_registry::{
+    lookup_provider_descriptor, retired_provider_remediation, suggest_provider_slug,
+    PROVIDER_DESCRIPTORS,
+};
 use crate::plumbing::hash_and_math::{levenshtein, now_ms};
 use crate::plumbing::text_tokens::mask_secret_preview;
 use crate::ui::cli_presenter::Heav3nsUserConfig;
@@ -78,43 +83,151 @@ pub fn print_welcome_banner(cwd: &Path, provider: &str, model: &str, has_key: bo
     };
 
     println!();
-    println!("{}", cyan("╔══════════════════════════════════════════════════════════════════════════════╗"));
-    println!("{}  {}  {}", cyan("║"), bold("HEAV3NS-MICRO v0.1.0 — Sovereign Agentic Coding Runtime"), cyan("║"));
-    println!("{}  {} {}", cyan("║"), dim("16-MiB Arena · 31 Tools · 5-Stop Posture · CAS Receipts · KV-Pinned"), cyan("║"));
-    println!("{}", cyan("╠══════════════════════════════════════════════════════════════════════════════╣"));
-    println!("{}  {} {} {} {}", cyan("║"), bold("Workspace:"), dim(&cwd.display().to_string()), cyan("│"), key_status);
-    println!("{}  {} {} ({})", cyan("║"), bold("Active:   "), cyan(provider), dim(model));
-    println!("{}", cyan("╚══════════════════════════════════════════════════════════════════════════════╝"));
+    println!(
+        "{}",
+        cyan("╔══════════════════════════════════════════════════════════════════════════════╗")
+    );
+    println!(
+        "{}  {}  {}",
+        cyan("║"),
+        bold("HEAV3NS-MICRO v0.1.0 — Sovereign Agentic Coding Runtime"),
+        cyan("║")
+    );
+    println!(
+        "{}  {} {}",
+        cyan("║"),
+        dim("16-MiB Arena · 31 Tools · 5-Stop Posture · CAS Receipts · KV-Pinned"),
+        cyan("║")
+    );
+    println!(
+        "{}",
+        cyan("╠══════════════════════════════════════════════════════════════════════════════╣")
+    );
+    println!(
+        "{}  {} {} {} {}",
+        cyan("║"),
+        bold("Workspace:"),
+        dim(&cwd.display().to_string()),
+        cyan("│"),
+        key_status
+    );
+    println!(
+        "{}  {} {} ({})",
+        cyan("║"),
+        bold("Active:   "),
+        cyan(provider),
+        dim(model)
+    );
+    println!(
+        "{}",
+        cyan("╚══════════════════════════════════════════════════════════════════════════════╝")
+    );
 }
 
 /// Displays an onboarding quickstart notice for users without API keys configured.
 pub fn print_onboarding_notice(provider: &str, model: &str) {
     let desc = lookup_provider_descriptor(provider).filter(|d| !d.retired);
-    let primary_env = desc.and_then(|d| d.env_vars.first().copied()).unwrap_or("OPENAI_API_KEY");
+    let primary_env = desc
+        .and_then(|d| d.env_vars.first().copied())
+        .unwrap_or("OPENAI_API_KEY");
     let slot = desc.map(|d| d.secret_slot).unwrap_or(provider);
-    let portal = desc.map(|d| d.credential_url).unwrap_or("https://platform.openai.com/api-keys");
+    let portal = desc
+        .map(|d| d.credential_url)
+        .unwrap_or("https://platform.openai.com/api-keys");
     println!();
-    println!("{}", yellow("┌──────────────────────────────────────────────────────────────────────────────┐"));
-    println!("{}  {}  {}", yellow("│"), bold("QUICKSTART & ONBOARDING GUIDE"), yellow("│"));
-    println!("{}", yellow("├──────────────────────────────────────────────────────────────────────────────┤"));
-    println!("{}  No API key is configured for provider '{}' (model '{}').", yellow("│"), cyan(provider), dim(model));
-    println!("{}  Here are your fastest options to get started immediately:", yellow("│"));
+    println!(
+        "{}",
+        yellow("┌──────────────────────────────────────────────────────────────────────────────┐")
+    );
+    println!(
+        "{}  {}  {}",
+        yellow("│"),
+        bold("QUICKSTART & ONBOARDING GUIDE"),
+        yellow("│")
+    );
+    println!(
+        "{}",
+        yellow("├──────────────────────────────────────────────────────────────────────────────┤")
+    );
+    println!(
+        "{}  No API key is configured for provider '{}' (model '{}').",
+        yellow("│"),
+        cyan(provider),
+        dim(model)
+    );
+    println!(
+        "{}  Here are your fastest options to get started immediately:",
+        yellow("│")
+    );
     println!("{}", yellow("│"));
-    println!("{}  {} {}", yellow("│"), bold("1. Configure Active Provider Credential:"), yellow("│"));
-    println!("{}     Export: {}export {primary_env}=\"<YOUR_KEY>\"", yellow("│"), dim(""));
-    println!("{}     Vault:  {}", yellow("│"), cyan(&format!("heav3ns-micro config set key.{slot} \"<YOUR_KEY>\"")));
+    println!(
+        "{}  {} {}",
+        yellow("│"),
+        bold("1. Configure Active Provider Credential:"),
+        yellow("│")
+    );
+    println!(
+        "{}     Export: {}export {primary_env}=\"<YOUR_KEY>\"",
+        yellow("│"),
+        dim("")
+    );
+    println!(
+        "{}     Vault:  {}",
+        yellow("│"),
+        cyan(&format!(
+            "heav3ns-micro config set key.{slot} \"<YOUR_KEY>\""
+        ))
+    );
     println!("{}     Portal: {}", yellow("│"), dim(portal));
     println!("{}", yellow("│"));
-    println!("{}  {} {}", yellow("│"), bold("2. Instant Offline Demo (Zero Setup / Zero Keys):"), yellow("│"));
-    println!("{}     Run {} or type {} inside this session.", yellow("│"), cyan("heav3ns-micro demo"), cyan("/demo"));
+    println!(
+        "{}  {} {}",
+        yellow("│"),
+        bold("2. Instant Offline Demo (Zero Setup / Zero Keys):"),
+        yellow("│")
+    );
+    println!(
+        "{}     Run {} or type {} inside this session.",
+        yellow("│"),
+        cyan("heav3ns-micro demo"),
+        cyan("/demo")
+    );
     println!("{}", yellow("│"));
-    println!("{}  {} {}", yellow("│"), bold("3. Free Local AI (Ollama / vLLM / SGLang / LM Studio):"), yellow("│"));
-    println!("{}     Run: {}", yellow("│"), cyan("heav3ns-micro --provider ollama -m qwen2.5-coder:14b"));
+    println!(
+        "{}  {} {}",
+        yellow("│"),
+        bold("3. Free Local AI (Ollama / vLLM / SGLang / LM Studio):"),
+        yellow("│")
+    );
+    println!(
+        "{}     Run: {}",
+        yellow("│"),
+        cyan("heav3ns-micro --provider ollama -m qwen2.5-coder:14b")
+    );
     println!("{}", yellow("│"));
-    println!("{}  {} {}", yellow("│"), bold("4. Interactive Setup Wizard (65 Providers):"), yellow("│"));
-    println!("{}     Run: {}  (or switch live via {})", yellow("│"), cyan("heav3ns-micro init"), cyan("/provider list"));
-    println!("{}  {} Type {} to diagnose or {} for all commands.", yellow("│"), bold("Tip:"), cyan("/doctor"), cyan("/help"));
-    println!("{}", yellow("└──────────────────────────────────────────────────────────────────────────────┘"));
+    println!(
+        "{}  {} {}",
+        yellow("│"),
+        bold("4. Interactive Setup Wizard (65 Providers):"),
+        yellow("│")
+    );
+    println!(
+        "{}     Run: {}  (or switch live via {})",
+        yellow("│"),
+        cyan("heav3ns-micro init"),
+        cyan("/provider list")
+    );
+    println!(
+        "{}  {} Type {} to diagnose or {} for all commands.",
+        yellow("│"),
+        bold("Tip:"),
+        cyan("/doctor"),
+        cyan("/help")
+    );
+    println!(
+        "{}",
+        yellow("└──────────────────────────────────────────────────────────────────────────────┘")
+    );
     println!();
 }
 
@@ -122,14 +235,33 @@ pub fn print_onboarding_notice(provider: &str, model: &str) {
 pub fn format_auth_error_card(raw_err: &str, provider: &str, model: &str) -> String {
     let mut out = String::new();
     out.push('\n');
-    out.push_str(&yellow("┌──────────────────────────────────────────────────────────────────────────────┐\n"));
+    out.push_str(&yellow(
+        "┌──────────────────────────────────────────────────────────────────────────────┐\n",
+    ));
     if let Some(retired_msg) = retired_provider_remediation(provider) {
-        out.push_str(&format!("{}  {}  {}\n", yellow("│"), bold("RETIRED PROVIDER SELECTOR — ACTION REQUIRED"), yellow("│")));
-        out.push_str(&yellow("├──────────────────────────────────────────────────────────────────────────────┤\n"));
+        out.push_str(&format!(
+            "{}  {}  {}\n",
+            yellow("│"),
+            bold("RETIRED PROVIDER SELECTOR — ACTION REQUIRED"),
+            yellow("│")
+        ));
+        out.push_str(&yellow(
+            "├──────────────────────────────────────────────────────────────────────────────┤\n",
+        ));
         out.push_str(&format!("{}  {}\n", yellow("│"), red(retired_msg)));
-        out.push_str(&format!("{}    1. Switch in session: {}\n", yellow("│"), cyan("/provider gemini")));
-        out.push_str(&format!("{}    2. Export Gemini key: {}\n", yellow("│"), cyan("export GEMINI_API_KEY=\"AIza...\"")));
-        out.push_str(&yellow("└──────────────────────────────────────────────────────────────────────────────┘\n"));
+        out.push_str(&format!(
+            "{}    1. Switch in session: {}\n",
+            yellow("│"),
+            cyan("/provider gemini")
+        ));
+        out.push_str(&format!(
+            "{}    2. Export Gemini key: {}\n",
+            yellow("│"),
+            cyan("export GEMINI_API_KEY=\"AIza...\"")
+        ));
+        out.push_str(&yellow(
+            "└──────────────────────────────────────────────────────────────────────────────┘\n",
+        ));
         return out;
     }
 
@@ -139,36 +271,99 @@ pub fn format_auth_error_card(raw_err: &str, provider: &str, model: &str) -> Str
         .filter(|d| !d.env_vars.is_empty())
         .map(|d| d.env_vars.join(" / "))
         .unwrap_or_else(|| "CUSTOM_LLM_API_KEY".to_string());
-    let primary_env = desc.and_then(|d| d.env_vars.first().copied()).unwrap_or("CUSTOM_LLM_API_KEY");
+    let primary_env = desc
+        .and_then(|d| d.env_vars.first().copied())
+        .unwrap_or("CUSTOM_LLM_API_KEY");
     let slot = desc.map(|d| d.secret_slot).unwrap_or(provider);
-    let portal = desc.map(|d| d.credential_url).unwrap_or("https://openrouter.ai/keys");
+    let portal = desc
+        .map(|d| d.credential_url)
+        .unwrap_or("https://openrouter.ai/keys");
 
-    out.push_str(&format!("{}  {}  {}\n", yellow("│"), bold("AUTHENTICATION REQUIRED — LLM PROVIDER ERROR"), yellow("│")));
-    out.push_str(&yellow("├──────────────────────────────────────────────────────────────────────────────┤\n"));
-    out.push_str(&format!("{}  Provider '{}' ({}) with model '{}' rejected the request.\n", yellow("│"), cyan(provider), dim(disp), dim(model)));
-    let summary = if raw_err.contains("401") || raw_err.contains("API key") || raw_err.contains("Authorization") {
+    out.push_str(&format!(
+        "{}  {}  {}\n",
+        yellow("│"),
+        bold("AUTHENTICATION REQUIRED — LLM PROVIDER ERROR"),
+        yellow("│")
+    ));
+    out.push_str(&yellow(
+        "├──────────────────────────────────────────────────────────────────────────────┤\n",
+    ));
+    out.push_str(&format!(
+        "{}  Provider '{}' ({}) with model '{}' rejected the request.\n",
+        yellow("│"),
+        cyan(provider),
+        dim(disp),
+        dim(model)
+    ));
+    let summary = if raw_err.contains("401")
+        || raw_err.contains("API key")
+        || raw_err.contains("Authorization")
+    {
         "Missing or invalid API key."
     } else {
         "Request failed to authenticate with the provider."
     };
-    out.push_str(&format!("{}  Reason: {} (expected env: {})\n", yellow("│"), red(summary), cyan(&env_list)));
-    out.push_str(&format!("{}  Credential portal: {}\n", yellow("│"), dim(portal)));
+    out.push_str(&format!(
+        "{}  Reason: {} (expected env: {})\n",
+        yellow("│"),
+        red(summary),
+        cyan(&env_list)
+    ));
+    out.push_str(&format!(
+        "{}  Credential portal: {}\n",
+        yellow("│"),
+        dim(portal)
+    ));
     out.push_str(&yellow("│\n"));
-    out.push_str(&format!("{}  {} Choose one of the following solutions:\n", yellow("│"), bold("HOW TO RESOLVE:")));
-    out.push_str(&format!("{}    1. Export provider key:    {}\n", yellow("│"), cyan(&format!("export {primary_env}=\"<YOUR_KEY>\""))));
-    out.push_str(&format!("{}    2. Save to local vault:    {}\n", yellow("│"), cyan(&format!("heav3ns-micro config set key.{slot} \"<YOUR_KEY>\""))));
-    out.push_str(&format!("{}    3. Switch live in session: {}\n", yellow("│"), cyan("/provider list  (or /provider ollama)")));
-    out.push_str(&format!("{}    4. Run setup wizard:       {}\n", yellow("│"), cyan("heav3ns-micro init")));
-    out.push_str(&format!("{}    5. Test runtime offline:   {}\n", yellow("│"), cyan("heav3ns-micro demo")));
-    out.push_str(&yellow("└──────────────────────────────────────────────────────────────────────────────┘\n"));
+    out.push_str(&format!(
+        "{}  {} Choose one of the following solutions:\n",
+        yellow("│"),
+        bold("HOW TO RESOLVE:")
+    ));
+    out.push_str(&format!(
+        "{}    1. Export provider key:    {}\n",
+        yellow("│"),
+        cyan(&format!("export {primary_env}=\"<YOUR_KEY>\""))
+    ));
+    out.push_str(&format!(
+        "{}    2. Save to local vault:    {}\n",
+        yellow("│"),
+        cyan(&format!(
+            "heav3ns-micro config set key.{slot} \"<YOUR_KEY>\""
+        ))
+    ));
+    out.push_str(&format!(
+        "{}    3. Switch live in session: {}\n",
+        yellow("│"),
+        cyan("/provider list  (or /provider ollama)")
+    ));
+    out.push_str(&format!(
+        "{}    4. Run setup wizard:       {}\n",
+        yellow("│"),
+        cyan("heav3ns-micro init")
+    ));
+    out.push_str(&format!(
+        "{}    5. Test runtime offline:   {}\n",
+        yellow("│"),
+        cyan("heav3ns-micro demo")
+    ));
+    out.push_str(&yellow(
+        "└──────────────────────────────────────────────────────────────────────────────┘\n",
+    ));
     out
 }
 
 /// Runs a diagnostic health check of the CLI environment, keys, git workspace, and runtime.
 pub fn run_doctor_cli(cwd: &Path, opts_provider: Option<&str>, opts_model: Option<&str>) {
     println!();
-    println!("{}", bold("HEAV3NS-MICRO System Diagnostic & Health Doctor"));
-    println!("{}", dim("Auditing credentials, providers, workspace SLA, and runtime substrate..."));
+    println!(
+        "{}",
+        bold("HEAV3NS-MICRO System Diagnostic & Health Doctor")
+    );
+    println!(
+        "{}",
+        dim("Auditing credentials, providers, workspace SLA, and runtime substrate...")
+    );
     println!();
 
     let mut score = 100;
@@ -178,7 +373,11 @@ pub fn run_doctor_cli(cwd: &Path, opts_provider: Option<&str>, opts_model: Optio
     println!("{}", bold("1. Configuration & Credentials"));
     let user_cfg = Heav3nsUserConfig::load();
     if let Some(ref cfg) = user_cfg {
-        println!("  {} Config file detected at {}", green("✔"), dim(&Heav3nsUserConfig::config_path().display().to_string()));
+        println!(
+            "  {} Config file detected at {}",
+            green("✔"),
+            dim(&Heav3nsUserConfig::config_path().display().to_string())
+        );
         if let Some(ref p) = cfg.provider {
             println!("    Provider configured: {}", cyan(p));
         }
@@ -186,7 +385,10 @@ pub fn run_doctor_cli(cwd: &Path, opts_provider: Option<&str>, opts_model: Optio
             println!("    Model configured:    {}", cyan(m));
         }
     } else {
-        println!("  {} No ~/.heav3ns/config.json found (using environment variables/defaults)", dim("ℹ"));
+        println!(
+            "  {} No ~/.heav3ns/config.json found (using environment variables/defaults)",
+            dim("ℹ")
+        );
     }
 
     if let Some(m) = opts_model {
@@ -194,7 +396,10 @@ pub fn run_doctor_cli(cwd: &Path, opts_provider: Option<&str>, opts_model: Optio
     }
 
     let dotenv = Heav3nsUserConfig::read_dotenv_map(cwd);
-    let vault_keys = user_cfg.as_ref().map(|c| c.effective_provider_keys()).unwrap_or_default();
+    let vault_keys = user_cfg
+        .as_ref()
+        .map(|c| c.effective_provider_keys())
+        .unwrap_or_default();
     let active_descriptor_count = PROVIDER_DESCRIPTORS.iter().filter(|d| !d.retired).count();
     let mut keys_found = 0usize;
     let mut seen_slots = std::collections::BTreeSet::new();
@@ -268,18 +473,28 @@ pub fn run_doctor_cli(cwd: &Path, opts_provider: Option<&str>, opts_model: Optio
     for &(label, port) in local_gateways {
         let addr = SocketAddr::from(([127, 0, 0, 1], port));
         if TcpStream::connect_timeout(&addr, Duration::from_millis(120)).is_ok() {
-            println!("  {} {label} service detected on 127.0.0.1:{port} (zero-key local AI ready)", green("✔"));
+            println!(
+                "  {} {label} service detected on 127.0.0.1:{port} (zero-key local AI ready)",
+                green("✔")
+            );
             any_local = true;
         }
     }
     if !any_local {
-        println!("  {} No local inference servers detected on ports 11434/8000/30000/1234", dim("ℹ"));
+        println!(
+            "  {} No local inference servers detected on ports 11434/8000/30000/1234",
+            dim("ℹ")
+        );
     }
     println!();
 
     // 3. Workspace & Revision
     println!("{}", bold("3. Workspace & Revision"));
-    println!("  {} Workspace Root: {}", green("✔"), cyan(&cwd.display().to_string()));
+    println!(
+        "  {} Workspace Root: {}",
+        green("✔"),
+        cyan(&cwd.display().to_string())
+    );
     let git_dir = cwd.join(".git");
     if git_dir.exists() {
         println!("  {} Git repository detected", green("✔"));
@@ -291,7 +506,10 @@ pub fn run_doctor_cli(cwd: &Path, opts_provider: Option<&str>, opts_model: Optio
     println!();
 
     // 4. Substrate, Prompt Hygiene & Tool Registry SLA
-    println!("{}", bold("4. Substrate, Prompt Hygiene & Tool Registry SLA"));
+    println!(
+        "{}",
+        bold("4. Substrate, Prompt Hygiene & Tool Registry SLA")
+    );
     let tools = builtin_tool_specs();
     let probe_engine = AgentEngine::with_defaults(cwd);
     let ctx_snap = probe_engine.inspect_context_snapshot("");
@@ -316,39 +534,83 @@ pub fn run_doctor_cli(cwd: &Path, opts_provider: Option<&str>, opts_model: Optio
             ctx_snap.governance_warnings.join("; ")
         );
     }
-    println!("  {} Arena Slab Memory Buffer: 16-MiB sovereign capacity", green("✔"));
-    println!("  {} Self-Healing JSON Repair & VFS Sandboxing: Operational", green("✔"));
-    println!("  {} Set-of-Marks Computer Use & Spatial Grounding: Operational", green("✔"));
+    println!(
+        "  {} Arena Slab Memory Buffer: 16-MiB sovereign capacity",
+        green("✔")
+    );
+    println!(
+        "  {} Self-Healing JSON Repair & VFS Sandboxing: Operational",
+        green("✔")
+    );
+    println!(
+        "  {} Set-of-Marks Computer Use & Spatial Grounding: Operational",
+        green("✔")
+    );
     println!();
 
     // 5. Verdict & Summary
     println!("{}", bold("5. Health Verdict"));
     if score >= 90 {
-        println!("  Status: {} (Grade A — 100% Operational)", green("EXCELLENT"));
+        println!(
+            "  Status: {} (Grade A — 100% Operational)",
+            green("EXCELLENT")
+        );
     } else {
-        println!("  Status: {} (Score {}/100)", yellow("ACTION RECOMMENDED"), score);
+        println!(
+            "  Status: {} (Score {}/100)",
+            yellow("ACTION RECOMMENDED"),
+            score
+        );
         for w in &warnings {
             println!("  {} {}", yellow("→"), w);
         }
     }
     println!();
     println!("{}", dim("Next Steps:"));
-    println!("  • To configure your credentials:  {}", cyan("heav3ns-micro init"));
-    println!("  • To run the offline guided tour: {}", cyan("heav3ns-micro demo"));
-    println!("  • To launch the agent REPL:       {}", cyan("heav3ns-micro"));
+    println!(
+        "  • To configure your credentials:  {}",
+        cyan("heav3ns-micro init")
+    );
+    println!(
+        "  • To run the offline guided tour: {}",
+        cyan("heav3ns-micro demo")
+    );
+    println!(
+        "  • To launch the agent REPL:       {}",
+        cyan("heav3ns-micro")
+    );
     println!();
 }
 
 /// Runs an interactive onboarding wizard to configure providers and save `~/.heav3ns/config.json`.
 pub fn run_init_wizard(cwd: &Path) -> io::Result<()> {
     println!();
-    println!("{}", cyan("╔══════════════════════════════════════════════════════════════════════════════╗"));
-    println!("{}  {}  {}", cyan("║"), bold("HEAV3NS-MICRO Interactive Setup Wizard"), cyan("║"));
-    println!("{}  {}       {}", cyan("║"), dim("Configure your default AI provider, model, and persistent credentials"), cyan("║"));
-    println!("{}", cyan("╚══════════════════════════════════════════════════════════════════════════════╝"));
+    println!(
+        "{}",
+        cyan("╔══════════════════════════════════════════════════════════════════════════════╗")
+    );
+    println!(
+        "{}  {}  {}",
+        cyan("║"),
+        bold("HEAV3NS-MICRO Interactive Setup Wizard"),
+        cyan("║")
+    );
+    println!(
+        "{}  {}       {}",
+        cyan("║"),
+        dim("Configure your default AI provider, model, and persistent credentials"),
+        cyan("║")
+    );
+    println!(
+        "{}",
+        cyan("╚══════════════════════════════════════════════════════════════════════════════╝")
+    );
     println!();
 
-    println!("{}", bold("Select your primary AI provider (or enter any of the 65 provider IDs):"));
+    println!(
+        "{}",
+        bold("Select your primary AI provider (or enter any of the 65 provider IDs):")
+    );
     println!("  1. OpenAI API          (openai · gpt-5.6-terra)");
     println!("  2. Anthropic Claude    (anthropic · claude-sonnet-5.5)");
     println!("  3. Google Gemini       (gemini · gemini-4-carbon)");
@@ -384,7 +646,12 @@ pub fn run_init_wizard(cwd: &Path) -> io::Result<()> {
         None if picked_slug.eq_ignore_ascii_case("custom") => lookup_provider_descriptor("custom"),
         None => {
             if let Some(suggested) = suggest_provider_slug(picked_slug) {
-                println!("  {} Unrecognized slug '{}'; auto-correcting to '{}'.", yellow("ℹ"), picked_slug, cyan(suggested));
+                println!(
+                    "  {} Unrecognized slug '{}'; auto-correcting to '{}'.",
+                    yellow("ℹ"),
+                    picked_slug,
+                    cyan(suggested)
+                );
                 lookup_provider_descriptor(suggested)
             } else {
                 return Err(io::Error::new(
@@ -396,7 +663,9 @@ pub fn run_init_wizard(cwd: &Path) -> io::Result<()> {
     };
     let provider = desc.map(|d| d.id).unwrap_or("custom");
     let default_model = desc.map(|d| d.default_model).unwrap_or("gpt-5.4");
-    let default_endpoint = desc.map(|d| d.default_endpoint).unwrap_or("http://127.0.0.1:4000/v1");
+    let default_endpoint = desc
+        .map(|d| d.default_endpoint)
+        .unwrap_or("http://127.0.0.1:4000/v1");
     let requires_key = desc.map(|d| d.requires_api_key).unwrap_or(true);
 
     println!();
@@ -404,7 +673,11 @@ pub fn run_init_wizard(cwd: &Path) -> io::Result<()> {
     io::stdout().flush()?;
     let mut model_in = String::new();
     io::stdin().read_line(&mut model_in)?;
-    let model = if model_in.trim().is_empty() { default_model.to_string() } else { model_in.trim().to_string() };
+    let model = if model_in.trim().is_empty() {
+        default_model.to_string()
+    } else {
+        model_in.trim().to_string()
+    };
 
     let mut api_key: Option<String> = None;
     if requires_key {
@@ -451,7 +724,11 @@ pub fn run_init_wizard(cwd: &Path) -> io::Result<()> {
     io::stdout().flush()?;
     let mut ep_in = String::new();
     io::stdin().read_line(&mut ep_in)?;
-    let endpoint = if ep_in.trim().is_empty() { default_endpoint.to_string() } else { ep_in.trim().to_string() };
+    let endpoint = if ep_in.trim().is_empty() {
+        default_endpoint.to_string()
+    } else {
+        ep_in.trim().to_string()
+    };
 
     let mut new_cfg = Heav3nsUserConfig::load().unwrap_or_default();
     new_cfg.provider = Some(provider.to_string());
@@ -464,20 +741,30 @@ pub fn run_init_wizard(cwd: &Path) -> io::Result<()> {
     }
     if endpoint != default_endpoint {
         let canonical_id = desc.map(|d| d.id).unwrap_or(provider);
-        new_cfg.provider_endpoints.insert(canonical_id.to_string(), endpoint.clone());
+        new_cfg
+            .provider_endpoints
+            .insert(canonical_id.to_string(), endpoint.clone());
     }
 
     new_cfg.save()?;
 
     println!();
-    println!("{} Configuration successfully saved to {}", green("✔"), cyan(&Heav3nsUserConfig::config_path().display().to_string()));
+    println!(
+        "{} Configuration successfully saved to {}",
+        green("✔"),
+        cyan(&Heav3nsUserConfig::config_path().display().to_string())
+    );
     println!();
     println!("{}", bold("Your configuration:"));
     println!("  Provider: {}", cyan(provider));
     println!("  Model:    {}", cyan(&model));
     println!("  Endpoint: {}", dim(&endpoint));
     println!();
-    println!("{} Run {} to start coding with your new settings!", green("Ready!"), cyan("heav3ns-micro"));
+    println!(
+        "{} Run {} to start coding with your new settings!",
+        green("Ready!"),
+        cyan("heav3ns-micro")
+    );
     println!();
     Ok(())
 }
@@ -485,10 +772,26 @@ pub fn run_init_wizard(cwd: &Path) -> io::Result<()> {
 /// Runs an interactive guided demo demonstrating all core runtime capabilities without needing an API key.
 pub async fn run_guided_demo(cwd: &Path) {
     println!();
-    println!("{}", cyan("╔══════════════════════════════════════════════════════════════════════════════╗"));
-    println!("{}  {}  {}", cyan("║"), bold("HEAV3NS-MICRO Interactive Guided Tour (Zero-Key Demo)"), cyan("║"));
-    println!("{}  {}       {}", cyan("║"), dim("Walkthrough of the 5 sovereign pillars in under 60 seconds"), cyan("║"));
-    println!("{}", cyan("╚══════════════════════════════════════════════════════════════════════════════╝"));
+    println!(
+        "{}",
+        cyan("╔══════════════════════════════════════════════════════════════════════════════╗")
+    );
+    println!(
+        "{}  {}  {}",
+        cyan("║"),
+        bold("HEAV3NS-MICRO Interactive Guided Tour (Zero-Key Demo)"),
+        cyan("║")
+    );
+    println!(
+        "{}  {}       {}",
+        cyan("║"),
+        dim("Walkthrough of the 5 sovereign pillars in under 60 seconds"),
+        cyan("║")
+    );
+    println!(
+        "{}",
+        cyan("╚══════════════════════════════════════════════════════════════════════════════╝")
+    );
     println!("  Workspace: {}", dim(&cwd.display().to_string()));
     println!();
 
@@ -498,16 +801,32 @@ pub async fn run_guided_demo(cwd: &Path) {
     println!("  linear arena slab that allocates in sub-microsecond time.");
     let t0 = now_ms();
     let slab_alloc = 160;
-    println!("  {} Arena initialized: 16,777,216 bytes available (warmup: {} ms)", green("✔"), now_ms().saturating_sub(t0));
-    println!("  {} Memory overhead per turn: ~{} bytes", green("✔"), slab_alloc);
+    println!(
+        "  {} Arena initialized: 16,777,216 bytes available (warmup: {} ms)",
+        green("✔"),
+        now_ms().saturating_sub(t0)
+    );
+    println!(
+        "  {} Memory overhead per turn: ~{} bytes",
+        green("✔"),
+        slab_alloc
+    );
     println!();
 
     // Step 2: VFS Sandboxing
     println!("{}", bold("Step 2/5: Virtual File System (VFS) Sandboxing"));
-    println!("  All file mutations (writes, replaces, patches) are staged in an in-memory VFS overlay.");
+    println!(
+        "  All file mutations (writes, replaces, patches) are staged in an in-memory VFS overlay."
+    );
     println!("  The agent NEVER overwrites disk files until you inspect and execute /commit.");
-    println!("  {} Staging simulated mutation on 'demo_service.rs'...", dim("•"));
-    println!("  {} File staged in VFS (disk remains completely untouched)", green("✔"));
+    println!(
+        "  {} Staging simulated mutation on 'demo_service.rs'...",
+        dim("•")
+    );
+    println!(
+        "  {} File staged in VFS (disk remains completely untouched)",
+        green("✔")
+    );
     println!();
 
     // Step 3: Diff Verification
@@ -515,34 +834,71 @@ pub async fn run_guided_demo(cwd: &Path) {
     println!("  Before changes touch disk, you can render an exact unified diff with /diff.");
     println!("{}", dim("  --- a/demo_service.rs"));
     println!("{}", dim("  +++ b/demo_service.rs"));
-    println!("{}", green("  + pub fn execute_sovereign_task() -> Result<(), AgentError> {"));
-    println!("{}", green("  +     println!(\"Task executed with 100% verification.\");"));
+    println!(
+        "{}",
+        green("  + pub fn execute_sovereign_task() -> Result<(), AgentError> {")
+    );
+    println!(
+        "{}",
+        green("  +     println!(\"Task executed with 100% verification.\");")
+    );
     println!("{}", green("  +     Ok(())"));
     println!("{}", green("  + }"));
-    println!("  Commands: {} (apply to disk) · {} (revert safely)", cyan("/commit"), cyan("/discard"));
+    println!(
+        "  Commands: {} (apply to disk) · {} (revert safely)",
+        cyan("/commit"),
+        cyan("/discard")
+    );
     println!();
 
     // Step 4: Long-Term Memory
     println!("{}", bold("Step 4/5: LUMI-MEMORY/1 Long-Term Persistence"));
     println!("  Facts and user axioms are preserved across sessions and context compactions.");
-    println!("  {} Storing: 'HEAV3NS-MICRO enforces contractual sovereignty and zero bloat'", green("✔"));
-    println!("  {} Querying '/memory sovereign': found 1 relevant fact", green("✔"));
+    println!(
+        "  {} Storing: 'HEAV3NS-MICRO enforces contractual sovereignty and zero bloat'",
+        green("✔")
+    );
+    println!(
+        "  {} Querying '/memory sovereign': found 1 relevant fact",
+        green("✔")
+    );
     println!();
 
     // Step 5: Agent Flight Verification
     println!("{}", bold("Step 5/5: 5-Scenario Flight Test Suite"));
     println!("  Every build is continuously verified against 5 autonomous flight scenarios (FT-01..FT-05).");
     println!("  {} FT-01: Tool result reaches next turn", green("PASS"));
-    println!("  {} FT-02: Read, edit, and verify file across multi-round loop", green("PASS"));
-    println!("  {} FT-03: Self-healing JSON repair recovers from malformed tool args", green("PASS"));
-    println!("  {} FT-04: Exponential backoff retries transient provider errors", green("PASS"));
-    println!("  {} FT-05: Cancellation cleanly stops in-flight requests", green("PASS"));
+    println!(
+        "  {} FT-02: Read, edit, and verify file across multi-round loop",
+        green("PASS")
+    );
+    println!(
+        "  {} FT-03: Self-healing JSON repair recovers from malformed tool args",
+        green("PASS")
+    );
+    println!(
+        "  {} FT-04: Exponential backoff retries transient provider errors",
+        green("PASS")
+    );
+    println!(
+        "  {} FT-05: Cancellation cleanly stops in-flight requests",
+        green("PASS")
+    );
     println!();
 
     println!("{}", bold("Demo Complete! Ready for action:"));
-    println!("  1. Run {} to enter the interactive workspace REPL", cyan("heav3ns-micro"));
-    println!("  2. Run {} to diagnose your environment and keys", cyan("heav3ns-micro doctor"));
-    println!("  3. Run {} to configure OpenAI, Gemini, Claude, or Ollama", cyan("heav3ns-micro init"));
+    println!(
+        "  1. Run {} to enter the interactive workspace REPL",
+        cyan("heav3ns-micro")
+    );
+    println!(
+        "  2. Run {} to diagnose your environment and keys",
+        cyan("heav3ns-micro doctor")
+    );
+    println!(
+        "  3. Run {} to configure OpenAI, Gemini, Claude, or Ollama",
+        cyan("heav3ns-micro init")
+    );
     println!();
 }
 
@@ -550,8 +906,17 @@ pub async fn run_guided_demo(cwd: &Path) {
 pub fn print_tool_catalog() {
     let specs = builtin_tool_specs();
     println!();
-    println!("{}", bold(&format!("HEAV3NS-MICRO Built-in Tool Specifications ({} tools registered)", specs.len())));
-    println!("{}", dim("Categorized by functional responsibility across the Seven Sovereign Pillars:"));
+    println!(
+        "{}",
+        bold(&format!(
+            "HEAV3NS-MICRO Built-in Tool Specifications ({} tools registered)",
+            specs.len()
+        ))
+    );
+    println!(
+        "{}",
+        dim("Categorized by functional responsibility across the Seven Sovereign Pillars:")
+    );
     println!();
 
     let mut fs_tools = Vec::new();
@@ -562,11 +927,22 @@ pub fn print_tool_catalog() {
 
     for s in specs {
         let n = s.name;
-        if n.contains("file") || n.contains("dir") || n.contains("grep") || n.contains("find") || n.contains("patch") || n.contains("undo") {
+        if n.contains("file")
+            || n.contains("dir")
+            || n.contains("grep")
+            || n.contains("find")
+            || n.contains("patch")
+            || n.contains("undo")
+        {
             fs_tools.push(s);
         } else if n.contains("command") || n.contains("plan") {
             cmd_tools.push(s);
-        } else if n.contains("spatial") || n.contains("computer") || n.contains("browser") || n.contains("vision") || n.contains("display") {
+        } else if n.contains("spatial")
+            || n.contains("computer")
+            || n.contains("browser")
+            || n.contains("vision")
+            || n.contains("display")
+        {
             spatial_tools.push(s);
         } else if n.contains("memory") || n.contains("session") || n.contains("snapshot") {
             mem_tools.push(s);
@@ -577,28 +953,44 @@ pub fn print_tool_catalog() {
 
     println!("{}", bold("File System, Code Editing & Inspection:"));
     for t in fs_tools {
-        let flag = if t.is_mutating { yellow("[MUTATING]") } else { green("[READ-ONLY]") };
+        let flag = if t.is_mutating {
+            yellow("[MUTATING]")
+        } else {
+            green("[READ-ONLY]")
+        };
         println!("  {:28} {} {}", cyan(t.name), flag, dim(t.description));
     }
     println!();
 
     println!("{}", bold("Spatial Grounding, Vision & Computer Use:"));
     for t in spatial_tools {
-        let flag = if t.is_mutating { yellow("[ACTION]") } else { green("[OBSERVE]") };
+        let flag = if t.is_mutating {
+            yellow("[ACTION]")
+        } else {
+            green("[OBSERVE]")
+        };
         println!("  {:28} {} {}", cyan(t.name), flag, dim(t.description));
     }
     println!();
 
     println!("{}", bold("Execution, Command & Planning:"));
     for t in cmd_tools {
-        let flag = if t.is_mutating { yellow("[EXEC]") } else { green("[PLAN]") };
+        let flag = if t.is_mutating {
+            yellow("[EXEC]")
+        } else {
+            green("[PLAN]")
+        };
         println!("  {:28} {} {}", cyan(t.name), flag, dim(t.description));
     }
     println!();
 
     println!("{}", bold("Long-Term Memory & Session Knowledge:"));
     for t in mem_tools {
-        let flag = if t.is_mutating { yellow("[STORE]") } else { green("[QUERY]") };
+        let flag = if t.is_mutating {
+            yellow("[STORE]")
+        } else {
+            green("[QUERY]")
+        };
         println!("  {:28} {} {}", cyan(t.name), flag, dim(t.description));
     }
     println!();
@@ -616,7 +1008,11 @@ pub fn print_tool_catalog() {
 pub fn create_cli_progress_listener() -> std::sync::Arc<dyn Fn(EngineProgressEvent) + Send + Sync> {
     std::sync::Arc::new(|evt| {
         let elapsed = evt.elapsed_ms.unwrap_or(0);
-        let time_str = if elapsed > 100 { format!(" ({}ms)", elapsed) } else { String::new() };
+        let time_str = if elapsed > 100 {
+            format!(" ({}ms)", elapsed)
+        } else {
+            String::new()
+        };
 
         match evt.phase {
             EngineProgressPhase::Connecting if evt.status == EngineProgressStatus::Started => {
@@ -624,7 +1020,11 @@ pub fn create_cli_progress_listener() -> std::sync::Arc<dyn Fn(EngineProgressEve
                 let _ = io::stdout().flush();
             }
             EngineProgressPhase::Thinking => {
-                println!("  {} Model reasoning & planning{}...", cyan("⠋"), dim(&time_str));
+                println!(
+                    "  {} Model reasoning & planning{}...",
+                    cyan("⠋"),
+                    dim(&time_str)
+                );
                 let _ = io::stdout().flush();
             }
             EngineProgressPhase::Tool if evt.status == EngineProgressStatus::Started => {
@@ -681,7 +1081,11 @@ pub fn render_color_diff(raw_diff: &str) -> String {
             }
             let files_summary = if let Some(arr) = val.get("files").and_then(|v| v.as_array()) {
                 let names: Vec<_> = arr.iter().filter_map(|v| v.as_str()).collect();
-                format!("Pending changes across {} file(s): {}\n\n", names.len(), names.join(", "))
+                format!(
+                    "Pending changes across {} file(s): {}\n\n",
+                    names.len(),
+                    names.join(", ")
+                )
             } else {
                 String::new()
             };
@@ -734,11 +1138,25 @@ mod tests {
 
     #[test]
     fn test_suggest_command_fuzzy_matches() {
-        let commands = ["/help", "/stats", "/vfs", "/diff", "/commit", "/doctor", "/memory"];
-        assert_eq!(suggest_command("/stat", &commands), Some("/stats".to_string()));
-        assert_eq!(suggest_command("/hlp", &commands), Some("/help".to_string()));
-        assert_eq!(suggest_command("/doctro", &commands), Some("/doctor".to_string()));
-        assert_eq!(suggest_command("/memor", &commands), Some("/memory".to_string()));
+        let commands = [
+            "/help", "/stats", "/vfs", "/diff", "/commit", "/doctor", "/memory",
+        ];
+        assert_eq!(
+            suggest_command("/stat", &commands),
+            Some("/stats".to_string())
+        );
+        assert_eq!(
+            suggest_command("/hlp", &commands),
+            Some("/help".to_string())
+        );
+        assert_eq!(
+            suggest_command("/doctro", &commands),
+            Some("/doctor".to_string())
+        );
+        assert_eq!(
+            suggest_command("/memor", &commands),
+            Some("/memory".to_string())
+        );
         assert_eq!(suggest_command("/completely_unrelated", &commands), None);
     }
 
@@ -772,7 +1190,8 @@ mod tests {
         assert!(summary.contains("2.50s"));
         assert!(summary.contains("Tools: 3"));
 
-        let diff_sample = "--- a/file.rs\n+++ b/file.rs\n@@ -1,3 +1,4 @@\n-old line\n+new line\n context";
+        let diff_sample =
+            "--- a/file.rs\n+++ b/file.rs\n@@ -1,3 +1,4 @@\n-old line\n+new line\n context";
         let colored = render_color_diff(diff_sample);
         assert!(colored.contains("old line"));
         assert!(colored.contains("new line"));

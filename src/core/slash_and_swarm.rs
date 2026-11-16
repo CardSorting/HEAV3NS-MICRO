@@ -4,10 +4,15 @@ use crate::core::request_queue::discover_skills_cached;
 use crate::domain::compaction::CompactionPolicy;
 use crate::domain::interfaces::IWorkspaceSnapshotCas;
 use crate::domain::prompt_spec::SystemPromptSpec;
-use crate::domain::swarm::{classify_task_for_legion, SwarmAssignment, SwarmFormationResult, SwarmItemReport};
+use crate::domain::swarm::{
+    classify_task_for_legion, SwarmAssignment, SwarmFormationResult, SwarmItemReport,
+};
 use crate::domain::types::messages::{estimate_messages_tokens, Role, SessionMessage};
 use crate::domain::types::progress::ToolExecutionRecord;
-use crate::domain::types::runtime::{CancellationToken, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel, ExecutionPosture};
+use crate::domain::types::runtime::{
+    CancellationToken, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel,
+    ExecutionPosture,
+};
 use crate::domain::types::tool_schedule::ScheduledToolCall;
 use crate::infrastructure::vfs_store::{workspace_revision, SkillsIngestor, WorkspacePromptProbe};
 use crate::plumbing::hash_and_math::now_ms;
@@ -26,7 +31,9 @@ impl AgentEngine {
         cancel_token: Option<&CancellationToken>,
     ) -> Vec<ToolExecutionRecord> {
         if self.forbids_swarm_delegation()
-            && scheduled_calls.iter().any(|c| canonical_tool_name(&c.name) == "engage_swarm")
+            && scheduled_calls
+                .iter()
+                .any(|c| canonical_tool_name(&c.name) == "engage_swarm")
         {
             let mut records = Vec::with_capacity(scheduled_calls.len());
             for call in scheduled_calls {
@@ -68,7 +75,12 @@ impl AgentEngine {
             records
         } else {
             self.tools()
-                .execute_batch(scheduled_calls, self.workspace_root(), authority, cancel_token)
+                .execute_batch(
+                    scheduled_calls,
+                    self.workspace_root(),
+                    authority,
+                    cancel_token,
+                )
                 .await
         }
     }
@@ -108,7 +120,11 @@ impl AgentEngine {
         let mut waves = 0usize;
 
         while !pending.is_empty() {
-            if cancel_token.as_ref().map(|t| t.is_cancelled()).unwrap_or(false) {
+            if cancel_token
+                .as_ref()
+                .map(|t| t.is_cancelled())
+                .unwrap_or(false)
+            {
                 return SwarmFormationResult {
                     objective,
                     outcome: EngineTickOutcome::Cancelled,
@@ -161,15 +177,30 @@ impl AgentEngine {
                 let dep_context: Vec<String> = assign
                     .depends_on
                     .iter()
-                    .filter_map(|d| completed.get(d).map(|r| format!("- [{} ({})]: {}", r.id, r.role, r.response)))
+                    .filter_map(|d| {
+                        completed
+                            .get(d)
+                            .map(|r| format!("- [{} ({})]: {}", r.id, r.role, r.response))
+                    })
                     .collect();
 
                 let mut child_cfg = self.config_snapshot();
-                let spec = SystemPromptSpec::for_specialist(&assign.role, &objective, assign.assigned_files.clone());
-                child_cfg.system_prompt = spec.render(&child_cfg, self.workspace_root(), &swarm_facts, &swarm_skills);
+                let spec = SystemPromptSpec::for_specialist(
+                    &assign.role,
+                    &objective,
+                    assign.assigned_files.clone(),
+                );
+                child_cfg.system_prompt = spec.render(
+                    &child_cfg,
+                    self.workspace_root(),
+                    &swarm_facts,
+                    &swarm_skills,
+                );
 
                 let parent_posture = self.current_posture();
-                let child_tools = Arc::new(crate::core::tool_registry::ToolRegistry::new(Arc::clone(self.memory())));
+                let child_tools = Arc::new(crate::core::tool_registry::ToolRegistry::new(
+                    Arc::clone(self.memory()),
+                ));
                 let child_engine = AgentEngine::with_shared_substrate(
                     self.workspace_root().to_path_buf(),
                     child_cfg,
@@ -180,7 +211,8 @@ impl AgentEngine {
                 .without_swarm_delegation();
                 child_engine.set_posture(parent_posture);
 
-                let prompt = SystemPromptSpec::format_swarm_task_prompt(&assign.objective, &dep_context);
+                let prompt =
+                    SystemPromptSpec::format_swarm_task_prompt(&assign.objective, &dep_context);
                 let tok = cancel_token.clone();
                 let def = should_defer.clone();
                 wave_futs.push(async move {
@@ -208,8 +240,16 @@ impl AgentEngine {
             }
 
             let wave_results = futures::future::join_all(wave_futs).await;
-            self.tools().cache.lock().unwrap_or_else(|e| e.into_inner()).clear();
-            self.tools().read_tracker.lock().unwrap_or_else(|e| e.into_inner()).reset_stamps();
+            self.tools()
+                .cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clear();
+            self.tools()
+                .read_tracker
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .reset_stamps();
             let mut any_failed = false;
             for rep in wave_results {
                 if rep.outcome != EngineTickOutcome::Completed {
@@ -646,38 +686,70 @@ impl AgentEngine {
         let sub_cmd = sub_parts.next().unwrap_or("").trim().to_ascii_lowercase();
         let sub_arg = sub_parts.next().unwrap_or("").trim();
         match sub_cmd.as_str() {
-            "observe" => serde_json::to_string_pretty(&self.tools().computer_orchestrator.observe()).unwrap_or_default(),
+            "observe" => {
+                serde_json::to_string_pretty(&self.tools().computer_orchestrator.observe())
+                    .unwrap_or_default()
+            }
             "interpret" => {
                 let obs = self.tools().computer_orchestrator.observe();
-                serde_json::to_string_pretty(&self.tools().computer_orchestrator.interpret(&obs)).unwrap_or_default()
+                serde_json::to_string_pretty(&self.tools().computer_orchestrator.interpret(&obs))
+                    .unwrap_or_default()
             }
             "patterns" => {
-                let kstore = self.tools().computer_orchestrator.knowledge_store.lock().unwrap_or_else(|e| e.into_inner());
+                let kstore = self
+                    .tools()
+                    .computer_orchestrator
+                    .knowledge_store
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
                 serde_json::to_string_pretty(&json!({ "patterns": kstore.list_patterns(), "procedures": kstore.list_procedures() })).unwrap_or_default()
             }
             "consult" => {
                 use crate::domain::interfaces::ISwarmIntelligenceConsultant;
                 let obs = self.tools().computer_orchestrator.observe();
-                let goal = if sub_arg.is_empty() { "Analyze active window" } else { sub_arg };
-                let mut req = crate::domain::types::swarm_intelligence_types::SwarmConsultationRequest::new("consult-slash", goal, &obs.app_name, &obs.window_title);
+                let goal = if sub_arg.is_empty() {
+                    "Analyze active window"
+                } else {
+                    sub_arg
+                };
+                let mut req =
+                    crate::domain::types::swarm_intelligence_types::SwarmConsultationRequest::new(
+                        "consult-slash",
+                        goal,
+                        &obs.app_name,
+                        &obs.window_title,
+                    );
                 req.modal_blocking = obs.modal_detected;
                 req.candidate_target_ids = obs.elements.iter().map(|e| e.id.clone()).collect();
-                serde_json::to_string_pretty(&self.tools().computer_orchestrator.consult(&req)).unwrap_or_default()
+                serde_json::to_string_pretty(&self.tools().computer_orchestrator.consult(&req))
+                    .unwrap_or_default()
             }
             "orchestrate" => {
-                let target = if sub_arg.is_empty() { None } else { Some(sub_arg.to_string()) };
+                let target = if sub_arg.is_empty() {
+                    None
+                } else {
+                    Some(sub_arg.to_string())
+                };
                 let contract = crate::domain::types::spatial_types::SpatialActionContract {
                     action_name: "click".into(),
                     target_selector: target,
                     ..Default::default()
                 };
-                match self.tools().computer_orchestrator.execute_closed_loop_cycle("Slash command orchestration", &contract) {
+                match self
+                    .tools()
+                    .computer_orchestrator
+                    .execute_closed_loop_cycle("Slash command orchestration", &contract)
+                {
                     Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_default(),
                     Err(e) => format!("Computer orchestration error: {e}"),
                 }
             }
             _ => {
-                let mut disp = self.tools().display_state.lock().unwrap_or_else(|e| e.into_inner());
+                let mut disp = self
+                    .tools()
+                    .display_state
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
                 let action = if arg.is_empty() { "capture" } else { arg };
                 match disp.execute_action(&json!({ "action": action })) {
                     Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_default(),

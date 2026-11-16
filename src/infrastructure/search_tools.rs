@@ -71,7 +71,10 @@ fn canonicalize_best_effort_checked(path: &Path) -> Result<PathBuf, String> {
                     let resolved = if target.is_absolute() {
                         target
                     } else {
-                        cursor.parent().unwrap_or_else(|| Path::new("")).join(target)
+                        cursor
+                            .parent()
+                            .unwrap_or_else(|| Path::new(""))
+                            .join(target)
                     };
                     let mut next = normalize_lexical_path(&resolved);
                     for seg in suffix.into_iter().rev() {
@@ -88,7 +91,10 @@ fn canonicalize_best_effort_checked(path: &Path) -> Result<PathBuf, String> {
         }
         return Ok(normalize_lexical_path(&base));
     }
-    Err(format!("Symlink resolution exceeded 16-hop limit for '{}'", path.display()))
+    Err(format!(
+        "Symlink resolution exceeded 16-hop limit for '{}'",
+        path.display()
+    ))
 }
 
 /// Resolves `raw` relative to `cwd`, enforces workspace containment (blocking `..` and symlink
@@ -111,7 +117,8 @@ pub fn resolve_and_verify_workspace_path(cwd: &Path, raw: &str) -> Result<PathBu
 /// Reads a UTF-8 text file up to `max_bytes`, failing cleanly before allocating on oversized files or special streams.
 pub fn read_text_file_bounded(path: &Path, max_bytes: usize) -> Result<String, String> {
     use std::io::Read;
-    let meta = fs::metadata(path).map_err(|e| format!("Failed to stat '{}': {e}", path.display()))?;
+    let meta =
+        fs::metadata(path).map_err(|e| format!("Failed to stat '{}': {e}", path.display()))?;
     if !meta.is_file() {
         return Err(format!("'{}' is not a regular file", path.display()));
     }
@@ -123,7 +130,8 @@ pub fn read_text_file_bounded(path: &Path, max_bytes: usize) -> Result<String, S
             max_bytes
         ));
     }
-    let f = fs::File::open(path).map_err(|e| format!("Failed to open '{}': {e}", path.display()))?;
+    let f =
+        fs::File::open(path).map_err(|e| format!("Failed to open '{}': {e}", path.display()))?;
     let mut buf = Vec::new();
     f.take(max_bytes as u64 + 1)
         .read_to_end(&mut buf)
@@ -142,7 +150,11 @@ pub fn read_text_file_bounded(path: &Path, max_bytes: usize) -> Result<String, S
 /// without leaking symlink destination paths on refusal.
 pub fn verify_model_path_access(path: &Path) -> Result<(), String> {
     let canon = path.canonicalize().ok();
-    SafetyPolicy::check_credential_path_with_target(path, canon.as_deref(), CredentialDenyScope::ModelContext)
+    SafetyPolicy::check_credential_path_with_target(
+        path,
+        canon.as_deref(),
+        CredentialDenyScope::ModelContext,
+    )
 }
 
 /// Writes bytes atomically via a sibling temp file + `fs::rename`, preserving existing file permissions.
@@ -157,7 +169,12 @@ pub fn atomic_write_file(target: &Path, bytes: &[u8]) -> Result<(), String> {
         .unwrap_or("file");
     static FS_TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let seq = FS_TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let tmp_path = target.with_file_name(format!(".{file_name}.heav3ns-tmp-{}-{}-{}", std::process::id(), now_ms(), seq));
+    let tmp_path = target.with_file_name(format!(
+        ".{file_name}.heav3ns-tmp-{}-{}-{}",
+        std::process::id(),
+        now_ms(),
+        seq
+    ));
     let write_res = (|| -> std::io::Result<()> {
         use std::io::Write;
         let mut f = fs::File::create(&tmp_path)?;
@@ -166,27 +183,37 @@ pub fn atomic_write_file(target: &Path, bytes: &[u8]) -> Result<(), String> {
     })();
     if let Err(e) = write_res {
         let _ = fs::remove_file(&tmp_path);
-        return Err(format!("Failed to write temp file for '{}': {e}", target.display()));
+        return Err(format!(
+            "Failed to write temp file for '{}': {e}",
+            target.display()
+        ));
     }
     if let Some(perms) = existing_perms {
         let _ = fs::set_permissions(&tmp_path, perms);
     }
     if let Err(e) = fs::rename(&tmp_path, target) {
         let _ = fs::remove_file(&tmp_path);
-        return Err(format!("Failed to commit '{}' atomically: {e}", target.display()));
+        return Err(format!(
+            "Failed to commit '{}' atomically: {e}",
+            target.display()
+        ));
     }
     Ok(())
 }
 
 /// Suggests nearby filenames in the same parent directory when a path lookup fails with ENOENT.
 pub fn suggest_nearby_files(missing_path: &Path) -> Vec<String> {
-    let Some(parent) = missing_path.parent() else { return Vec::new() };
+    let Some(parent) = missing_path.parent() else {
+        return Vec::new();
+    };
     let target_name = missing_path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("")
         .to_lowercase();
-    let Ok(rd) = fs::read_dir(parent) else { return Vec::new() };
+    let Ok(rd) = fs::read_dir(parent) else {
+        return Vec::new();
+    };
     let mut candidates: Vec<(usize, String)> = rd
         .flatten()
         .filter_map(|e| {
@@ -224,7 +251,9 @@ pub fn walk_find_files(
     if depth > max_depth || out.len() >= 500 {
         return;
     }
-    let Ok(rd) = fs::read_dir(current) else { return };
+    let Ok(rd) = fs::read_dir(current) else {
+        return;
+    };
     let clean_query = query.trim_matches('*');
     for entry in rd.flatten() {
         if out.len() >= 1_500 {
@@ -235,7 +264,10 @@ pub fn walk_find_files(
         }
         let file_name = entry.file_name().to_string_lossy().into_owned();
         let path = entry.path();
-        if fs::symlink_metadata(&path).map(|m| m.file_type().is_symlink()).unwrap_or(true) {
+        if fs::symlink_metadata(&path)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(true)
+        {
             continue;
         }
         if path.is_dir() {
@@ -243,7 +275,11 @@ pub fn walk_find_files(
                 walk_find_files(root, &path, query, depth + 1, max_depth, out);
             }
         } else if verify_model_path_access(&path).is_ok() {
-            let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().into_owned();
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .into_owned();
             if clean_query.is_empty()
                 || file_name.to_lowercase().contains(clean_query)
                 || rel.to_lowercase().contains(clean_query)
@@ -269,7 +305,9 @@ pub fn build_directory_tree(
         .flatten()
         .filter(|e| {
             let p = e.path();
-            !fs::symlink_metadata(&p).map(|m| m.file_type().is_symlink()).unwrap_or(true)
+            !fs::symlink_metadata(&p)
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(true)
                 && !is_ignored_dir(&e.file_name().to_string_lossy())
                 && verify_model_path_access(&p).is_ok()
         })
@@ -286,7 +324,10 @@ pub fn build_directory_tree(
         let child_prefix = format!("{prefix}{}", if is_last { "    " } else { "│   " });
         let is_dir = entry.path().is_dir();
         let name = entry.file_name().to_string_lossy().into_owned();
-        lines.push(format!("{prefix}{connector}{name}{}", if is_dir { "/" } else { "" }));
+        lines.push(format!(
+            "{prefix}{connector}{name}{}",
+            if is_dir { "/" } else { "" }
+        ));
         if is_dir {
             build_directory_tree(&entry.path(), &child_prefix, depth + 1, max_depth, lines);
         }
@@ -301,7 +342,10 @@ fn collect_source_files_bounded(target: &Path, out: &mut Vec<PathBuf>, depth: us
     if out.len() >= 1_500 || depth >= 16 {
         return;
     }
-    if fs::symlink_metadata(target).map(|m| m.file_type().is_symlink()).unwrap_or(true) {
+    if fs::symlink_metadata(target)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(true)
+    {
         return;
     }
     if target.is_file() {
@@ -320,7 +364,10 @@ fn collect_source_files_bounded(target: &Path, out: &mut Vec<PathBuf>, depth: us
             continue;
         }
         let p = entry.path();
-        if fs::symlink_metadata(&p).map(|m| m.file_type().is_symlink()).unwrap_or(true) {
+        if fs::symlink_metadata(&p)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(true)
+        {
             continue;
         }
         if p.is_dir() {
@@ -353,7 +400,12 @@ pub fn batch_replace_regex_files(
         if let Ok(content) = read_text_file_bounded(&file, 2 * 1024 * 1024) {
             let count = re.find_iter(&content).count();
             if count > 0 {
-                let rel = file.strip_prefix(&canon_cwd).or_else(|_| file.strip_prefix(cwd)).unwrap_or(&file).to_string_lossy().into_owned();
+                let rel = file
+                    .strip_prefix(&canon_cwd)
+                    .or_else(|_| file.strip_prefix(cwd))
+                    .unwrap_or(&file)
+                    .to_string_lossy()
+                    .into_owned();
                 if !dry_run {
                     if let Ok(mut j) = journal.lock() {
                         j.record_mutation("batch_replace_regex", &file);
@@ -432,8 +484,14 @@ pub fn extract_workspace_symbols(
     let mut results = Vec::new();
 
     for file in files {
-        let Ok(content) = read_text_file_bounded(&file, 2 * 1024 * 1024) else { continue };
-        let rel = file.strip_prefix(cwd).unwrap_or(&file).to_string_lossy().into_owned();
+        let Ok(content) = read_text_file_bounded(&file, 2 * 1024 * 1024) else {
+            continue;
+        };
+        let rel = file
+            .strip_prefix(cwd)
+            .unwrap_or(&file)
+            .to_string_lossy()
+            .into_owned();
         for (line_idx, line) in content.lines().enumerate() {
             for &(kind, ref re) in patterns {
                 if let Some(kf) = kind_filter {
@@ -482,7 +540,13 @@ pub fn execute_grep_search(
 
     let mut hits = Vec::new();
     if root.is_file() {
-        search_file_lines(root, root.parent().unwrap_or(root), &re, max_results, &mut hits);
+        search_file_lines(
+            root,
+            root.parent().unwrap_or(root),
+            &re,
+            max_results,
+            &mut hits,
+        );
     } else {
         walk_grep(root, root, &re, 0, 12, max_results, &mut hits);
     }
@@ -501,14 +565,19 @@ fn walk_grep(
     if depth > max_depth || hits.len() >= max_results {
         return;
     }
-    let Ok(rd) = fs::read_dir(current) else { return };
+    let Ok(rd) = fs::read_dir(current) else {
+        return;
+    };
     for entry in rd.flatten() {
         if hits.len() >= max_results {
             break;
         }
         let name = entry.file_name().to_string_lossy().into_owned();
         let path = entry.path();
-        if fs::symlink_metadata(&path).map(|m| m.file_type().is_symlink()).unwrap_or(true) {
+        if fs::symlink_metadata(&path)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(true)
+        {
             continue;
         }
         if path.is_dir() {
@@ -521,7 +590,13 @@ fn walk_grep(
     }
 }
 
-fn search_file_lines(file: &Path, root: &Path, re: &Regex, max_results: usize, hits: &mut Vec<Value>) {
+fn search_file_lines(
+    file: &Path,
+    root: &Path,
+    re: &Regex,
+    max_results: usize,
+    hits: &mut Vec<Value>,
+) {
     if verify_model_path_access(file).is_err() {
         return;
     }
@@ -529,8 +604,14 @@ fn search_file_lines(file: &Path, root: &Path, re: &Regex, max_results: usize, h
     if !meta.is_file() || meta.len() > 2 * 1024 * 1024 {
         return;
     }
-    let Ok(content) = read_text_file_bounded(file, 2 * 1024 * 1024) else { return };
-    let rel = file.strip_prefix(root).unwrap_or(file).to_string_lossy().into_owned();
+    let Ok(content) = read_text_file_bounded(file, 2 * 1024 * 1024) else {
+        return;
+    };
+    let rel = file
+        .strip_prefix(root)
+        .unwrap_or(file)
+        .to_string_lossy()
+        .into_owned();
     for (idx, line) in content.lines().enumerate() {
         if hits.len() >= max_results {
             break;

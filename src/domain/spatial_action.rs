@@ -75,7 +75,9 @@ impl SpatialGroundingResult {
             grounded: None,
             ambiguity_candidates: candidates,
             error: Some(err),
-            recovery_hint: Some("Disambiguate with Set-of-Marks token (e.g. 's1:2') or unique ID".into()),
+            recovery_hint: Some(
+                "Disambiguate with Set-of-Marks token (e.g. 's1:2') or unique ID".into(),
+            ),
         }
     }
 }
@@ -95,7 +97,14 @@ pub struct SpatialExecutionReceipt {
 }
 
 impl SpatialExecutionReceipt {
-    pub fn confirmed(action: impl Into<String>, target_id: Option<String>, pt: [i32; 2], epoch: u64, frame: u64, duration_ms: u64) -> Self {
+    pub fn confirmed(
+        action: impl Into<String>,
+        target_id: Option<String>,
+        pt: [i32; 2],
+        epoch: u64,
+        frame: u64,
+        duration_ms: u64,
+    ) -> Self {
         Self {
             action: action.into(),
             target_id,
@@ -109,7 +118,15 @@ impl SpatialExecutionReceipt {
         }
     }
 
-    pub fn suspected_noop(action: impl Into<String>, target_id: Option<String>, pt: [i32; 2], epoch: u64, frame: u64, duration_ms: u64, escalation: impl Into<String>) -> Self {
+    pub fn suspected_noop(
+        action: impl Into<String>,
+        target_id: Option<String>,
+        pt: [i32; 2],
+        epoch: u64,
+        frame: u64,
+        duration_ms: u64,
+        escalation: impl Into<String>,
+    ) -> Self {
         Self {
             action: action.into(),
             target_id,
@@ -123,4 +140,3 @@ impl SpatialExecutionReceipt {
         }
     }
 }
-

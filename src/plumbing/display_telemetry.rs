@@ -9,7 +9,11 @@ pub trait IDisplayTelemetry {
 
 /// Contractual sovereignty interface for preview element inventory diffing.
 pub trait IPreviewDiffer {
-    fn compute_delta(&self, current: &BTreeMap<String, Value>, previous: &BTreeMap<String, Value>) -> Value;
+    fn compute_delta(
+        &self,
+        current: &BTreeMap<String, Value>,
+        previous: &BTreeMap<String, Value>,
+    ) -> Value;
 }
 
 pub type LedgerQueryFilter = String;
@@ -45,7 +49,12 @@ pub fn compute_preview_delta(
 }
 
 /// Applies an annotation mutation (`add`, `pin`, `hold`, `remove`, `unpin`, `clear`) to the display overlay list.
-pub fn apply_annotation_mutation(annotations: &mut Vec<Value>, op: &str, target_ref: &str, note: &str) -> Value {
+pub fn apply_annotation_mutation(
+    annotations: &mut Vec<Value>,
+    op: &str,
+    target_ref: &str,
+    note: &str,
+) -> Value {
     match op {
         "add" | "pin" | "hold" => {
             annotations.retain(|a| a.get("ref").and_then(|v| v.as_str()) != Some(target_ref));
@@ -55,7 +64,9 @@ pub fn apply_annotation_mutation(annotations: &mut Vec<Value>, op: &str, target_
                 "note": note
             }));
         }
-        "remove" | "unpin" => annotations.retain(|a| a.get("ref").and_then(|v| v.as_str()) != Some(target_ref)),
+        "remove" | "unpin" => {
+            annotations.retain(|a| a.get("ref").and_then(|v| v.as_str()) != Some(target_ref))
+        }
         "clear" => annotations.clear(),
         _ => {}
     }
@@ -84,7 +95,10 @@ pub fn query_action_ledger_dsl(ledger: &[Value], query: &str) -> Value {
             stat_f = Some(r.to_ascii_lowercase());
         } else if let Some(r) = token.strip_prefix("element:") {
             elem_f = Some(r.to_ascii_lowercase());
-        } else if let Some(r) = token.strip_prefix("mode:").or_else(|| token.strip_prefix("delivery:")) {
+        } else if let Some(r) = token
+            .strip_prefix("mode:")
+            .or_else(|| token.strip_prefix("delivery:"))
+        {
             mode_f = Some(r.to_ascii_lowercase());
         } else if let Some(r) = token.strip_prefix("duration<") {
             max_d = r.parse::<u64>().ok();
@@ -100,7 +114,12 @@ pub fn query_action_ledger_dsl(ledger: &[Value], query: &str) -> Value {
         .filter(|e| {
             let act_ok = act_f
                 .as_ref()
-                .map(|f| e.get("action").and_then(|v| v.as_str()).unwrap_or("").eq_ignore_ascii_case(f))
+                .map(|f| {
+                    e.get("action")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .eq_ignore_ascii_case(f)
+                })
                 .unwrap_or(true);
             let win_ok = win_f
                 .as_ref()
@@ -108,7 +127,12 @@ pub fn query_action_ledger_dsl(ledger: &[Value], query: &str) -> Value {
                 .unwrap_or(true);
             let stat_ok = stat_f
                 .as_ref()
-                .map(|f| e.get("status").and_then(|v| v.as_str()).unwrap_or("").eq_ignore_ascii_case(f))
+                .map(|f| {
+                    e.get("status")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .eq_ignore_ascii_case(f)
+                })
                 .unwrap_or(true);
             let elem_ok = elem_f
                 .as_ref()
@@ -176,8 +200,15 @@ pub fn compute_action_ledger_health(
         .collect();
     durations.sort_unstable();
     let p50 = durations.get(durations.len() / 2).copied().unwrap_or(1);
-    let p95 = durations.get((durations.len() * 95) / 100).copied().unwrap_or(2);
-    let success_rate = if total == 0 { 1.0 } else { successes as f64 / total as f64 };
+    let p95 = durations
+        .get((durations.len() * 95) / 100)
+        .copied()
+        .unwrap_or(2);
+    let success_rate = if total == 0 {
+        1.0
+    } else {
+        successes as f64 / total as f64
+    };
     json!({
         "healthy": success_rate >= 0.95,
         "totalActions": total,
@@ -197,16 +228,41 @@ pub fn compute_action_ledger_health(
 
 /// Extracts `(id, som_id, role, label, value, bounds)` tuples from a DOM snapshot
 /// so `browser_navigate` can synchronize the window's interactive `UiElement` list.
-pub fn extract_dom_ui_tuples(dom_snap: &Value) -> Vec<(String, u32, String, String, String, [i32; 4])> {
+pub fn extract_dom_ui_tuples(
+    dom_snap: &Value,
+) -> Vec<(String, u32, String, String, String, [i32; 4])> {
     let mut out = Vec::new();
-    if let Some(arr) = dom_snap.get("interactiveElements").or_else(|| dom_snap.get("elements")).and_then(|v| v.as_array()) {
+    if let Some(arr) = dom_snap
+        .get("interactiveElements")
+        .or_else(|| dom_snap.get("elements"))
+        .and_then(|v| v.as_array())
+    {
         for (idx, item) in arr.iter().enumerate() {
-            let som_id = item.get("somId").and_then(|v| v.as_u64()).unwrap_or((idx + 1) as u64) as u32;
+            let som_id = item
+                .get("somId")
+                .and_then(|v| v.as_u64())
+                .unwrap_or((idx + 1) as u64) as u32;
             let raw_id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
-            let id = if raw_id.is_empty() { format!("dom-el-{som_id}") } else { raw_id.to_string() };
-            let role = item.get("role").and_then(|v| v.as_str()).unwrap_or("generic").to_string();
-            let label = item.get("label").and_then(|v| v.as_str()).unwrap_or(&id).to_string();
-            let value = item.get("href").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let id = if raw_id.is_empty() {
+                format!("dom-el-{som_id}")
+            } else {
+                raw_id.to_string()
+            };
+            let role = item
+                .get("role")
+                .and_then(|v| v.as_str())
+                .unwrap_or("generic")
+                .to_string();
+            let label = item
+                .get("label")
+                .and_then(|v| v.as_str())
+                .unwrap_or(&id)
+                .to_string();
+            let value = item
+                .get("href")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let col = (idx % 3) as i32;
             let row = (idx / 3) as i32;
             let bounds = [40 + col * 360, 80 + row * 56, 320, 40];
@@ -215,4 +271,3 @@ pub fn extract_dom_ui_tuples(dom_snap: &Value) -> Vec<(String, u32, String, Stri
     }
     out
 }
-

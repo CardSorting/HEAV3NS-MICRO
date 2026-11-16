@@ -66,7 +66,10 @@ impl ShellCommandGuard {
         let mut targets = Vec::new();
         for span in spans {
             let before = &cmd[span.statement_start..span.index];
-            let line_end = cmd[span.index..].find('\n').map(|o| span.index + o).unwrap_or(cmd.len());
+            let line_end = cmd[span.index..]
+                .find('\n')
+                .map(|o| span.index + o)
+                .unwrap_or(cmd.len());
             let heredoc_line = &cmd[span.index..line_end];
 
             collect_regex_targets(before_re, before, &mut targets);
@@ -192,11 +195,15 @@ fn is_whitelisted_read_target(target: &str) -> bool {
         || t.starts_with("/dev/")
         || t.starts_with("/proc/")
         || t.starts_with("/sys/")
-        || (t.starts_with("/etc/") && (t.ends_with("-release") || t == "/etc/issue" || t == "/etc/version"))
+        || (t.starts_with("/etc/")
+            && (t.ends_with("-release") || t == "/etc/issue" || t == "/etc/version"))
 }
 
 fn next_char_len(s: &str, idx: usize) -> usize {
-    s.get(idx..).and_then(|r| r.chars().next()).map(|c| c.len_utf8()).unwrap_or(1)
+    s.get(idx..)
+        .and_then(|r| r.chars().next())
+        .map(|c| c.len_utf8())
+        .unwrap_or(1)
 }
 
 fn find_top_level_heredocs(cmd: &str) -> Vec<HeredocSpan> {
@@ -244,12 +251,21 @@ fn find_top_level_heredocs(cmd: &str) -> Vec<HeredocSpan> {
                     state = 3;
                     paren_depth = 2;
                     i += 1;
-                } else if c == b';' || c == b'\n' || c == b'\r' || (c == b'&' && next == b'&') || (c == b'|' && next == b'|') {
+                } else if c == b';'
+                    || c == b'\n'
+                    || c == b'\r'
+                    || (c == b'&' && next == b'&')
+                    || (c == b'|' && next == b'|')
+                {
                     if next == b'&' || next == b'|' {
                         i += 1;
                     }
                     stmt_start = i + 1;
-                } else if c == b'<' && next == b'<' && bytes.get(i + 2) != Some(&b'<') && (i == 0 || bytes[i - 1] != b'<') {
+                } else if c == b'<'
+                    && next == b'<'
+                    && bytes.get(i + 2) != Some(&b'<')
+                    && (i == 0 || bytes[i - 1] != b'<')
+                {
                     let mut idx = i + 2;
                     if bytes.get(idx) == Some(&b'-') {
                         idx += 1;
@@ -272,7 +288,11 @@ fn find_top_level_heredocs(cmd: &str) -> Vec<HeredocSpan> {
                         _ => {
                             let start = idx;
                             let mut end = start;
-                            while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_' || bytes[end] == b'-') {
+                            while end < bytes.len()
+                                && (bytes[end].is_ascii_alphanumeric()
+                                    || bytes[end] == b'_'
+                                    || bytes[end] == b'-')
+                            {
                                 end += 1;
                             }
                             &cmd[start..end]
@@ -316,7 +336,10 @@ pub fn split_top_level_statements(cmd: &str) -> Vec<String> {
             state = 2;
         } else if c == b'\\' && i + 1 < bytes.len() {
             i += next_char_len(cmd, i + 1);
-        } else if (c == b'$' || c == b'<' || c == b'>') && next == b'(' && bytes.get(i + 2) != Some(&b'(') {
+        } else if (c == b'$' || c == b'<' || c == b'>')
+            && next == b'('
+            && bytes.get(i + 2) != Some(&b'(')
+        {
             let (mut depth, mut j, mut sub_state) = (1i32, i + 2, 0u8);
             while j < bytes.len() && depth > 0 {
                 let b = bytes[j];
@@ -472,7 +495,10 @@ fn extract_redir_target(s: &str, start: usize) -> (String, usize) {
         }
         j += next_char_len(s, j);
     }
-    (s.get(beg..j.min(bytes.len())).unwrap_or("").to_string(), j.min(bytes.len()))
+    (
+        s.get(beg..j.min(bytes.len())).unwrap_or("").to_string(),
+        j.min(bytes.len()),
+    )
 }
 
 fn parse_stage(stage: &str) -> ParsedStage {
@@ -538,14 +564,21 @@ fn parse_stage(stage: &str) -> ParsedStage {
                 ps.tokens.push(std::mem::take(&mut cur));
             }
             ps.has_redirect_out = true;
-            let op_len = if bytes.get(i + 2) == Some(&b'>') { 3 } else { 2 };
+            let op_len = if bytes.get(i + 2) == Some(&b'>') {
+                3
+            } else {
+                2
+            };
             let (_, end) = extract_redir_target(stage, i + op_len);
             i = end;
         } else if c == b'>' {
             let is_append = next == b'>';
             let op_len = if next == b'&' || is_append { 2 } else { 1 };
             let (target, end) = extract_redir_target(stage, i + op_len);
-            let is_dup = next == b'&' && (cur == "1" || cur == "2" || (cur.is_empty() && matches!(target.as_str(), "1" | "2" | "-")));
+            let is_dup = next == b'&'
+                && (cur == "1"
+                    || cur == "2"
+                    || (cur.is_empty() && matches!(target.as_str(), "1" | "2" | "-")));
             let is_err_fd = cur == "2" || (next == b'&' && cur.is_empty() && target == "2");
             if is_err_fd || cur == "1" {
                 cur.clear();
@@ -589,12 +622,20 @@ fn parse_stage(stage: &str) -> ParsedStage {
 
 fn finalize_parsed_stage(ps: &mut ParsedStage, redir_in: Vec<String>) {
     let mut idx = 0usize;
-    while idx < ps.tokens.len() && ps.tokens[idx].contains('=') && !ps.tokens[idx].starts_with('-') {
+    while idx < ps.tokens.len() && ps.tokens[idx].contains('=') && !ps.tokens[idx].starts_with('-')
+    {
         idx += 1;
     }
     while idx < ps.tokens.len() {
-        let base = ps.tokens[idx].rsplit('/').next().unwrap_or("").to_ascii_lowercase();
-        if matches!(base.as_str(), "sudo" | "doas" | "nohup" | "time" | "exec" | "builtin") {
+        let base = ps.tokens[idx]
+            .rsplit('/')
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if matches!(
+            base.as_str(),
+            "sudo" | "doas" | "nohup" | "time" | "exec" | "builtin"
+        ) {
             idx += 1;
         } else if base == "command" {
             idx += 1;
@@ -617,13 +658,22 @@ fn finalize_parsed_stage(ps: &mut ParsedStage, redir_in: Vec<String>) {
         }
     }
 
-    let cmd = ps.tokens.get(idx).map(|t| t.rsplit('/').next().unwrap_or(t).to_ascii_lowercase());
-    let args = if idx + 1 <= ps.tokens.len() { &ps.tokens[idx + 1..] } else { &[] };
+    let cmd = ps
+        .tokens
+        .get(idx)
+        .map(|t| t.rsplit('/').next().unwrap_or(t).to_ascii_lowercase());
+    let args = if idx + 1 <= ps.tokens.len() {
+        &ps.tokens[idx + 1..]
+    } else {
+        &[]
+    };
 
     if let Some(ref c) = cmd {
         if FILE_READERS.contains(&c.as_str()) {
             if c == "tail" {
-                ps.is_follow = args.iter().any(|a| a == "-f" || a == "-F" || a == "--follow" || a.starts_with("-f"));
+                ps.is_follow = args
+                    .iter()
+                    .any(|a| a == "-f" || a == "-F" || a == "--follow" || a.starts_with("-f"));
             }
             if !ps.is_follow {
                 let mut skip = false;
@@ -649,7 +699,10 @@ fn finalize_parsed_stage(ps: &mut ParsedStage, redir_in: Vec<String>) {
         } else if c == "xargs" {
             let mut s = 0usize;
             while s < args.len() {
-                if matches!(args[s].as_str(), "-I" | "-n" | "-L" | "-P" | "-s" | "-E" | "-d") {
+                if matches!(
+                    args[s].as_str(),
+                    "-I" | "-n" | "-L" | "-P" | "-s" | "-E" | "-d"
+                ) {
                     s += 2;
                 } else if args[s].starts_with('-') {
                     s += 1;
@@ -657,7 +710,10 @@ fn finalize_parsed_stage(ps: &mut ParsedStage, redir_in: Vec<String>) {
                     break;
                 }
             }
-            if let Some(sub) = args.get(s).map(|t| t.rsplit('/').next().unwrap_or(t).to_ascii_lowercase()) {
+            if let Some(sub) = args
+                .get(s)
+                .map(|t| t.rsplit('/').next().unwrap_or(t).to_ascii_lowercase())
+            {
                 if FILE_READERS.contains(&sub.as_str()) {
                     ps.xargs_reader = Some(sub);
                 }
@@ -665,7 +721,11 @@ fn finalize_parsed_stage(ps: &mut ParsedStage, redir_in: Vec<String>) {
         } else if c == "find" {
             for w in args.windows(2) {
                 if matches!(w[0].as_str(), "-exec" | "-execdir") {
-                    let sub = w[1].rsplit('/').next().unwrap_or(&w[1]).to_ascii_lowercase();
+                    let sub = w[1]
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or(&w[1])
+                        .to_ascii_lowercase();
                     if FILE_READERS.contains(&sub.as_str()) {
                         ps.find_exec_reader = Some(sub);
                         break;

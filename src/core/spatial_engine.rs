@@ -2,7 +2,9 @@
 use crate::domain::computer_use::VirtualDisplayState;
 use crate::domain::spatial_action::SpatialGroundingResult;
 use crate::domain::spatial_mediator::SpatialActionMediator;
-use crate::domain::types::spatial_types::{SpatialActionContract, SpatialScene, SpatialTarget, TargetProvenance};
+use crate::domain::types::spatial_types::{
+    SpatialActionContract, SpatialScene, SpatialTarget, TargetProvenance,
+};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 
@@ -65,7 +67,10 @@ impl SpatialInteractionEngine {
         for win in &display.windows {
             let tl = win.title.to_ascii_lowercase();
             if win.id != display.active_window_id
-                && (tl.contains("dialog") || tl.contains("alert") || tl.contains("confirm") || tl.contains("modal"))
+                && (tl.contains("dialog")
+                    || tl.contains("alert")
+                    || tl.contains("confirm")
+                    || tl.contains("modal"))
             {
                 for el in &win.elements {
                     if !scene.targets.iter().any(|t| t.id == el.id) {
@@ -98,13 +103,21 @@ impl SpatialInteractionEngine {
         let cur_epoch = scene.layout_epoch;
 
         for dom_el in dom_elements {
-            let som_id = dom_el.get("somId").and_then(|v| v.as_u64()).map(|n| n as u32);
+            let som_id = dom_el
+                .get("somId")
+                .and_then(|v| v.as_u64())
+                .map(|n| n as u32);
             let elem_id = dom_el.get("id").and_then(|v| v.as_str()).unwrap_or("");
-            let role = dom_el.get("role").and_then(|v| v.as_str()).unwrap_or("generic");
+            let role = dom_el
+                .get("role")
+                .and_then(|v| v.as_str())
+                .unwrap_or("generic");
             let label = dom_el.get("label").and_then(|v| v.as_str()).unwrap_or("");
 
             // Try to match existing visual target by som_id or element_id
-            if let Some(existing) = scene.targets.iter_mut().find(|t| (som_id.is_some() && t.som_id == som_id) || (!elem_id.is_empty() && t.id == elem_id)) {
+            if let Some(existing) = scene.targets.iter_mut().find(|t| {
+                (som_id.is_some() && t.som_id == som_id) || (!elem_id.is_empty() && t.id == elem_id)
+            }) {
                 existing.provenance = TargetProvenance::DomTree;
                 existing.confidence = 1.0;
                 if !label.is_empty() && existing.label.is_empty() {
@@ -112,7 +125,11 @@ impl SpatialInteractionEngine {
                 }
             } else if !elem_id.is_empty() || som_id.is_some() {
                 // Synthesize new spatial target with heuristic bounds if only in DOM
-                let synth_id = if !elem_id.is_empty() { elem_id.to_string() } else { format!("dom-{}", som_id.unwrap_or(0)) };
+                let synth_id = if !elem_id.is_empty() {
+                    elem_id.to_string()
+                } else {
+                    format!("dom-{}", som_id.unwrap_or(0))
+                };
                 let mut target = SpatialTarget::new(
                     synth_id,
                     som_id,
@@ -135,13 +152,19 @@ impl SpatialInteractionEngine {
     /// Dispatches an action through the complete Double-Wrapped Spatial Action Architecture:
     /// Wrapper A (Spatial Grounding) -> Wrapper B Pre (Preconditions & Containment) ->
     /// Native Dispatch -> Wrapper B Post (Observable Postcondition Verification).
-    pub fn execute_spatially_grounded_action(&self, contract: &SpatialActionContract) -> Result<Value, String> {
+    pub fn execute_spatially_grounded_action(
+        &self,
+        contract: &SpatialActionContract,
+    ) -> Result<Value, String> {
         // Step 1: Refresh scene state from display only when frame_seq changed or mediator has no active scene
         let mut before_scene = {
             let disp = self.display.lock().unwrap_or_else(|e| e.into_inner());
             let fresh = Self::extract_scene_from_display(&disp);
             let mut med = self.mediator.lock().unwrap_or_else(|e| e.into_inner());
-            if med.layout_epoch == 0 || med.active_scene.frame_seq != fresh.frame_seq || med.active_scene.targets.is_empty() {
+            if med.layout_epoch == 0
+                || med.active_scene.frame_seq != fresh.frame_seq
+                || med.active_scene.targets.is_empty()
+            {
                 med.update_scene(fresh.clone());
             }
             med.active_scene.clone()
@@ -154,8 +177,17 @@ impl SpatialInteractionEngine {
         };
 
         let mut grounded = match grounding {
-            SpatialGroundingResult { success: true, grounded: Some(g), .. } => g,
-            SpatialGroundingResult { error: Some(err), recovery_hint, ambiguity_candidates, .. } => {
+            SpatialGroundingResult {
+                success: true,
+                grounded: Some(g),
+                ..
+            } => g,
+            SpatialGroundingResult {
+                error: Some(err),
+                recovery_hint,
+                ambiguity_candidates,
+                ..
+            } => {
                 return Ok(json!({
                     "success": false,
                     "groundingPhase": "rejected",
@@ -246,14 +278,22 @@ impl SpatialInteractionEngine {
             disp.execute_action(&dispatch_args)
         }?;
 
-        let duration_ms = crate::plumbing::hash_and_math::now_ms().saturating_sub(start_time).max(1);
+        let duration_ms = crate::plumbing::hash_and_math::now_ms()
+            .saturating_sub(start_time)
+            .max(1);
 
         // Step 5: WRAPPER B (Post) — Observable Postcondition Verification
         let (after_scene, receipt, med_layout_epoch) = {
             let disp = self.display.lock().unwrap_or_else(|e| e.into_inner());
             let after = Self::extract_scene_from_display(&disp);
             let mut med = self.mediator.lock().unwrap_or_else(|e| e.into_inner());
-            let rcpt = med.verify_post_execution(&contract.action_name, Some(&grounded), &before_scene, &after, duration_ms);
+            let rcpt = med.verify_post_execution(
+                &contract.action_name,
+                Some(&grounded),
+                &before_scene,
+                &after,
+                duration_ms,
+            );
             (after, rcpt, med.layout_epoch)
         };
 
@@ -282,12 +322,18 @@ impl SpatialInteractionEngine {
 
     /// Generates and executes a multi-step `SpatialActionPlan` (e.g., scroll into view -> focus click -> type)
     /// through the Double-Wrapped Spatial Action Architecture.
-    pub extern "Rust" fn execute_plan(&self, contract: &SpatialActionContract) -> Result<Value, String> {
+    pub extern "Rust" fn execute_plan(
+        &self,
+        contract: &SpatialActionContract,
+    ) -> Result<Value, String> {
         let plan = {
             let disp = self.display.lock().unwrap_or_else(|e| e.into_inner());
             let fresh = Self::extract_scene_from_display(&disp);
             let mut med = self.mediator.lock().unwrap_or_else(|e| e.into_inner());
-            if med.layout_epoch == 0 || med.active_scene.frame_seq != fresh.frame_seq || med.active_scene.targets.is_empty() {
+            if med.layout_epoch == 0
+                || med.active_scene.frame_seq != fresh.frame_seq
+                || med.active_scene.targets.is_empty()
+            {
                 med.update_scene(fresh);
             }
             if let Some(expected) = contract.expected_epoch {
@@ -311,7 +357,10 @@ impl SpatialInteractionEngine {
             step.auto_scroll_if_needed = false;
             step.expected_epoch = None;
             let step_res = self.execute_spatially_grounded_action(&step)?;
-            let step_ok = step_res.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+            let step_ok = step_res
+                .get("success")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             step_results.push(step_res);
             if !step_ok {
                 all_succeeded = false;
@@ -336,7 +385,9 @@ impl SpatialInteractionEngine {
         let origin_rect = origin.to_spatial_rect();
         let origin_center = origin_rect.center();
 
-        let mut candidates: Vec<&SpatialTarget> = med.active_scene.targets
+        let mut candidates: Vec<&SpatialTarget> = med
+            .active_scene
+            .targets
             .iter()
             .filter(|t| t.id != origin_id)
             .filter(|t| {
@@ -355,7 +406,9 @@ impl SpatialInteractionEngine {
         candidates.sort_by(|a, b| {
             let dist_a = a.to_spatial_rect().center().distance_sq(&origin_center);
             let dist_b = b.to_spatial_rect().center().distance_sq(&origin_center);
-            dist_a.partial_cmp(&dist_b).unwrap_or(std::cmp::Ordering::Equal)
+            dist_a
+                .partial_cmp(&dist_b)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         candidates.first().map(|t| (*t).clone())

@@ -1,6 +1,11 @@
 // [LAYER: DOMAIN]
-pub use crate::domain::types::provider_catalog_data::{is_retired_provider, lookup_provider_descriptor, opencode_go_model_id, resolve_model_aware_wire_and_model, resolve_opencode_go_model, retired_provider_remediation, suggest_provider_slug, ProviderBillingClass, ProviderDescriptor, WireDialect, LEGACY_ANTIGRAVITY_TOMBSTONE_MESSAGE, OPENCODE_GO_TRANSPORTS, PROVIDER_DESCRIPTORS};
 use crate::domain::types::provider_catalog_data::normalize_provider_token;
+pub use crate::domain::types::provider_catalog_data::{
+    is_retired_provider, lookup_provider_descriptor, opencode_go_model_id,
+    resolve_model_aware_wire_and_model, resolve_opencode_go_model, retired_provider_remediation,
+    suggest_provider_slug, ProviderBillingClass, ProviderDescriptor, WireDialect,
+    LEGACY_ANTIGRAVITY_TOMBSTONE_MESSAGE, OPENCODE_GO_TRANSPORTS, PROVIDER_DESCRIPTORS,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -92,12 +97,18 @@ impl ProviderChain {
             if trimmed.is_empty() {
                 continue;
             }
-            let (raw_prov, model_override) = trimmed.split_once(':').map(|(p, m)| (p, Some(m.trim()))).unwrap_or((trimmed, None));
+            let (raw_prov, model_override) = trimmed
+                .split_once(':')
+                .map(|(p, m)| (p, Some(m.trim())))
+                .unwrap_or((trimmed, None));
             if is_retired_provider(raw_prov) {
                 continue;
             }
             let canon = canonicalize_provider_id(raw_prov);
-            if !providers.iter().any(|existing| existing.split(':').next().unwrap_or(existing) == canon) {
+            if !providers
+                .iter()
+                .any(|existing| existing.split(':').next().unwrap_or(existing) == canon)
+            {
                 providers.push(match model_override {
                     Some(m) if !m.is_empty() => format!("{canon}:{m}"),
                     _ => canon,
@@ -107,17 +118,26 @@ impl ProviderChain {
         if providers.is_empty() {
             providers.push("openai".to_string());
         }
-        Self { providers, cursor: 0 }
+        Self {
+            providers,
+            cursor: 0,
+        }
     }
 
     #[inline]
     pub fn current(&self) -> &str {
-        self.providers.get(self.cursor).map(String::as_str).unwrap_or("openai")
+        self.providers
+            .get(self.cursor)
+            .map(String::as_str)
+            .unwrap_or("openai")
     }
 
     #[inline]
     pub fn primary(&self) -> &str {
-        self.providers.first().map(String::as_str).unwrap_or("openai")
+        self.providers
+            .first()
+            .map(String::as_str)
+            .unwrap_or("openai")
     }
 
     #[inline]
@@ -182,19 +202,41 @@ where
     F: Fn(&str) -> Option<String>,
 {
     let desc = lookup_provider_descriptor(target_provider);
-    let provider_id = desc.map(|d| d.id.to_string()).unwrap_or_else(|| canonicalize_provider_id(target_provider));
-    let display_name = desc.map(|d| d.display_name.to_string()).unwrap_or_else(|| provider_id.clone());
-    let secret_slot = desc.map(|d| d.secret_slot.to_string()).unwrap_or_else(|| provider_id.clone());
-    let billing_class = desc.map(|d| d.billing_class).unwrap_or(ProviderBillingClass::Metered);
+    let provider_id = desc
+        .map(|d| d.id.to_string())
+        .unwrap_or_else(|| canonicalize_provider_id(target_provider));
+    let display_name = desc
+        .map(|d| d.display_name.to_string())
+        .unwrap_or_else(|| provider_id.clone());
+    let secret_slot = desc
+        .map(|d| d.secret_slot.to_string())
+        .unwrap_or_else(|| provider_id.clone());
+    let billing_class = desc
+        .map(|d| d.billing_class)
+        .unwrap_or(ProviderBillingClass::Metered);
 
     let api_endpoint = explicit_endpoint
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(String::from)
-        .or_else(|| desc.and_then(|d| d.endpoint_env).and_then(&env_lookup).filter(|s| !s.trim().is_empty()))
-        .or_else(|| saved_endpoints.get(&provider_id).cloned().filter(|s| !s.trim().is_empty()))
+        .or_else(|| {
+            desc.and_then(|d| d.endpoint_env)
+                .and_then(&env_lookup)
+                .filter(|s| !s.trim().is_empty())
+        })
+        .or_else(|| {
+            saved_endpoints
+                .get(&provider_id)
+                .cloned()
+                .filter(|s| !s.trim().is_empty())
+        })
         .or_else(|| desc.map(|d| d.default_endpoint.to_string()))
-        .or_else(|| saved_endpoints.get(&secret_slot).cloned().filter(|s| !s.trim().is_empty()))
+        .or_else(|| {
+            saved_endpoints
+                .get(&secret_slot)
+                .cloned()
+                .filter(|s| !s.trim().is_empty())
+        })
         .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
 
     let raw_model = explicit_model
@@ -232,7 +274,10 @@ where
         key_source = "explicit".to_string();
     } else if let Some(d) = desc {
         for &env_name in d.env_vars {
-            if let Some(val) = env_lookup(env_name).map(|v| v.trim().to_string()).filter(|v| !v.is_empty()) {
+            if let Some(val) = env_lookup(env_name)
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+            {
                 api_key = Some(val);
                 key_source = format!("env:{env_name}");
                 break;
@@ -283,7 +328,10 @@ pub fn resolve_effective_wire_override(
         .map(canonicalize_provider_id)
         .is_some_and(|up| up == canonicalize_provider_id(selected_provider));
     if same_provider {
-        cfg_wire.map(str::trim).filter(|s| !s.is_empty()).map(String::from)
+        cfg_wire
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from)
     } else {
         None
     }
@@ -293,8 +341,15 @@ pub fn resolve_effective_wire_override(
 /// Notably classifies Google's OpenAI-compatible path (`/v1beta/openai`) as [`WireDialect::ChatCompletions`].
 pub fn infer_wire_dialect_from_endpoint(endpoint: &str) -> WireDialect {
     let lower = endpoint.trim().to_ascii_lowercase();
-    let path_part = lower.split(['?', '#']).next().unwrap_or(&lower).trim_end_matches('/');
-    if path_part.ends_with("/openai") || path_part.contains("/openai/") || path_part.ends_with("/chat/completions") {
+    let path_part = lower
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(&lower)
+        .trim_end_matches('/');
+    if path_part.ends_with("/openai")
+        || path_part.contains("/openai/")
+        || path_part.ends_with("/chat/completions")
+    {
         WireDialect::ChatCompletions
     } else if lower.contains("anthropic") || path_part.ends_with("/messages") {
         WireDialect::AnthropicMessages

@@ -63,7 +63,13 @@ pub struct SpatialTarget {
 }
 
 impl SpatialTarget {
-    pub fn new(id: impl Into<String>, som_id: Option<u32>, role: impl Into<String>, label: impl Into<String>, bounds: [i32; 4]) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        som_id: Option<u32>,
+        role: impl Into<String>,
+        label: impl Into<String>,
+        bounds: [i32; 4],
+    ) -> Self {
         Self {
             id: id.into(),
             som_id,
@@ -86,12 +92,26 @@ impl SpatialTarget {
 
     pub fn is_input_capable(&self) -> bool {
         let r = self.role.to_ascii_lowercase();
-        matches!(r.as_str(), "textbox" | "input" | "textarea" | "combobox" | "searchbox" | "text")
+        matches!(
+            r.as_str(),
+            "textbox" | "input" | "textarea" | "combobox" | "searchbox" | "text"
+        )
     }
 
     pub fn is_clickable(&self) -> bool {
         let r = self.role.to_ascii_lowercase();
-        matches!(r.as_str(), "button" | "link" | "checkbox" | "radio" | "tab" | "menuitem" | "switch" | "option" | "summary")
+        matches!(
+            r.as_str(),
+            "button"
+                | "link"
+                | "checkbox"
+                | "radio"
+                | "tab"
+                | "menuitem"
+                | "switch"
+                | "option"
+                | "summary"
+        )
     }
 }
 
@@ -142,7 +162,8 @@ impl SpatialScene {
 
     pub fn find_at_point(&self, x: i32, y: i32) -> Vec<&SpatialTarget> {
         let pt = crate::plumbing::spatial_geometry::SpatialPoint::new(x as f64, y as f64);
-        let mut hits: Vec<&SpatialTarget> = self.targets
+        let mut hits: Vec<&SpatialTarget> = self
+            .targets
             .iter()
             .filter(|t| t.to_spatial_rect().contains_point(&pt))
             .collect();
@@ -151,7 +172,9 @@ impl SpatialScene {
             b.z_order.cmp(&a.z_order).then_with(|| {
                 let area_a = a.to_spatial_rect().area();
                 let area_b = b.to_spatial_rect().area();
-                area_a.partial_cmp(&area_b).unwrap_or(std::cmp::Ordering::Equal)
+                area_a
+                    .partial_cmp(&area_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
         });
         hits
@@ -203,13 +226,33 @@ impl Default for SpatialActionContract {
 pub enum SpatialError {
     TargetNotFound(String),
     AmbiguousTarget(Vec<String>),
-    StaleTargetEpoch { expected: u64, current: u64 },
-    TargetOccluded { target_id: String, occlusion_ratio: f64, occluded_by: String },
-    TargetOutOfBounds { target_id: String, bounds: [i32; 4] },
-    ContainmentViolation { point: [i32; 2], bounds: [i32; 4] },
+    StaleTargetEpoch {
+        expected: u64,
+        current: u64,
+    },
+    TargetOccluded {
+        target_id: String,
+        occlusion_ratio: f64,
+        occluded_by: String,
+    },
+    TargetOutOfBounds {
+        target_id: String,
+        bounds: [i32; 4],
+    },
+    ContainmentViolation {
+        point: [i32; 2],
+        bounds: [i32; 4],
+    },
     TargetDisabled(String),
-    ActionNotPermittedForRole { role: String, action: String },
-    ConfidenceTooLow { target_id: String, confidence: f32, required: f32 },
+    ActionNotPermittedForRole {
+        role: String,
+        action: String,
+    },
+    ConfidenceTooLow {
+        target_id: String,
+        confidence: f32,
+        required: f32,
+    },
     TrajectoryBlocked(String),
     ExecutionPreconditionFailed(String),
     PostconditionFailed(String),
@@ -218,17 +261,63 @@ pub enum SpatialError {
 impl std::fmt::Display for SpatialError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::TargetNotFound(id) => write!(f, "spatial_target_not_found: Target '{}' not resolved in spatial scene", id),
-            Self::AmbiguousTarget(ids) => write!(f, "spatial_ambiguity: Multiple targets match without distinct precedence: {:?}", ids),
-            Self::StaleTargetEpoch { expected, current } => write!(f, "stale_target_epoch: Expected epoch {} but current scene epoch is {}", expected, current),
-            Self::TargetOccluded { target_id, occlusion_ratio, occluded_by } => write!(f, "target_occluded: Target '{}' is {:.1}% occluded by '{}'", target_id, occlusion_ratio * 100.0, occluded_by),
-            Self::TargetOutOfBounds { target_id, bounds } => write!(f, "target_out_of_bounds: Target '{}' with bounds {:?} is outside active viewport", target_id, bounds),
-            Self::ContainmentViolation { point, bounds } => write!(f, "containment_violation: Point {:?} is not contained in target bounds {:?}", point, bounds),
-            Self::TargetDisabled(id) => write!(f, "target_disabled: Target '{}' is marked disabled", id),
-            Self::ActionNotPermittedForRole { role, action } => write!(f, "action_not_permitted: Action '{}' is invalid for element role '{}'", action, role),
-            Self::ConfidenceTooLow { target_id, confidence, required } => write!(f, "confidence_too_low: Target '{}' confidence {:.2} below required {:.2}", target_id, confidence, required),
+            Self::TargetNotFound(id) => write!(
+                f,
+                "spatial_target_not_found: Target '{}' not resolved in spatial scene",
+                id
+            ),
+            Self::AmbiguousTarget(ids) => write!(
+                f,
+                "spatial_ambiguity: Multiple targets match without distinct precedence: {:?}",
+                ids
+            ),
+            Self::StaleTargetEpoch { expected, current } => write!(
+                f,
+                "stale_target_epoch: Expected epoch {} but current scene epoch is {}",
+                expected, current
+            ),
+            Self::TargetOccluded {
+                target_id,
+                occlusion_ratio,
+                occluded_by,
+            } => write!(
+                f,
+                "target_occluded: Target '{}' is {:.1}% occluded by '{}'",
+                target_id,
+                occlusion_ratio * 100.0,
+                occluded_by
+            ),
+            Self::TargetOutOfBounds { target_id, bounds } => write!(
+                f,
+                "target_out_of_bounds: Target '{}' with bounds {:?} is outside active viewport",
+                target_id, bounds
+            ),
+            Self::ContainmentViolation { point, bounds } => write!(
+                f,
+                "containment_violation: Point {:?} is not contained in target bounds {:?}",
+                point, bounds
+            ),
+            Self::TargetDisabled(id) => {
+                write!(f, "target_disabled: Target '{}' is marked disabled", id)
+            }
+            Self::ActionNotPermittedForRole { role, action } => write!(
+                f,
+                "action_not_permitted: Action '{}' is invalid for element role '{}'",
+                action, role
+            ),
+            Self::ConfidenceTooLow {
+                target_id,
+                confidence,
+                required,
+            } => write!(
+                f,
+                "confidence_too_low: Target '{}' confidence {:.2} below required {:.2}",
+                target_id, confidence, required
+            ),
             Self::TrajectoryBlocked(reason) => write!(f, "trajectory_blocked: {}", reason),
-            Self::ExecutionPreconditionFailed(reason) => write!(f, "precondition_failed: {}", reason),
+            Self::ExecutionPreconditionFailed(reason) => {
+                write!(f, "precondition_failed: {}", reason)
+            }
             Self::PostconditionFailed(reason) => write!(f, "postcondition_failed: {}", reason),
         }
     }
@@ -245,4 +334,3 @@ pub enum AssuranceVerdict {
     RequiresEscalation(String),
     RecoveryAvailable(String),
 }
-

@@ -38,7 +38,12 @@ pub struct SpecialistInsight {
 }
 
 impl SpecialistInsight {
-    pub fn new(role: impl Into<String>, finding: impl Into<String>, confidence: f32, provenance: impl Into<String>) -> Self {
+    pub fn new(
+        role: impl Into<String>,
+        finding: impl Into<String>,
+        confidence: f32,
+        provenance: impl Into<String>,
+    ) -> Self {
         Self {
             specialist_role: role.into(),
             finding: finding.into(),
@@ -75,7 +80,12 @@ pub struct SwarmConsultationRequest {
 }
 
 impl SwarmConsultationRequest {
-    pub fn new(id: impl Into<String>, objective: impl Into<String>, app: impl Into<String>, title: impl Into<String>) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        objective: impl Into<String>,
+        app: impl Into<String>,
+        title: impl Into<String>,
+    ) -> Self {
         Self {
             consultation_id: id.into(),
             task_objective: objective.into(),
@@ -149,4 +159,3 @@ impl ISwarmConsultationResponse for SwarmConsultationResponse {
         self.confidence
     }
 }
-

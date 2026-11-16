@@ -87,7 +87,10 @@ impl ToolSpec {
                     let desc_low = pschema.description.to_ascii_lowercase();
                     let items = if desc_low.contains('{') || desc_low.contains("object") {
                         json!({ "type": "object", "properties": {} })
-                    } else if desc_low.contains("[x, y]") || desc_low.contains("coordinate") || desc_low.contains("number") {
+                    } else if desc_low.contains("[x, y]")
+                        || desc_low.contains("coordinate")
+                        || desc_low.contains("number")
+                    {
                         json!({ "type": "number" })
                     } else {
                         json!({ "type": "string" })

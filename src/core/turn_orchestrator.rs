@@ -1,17 +1,33 @@
 // [LAYER: CORE]
 use crate::core::engine::AgentEngine;
 use crate::core::session_store::SessionStore;
-use crate::domain::interfaces::{ILlmProvider, IModelPricingRegistry, IWorkspaceSnapshotCas, ProgressCallback};
-use crate::domain::types::model_catalog::ModelPricingCatalog;
-use crate::domain::pricing_and_taxonomy::{compute_retry_delay_ms, resolve_compatible_fallback_model_with_catalog, select_auto_routed_model_with_catalog, AutoRouteDecision, BillingMetering, ErrorCategory, ErrorEnvelope, ProviderTokenUsage};
+use crate::domain::interfaces::{
+    ILlmProvider, IModelPricingRegistry, IWorkspaceSnapshotCas, ProgressCallback,
+};
+use crate::domain::pricing_and_taxonomy::{
+    compute_retry_delay_ms, resolve_compatible_fallback_model_with_catalog,
+    select_auto_routed_model_with_catalog, AutoRouteDecision, BillingMetering, ErrorCategory,
+    ErrorEnvelope, ProviderTokenUsage,
+};
 use crate::domain::turn_receipt::{CommandRunReceipt, FileChangeReceipt, TurnReceipt};
 use crate::domain::types::messages::{Role, SessionMessage};
+use crate::domain::types::model_catalog::ModelPricingCatalog;
 use crate::domain::types::posture_types::RepoConstitution;
-use crate::domain::types::progress::{EngineProgressMetadata, EngineProgressPhase, EngineProgressStatus, ToolExecutionRecord};
-use crate::domain::types::provider_registry::{canonicalize_provider_id, lookup_provider_descriptor, resolve_provider_route, ProviderChain, WireDialect};
-use crate::domain::types::runtime::{AgentConfig, CancellationToken, EngineTickOutcome, ExecutionPosture};
+use crate::domain::types::progress::{
+    EngineProgressMetadata, EngineProgressPhase, EngineProgressStatus, ToolExecutionRecord,
+};
+use crate::domain::types::provider_registry::{
+    canonicalize_provider_id, lookup_provider_descriptor, resolve_provider_route, ProviderChain,
+    WireDialect,
+};
+use crate::domain::types::runtime::{
+    AgentConfig, CancellationToken, EngineTickOutcome, ExecutionPosture,
+};
 use crate::domain::types::tick_result::{ProviderError, ProviderRequest, ProviderResponse};
-use crate::infrastructure::http_provider::{probe_local_ollama_model, probe_local_ollama_models, probe_openai_compatible_models, HttpProvider};
+use crate::infrastructure::http_provider::{
+    probe_local_ollama_model, probe_local_ollama_models, probe_openai_compatible_models,
+    HttpProvider,
+};
 use crate::infrastructure::pricing_updater::global_pricing_registry;
 use crate::plumbing::hash_and_math::now_ms;
 use crate::plumbing::text_tokens::{canonical_tool_name, estimate_text_tokens};
@@ -65,8 +81,14 @@ pub fn accumulate_round_usage(
         let first_round = accum.prompt_tokens == 0 && accum.completion_tokens == 0;
         accum.prompt_tokens = accum.prompt_tokens.saturating_add(u.prompt_tokens);
         accum.completion_tokens = accum.completion_tokens.saturating_add(u.completion_tokens);
-        accum.cached_prompt_tokens = accum.cached_prompt_tokens.saturating_add(u.cached_prompt_tokens);
-        accum.is_exact = if first_round { u.is_exact } else { accum.is_exact && u.is_exact };
+        accum.cached_prompt_tokens = accum
+            .cached_prompt_tokens
+            .saturating_add(u.cached_prompt_tokens);
+        accum.is_exact = if first_round {
+            u.is_exact
+        } else {
+            accum.is_exact && u.is_exact
+        };
     } else {
         let req_str = serde_json::to_string(&req.messages).unwrap_or_default();
         let tools_str = serde_json::to_string(&req.tools).unwrap_or_default();
@@ -74,7 +96,10 @@ pub fn accumulate_round_usage(
         let tc_tokens: usize = resp
             .tool_calls
             .iter()
-            .map(|tc| 8 + estimate_text_tokens(&tc.function.name) + estimate_text_tokens(&tc.function.arguments))
+            .map(|tc| {
+                8 + estimate_text_tokens(&tc.function.name)
+                    + estimate_text_tokens(&tc.function.arguments)
+            })
             .sum();
         accum.prompt_tokens = accum
             .prompt_tokens
@@ -104,11 +129,18 @@ impl AgentEngine {
     }
 
     pub fn receipts_snapshot(&self) -> Vec<TurnReceipt> {
-        self.turn_receipts.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.turn_receipts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     pub fn latest_receipt(&self) -> Option<TurnReceipt> {
-        self.turn_receipts.lock().unwrap_or_else(|e| e.into_inner()).last().cloned()
+        self.turn_receipts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .last()
+            .cloned()
     }
 
     pub async fn probe_ollama_default_model() -> Option<String> {
@@ -154,10 +186,14 @@ impl AgentEngine {
             &cfg.provider_endpoints,
             |env_key| std::env::var(env_key).ok(),
         );
-        if !matches!(route.wire_dialect, WireDialect::ChatCompletions | WireDialect::OpenAiResponses) {
+        if !matches!(
+            route.wire_dialect,
+            WireDialect::ChatCompletions | WireDialect::OpenAiResponses
+        ) {
             return Vec::new();
         }
-        let requires_key = lookup_provider_descriptor(&route.provider_id).is_some_and(|d| d.requires_api_key);
+        let requires_key =
+            lookup_provider_descriptor(&route.provider_id).is_some_and(|d| d.requires_api_key);
         if requires_key && route.api_key.is_none() {
             return Vec::new();
         }
@@ -176,7 +212,11 @@ impl AgentEngine {
         global_pricing_registry().refresh_now().await
     }
 
-    pub fn route_turn_model(provider: &str, configured_model: &str, prompt: &str) -> AutoRouteDecision {
+    pub fn route_turn_model(
+        provider: &str,
+        configured_model: &str,
+        prompt: &str,
+    ) -> AutoRouteDecision {
         if !provider.eq_ignore_ascii_case("scripted") {
             global_pricing_registry().ensure_fresh_background();
         }
@@ -228,14 +268,20 @@ impl AgentEngine {
 
         let prev_prov = cfg.provider.clone();
         let prev_key = cfg.api_key.clone();
-        let explicit_key_cleared = api_key_override.as_ref().is_some_and(|k| k.trim().is_empty());
+        let explicit_key_cleared = api_key_override
+            .as_ref()
+            .is_some_and(|k| k.trim().is_empty());
         if explicit_key_cleared {
             let slot = lookup_provider_descriptor(provider_id)
                 .map(|d| d.secret_slot.to_string())
                 .unwrap_or_else(|| provider_id.trim().to_ascii_lowercase());
             cfg.provider_keys.remove(&slot);
             cfg.provider_keys.remove(provider_id);
-        } else if let Some(explicit_key) = api_key_override.as_deref().map(str::trim).filter(|k| !k.is_empty()) {
+        } else if let Some(explicit_key) = api_key_override
+            .as_deref()
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+        {
             let slot = lookup_provider_descriptor(provider_id)
                 .map(|d| d.secret_slot.to_string())
                 .unwrap_or_else(|| provider_id.trim().to_ascii_lowercase());
@@ -248,7 +294,8 @@ impl AgentEngine {
             cfg.provider_endpoints.insert(pid, ep.to_string());
         }
 
-        let changed_provider = canonicalize_provider_id(&prev_prov) != canonicalize_provider_id(provider_id);
+        let changed_provider =
+            canonicalize_provider_id(&prev_prov) != canonicalize_provider_id(provider_id);
         let crossing_family = lookup_provider_descriptor(&prev_prov).map(|d| d.catalog_vendor)
             != lookup_provider_descriptor(provider_id).map(|d| d.catalog_vendor);
         if crossing_family {
@@ -264,8 +311,16 @@ impl AgentEngine {
             endpoint_override,
             api_key_override.as_deref().filter(|k| !k.trim().is_empty()),
             cfg.wire_dialect.as_deref(),
-            if explicit_key_cleared { None } else { Some(prev_prov.as_str()) },
-            if explicit_key_cleared { None } else { prev_key.as_deref() },
+            if explicit_key_cleared {
+                None
+            } else {
+                Some(prev_prov.as_str())
+            },
+            if explicit_key_cleared {
+                None
+            } else {
+                prev_key.as_deref()
+            },
             &cfg.provider_keys,
             &cfg.provider_endpoints,
             |env_key| std::env::var(env_key).ok(),
@@ -274,7 +329,11 @@ impl AgentEngine {
         cfg.provider = route.provider_id.clone();
         cfg.model_name = route.model_name;
         cfg.api_endpoint = route.api_endpoint.clone();
-        cfg.api_key = if explicit_key_cleared { None } else { route.api_key };
+        cfg.api_key = if explicit_key_cleared {
+            None
+        } else {
+            route.api_key
+        };
 
         let mut http = HttpProvider::new(
             route.provider_id,
@@ -282,8 +341,14 @@ impl AgentEngine {
             cfg.api_key.clone(),
             cfg.provider_timeout_ms,
         );
-        if let Some(dialect) = cfg.wire_dialect.as_deref().and_then(WireDialect::parse_override) {
-            http = http.with_wire_dialect(dialect).with_explicit_wire_override(true);
+        if let Some(dialect) = cfg
+            .wire_dialect
+            .as_deref()
+            .and_then(WireDialect::parse_override)
+        {
+            http = http
+                .with_wire_dialect(dialect)
+                .with_explicit_wire_override(true);
         } else {
             http = http.with_wire_dialect(route.wire_dialect);
         }
@@ -295,7 +360,10 @@ impl AgentEngine {
         before_snap: &str,
         after_snap: Option<&str>,
     ) -> Result<(Vec<FileChangeReceipt>, String), String> {
-        self.cas.lock().unwrap_or_else(|e| e.into_inner()).diff_between(before_snap, after_snap)
+        self.cas
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .diff_between(before_snap, after_snap)
     }
 
     pub fn cas_snapshot_id_for_game_snapshot(&self, snapshot_id: &str) -> Option<String> {
@@ -306,23 +374,51 @@ impl AgentEngine {
     }
 
     pub fn undo_last_turn(&self, force: bool) -> Result<Value, String> {
-        let last = self.turn_receipts.lock().unwrap_or_else(|e| e.into_inner()).last().cloned();
+        let last = self
+            .turn_receipts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .last()
+            .cloned();
         if let Some(receipt) = last {
-            if let (Some(before), Some(after)) = (&receipt.snapshot_before, &receipt.snapshot_after) {
+            if let (Some(before), Some(after)) = (&receipt.snapshot_before, &receipt.snapshot_after)
+            {
                 if !receipt.file_changes.is_empty() {
-                    let actions = self.cas.lock().unwrap_or_else(|e| e.into_inner()).undo_turn_changes(before, after, force)?;
-                    self.turn_receipts.lock().unwrap_or_else(|e| e.into_inner()).pop();
+                    let actions = self
+                        .cas
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .undo_turn_changes(before, after, force)?;
+                    self.turn_receipts
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .pop();
                     let journal_turn_id = receipt.turn_id.replace('-', "_");
-                    self.tools().journal.lock().unwrap_or_else(|e| e.into_inner()).discard_turn(&journal_turn_id);
-                    self.tools().cache.lock().unwrap_or_else(|e| e.into_inner()).clear();
-                    self.tools().read_tracker.lock().unwrap_or_else(|e| e.into_inner()).reset_stamps();
+                    self.tools()
+                        .journal
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .discard_turn(&journal_turn_id);
+                    self.tools()
+                        .cache
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .clear();
+                    self.tools()
+                        .read_tracker
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .reset_stamps();
                     return Ok(json!({
                         "restoredCount": actions.len(),
                         "actions": actions,
                         "turnId": receipt.turn_id,
                     }));
                 } else {
-                    self.turn_receipts.lock().unwrap_or_else(|e| e.into_inner()).pop();
+                    self.turn_receipts
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .pop();
                     return Ok(json!({
                         "restoredCount": 0,
                         "actions": Vec::<String>::new(),
@@ -330,18 +426,41 @@ impl AgentEngine {
                     }));
                 }
             }
-            self.turn_receipts.lock().unwrap_or_else(|e| e.into_inner()).pop();
+            self.turn_receipts
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .pop();
         }
-        let fallback = self.tools().journal.lock().unwrap_or_else(|e| e.into_inner()).rollback_last();
-        self.tools().cache.lock().unwrap_or_else(|e| e.into_inner()).clear();
-        self.tools().read_tracker.lock().unwrap_or_else(|e| e.into_inner()).reset_stamps();
+        let fallback = self
+            .tools()
+            .journal
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .rollback_last();
+        self.tools()
+            .cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        self.tools()
+            .read_tracker
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .reset_stamps();
         serde_json::to_value(fallback).map_err(|e| e.to_string())
     }
 
     pub async fn ask_side_question(&self, question: &str) -> Result<String, ProviderError> {
         let cfg = self.config_snapshot();
-        let facts = crate::infrastructure::vfs_store::WorkspacePromptProbe::probe_cached(self.workspace_root());
-        let side_sys = crate::domain::prompt_spec::SystemPromptSpec::for_side_question().render(&cfg, self.workspace_root(), &facts, &[]);
+        let facts = crate::infrastructure::vfs_store::WorkspacePromptProbe::probe_cached(
+            self.workspace_root(),
+        );
+        let side_sys = crate::domain::prompt_spec::SystemPromptSpec::for_side_question().render(
+            &cfg,
+            self.workspace_root(),
+            &facts,
+            &[],
+        );
         let req = ProviderRequest {
             model: cfg.model_name,
             messages: vec![
@@ -376,9 +495,16 @@ impl AgentEngine {
         started_ms: u64,
     ) -> Result<ProviderResponse, (ProviderError, Option<ErrorEnvelope>)> {
         let is_scripted = cfg.provider.eq_ignore_ascii_case("scripted")
-            || self.provider_arc().provider_name().eq_ignore_ascii_case("scripted");
+            || self
+                .provider_arc()
+                .provider_name()
+                .eq_ignore_ascii_case("scripted");
         let max_attempts: u32 = if is_scripted {
-            if tools_admitted { 1 } else { 2 }
+            if tools_admitted {
+                1
+            } else {
+                2
+            }
         } else {
             3
         };
@@ -386,13 +512,20 @@ impl AgentEngine {
 
         for attempt in 1..=max_attempts {
             let conn_id = format!("provider-r{round}-a{attempt}");
-            let active_prov_id = turn_route.as_ref().map(|(_, p, _)| p.as_str()).unwrap_or(&cfg.provider);
+            let active_prov_id = turn_route
+                .as_ref()
+                .map(|(_, p, _)| p.as_str())
+                .unwrap_or(&cfg.provider);
             if attempt >= 2 && !*is_fallback_model {
                 let catalog = global_pricing_registry().snapshot_catalog();
                 if let Some(fb) = resolve_compatible_fallback_model_with_catalog(
                     active_prov_id,
                     active_model,
-                    if turn_route.is_none() { cfg.fallback_model.as_deref() } else { None },
+                    if turn_route.is_none() {
+                        cfg.fallback_model.as_deref()
+                    } else {
+                        None
+                    },
                     &catalog,
                 ) {
                     *active_model = fb;
@@ -405,7 +538,10 @@ impl AgentEngine {
                 &conn_id,
                 EngineProgressPhase::Connecting,
                 EngineProgressStatus::Started,
-                format!("Requesting completion from {} (attempt {attempt})", *active_model),
+                format!(
+                    "Requesting completion from {} (attempt {attempt})",
+                    *active_model
+                ),
                 None,
                 started_ms,
                 Some(EngineProgressMetadata {
@@ -447,13 +583,21 @@ impl AgentEngine {
                 }
                 Err(err) => {
                     if err.is_cancelled()
-                        || cancel_token.as_ref().map(|t| t.is_cancelled()).unwrap_or(false)
+                        || cancel_token
+                            .as_ref()
+                            .map(|t| t.is_cancelled())
+                            .unwrap_or(false)
                     {
                         return Err((ProviderError::Cancelled, None));
                     }
 
                     let (envelope, retry_after_ms) = match &err {
-                        ProviderError::HttpStatus { status, body, retry_after_ms, .. } => (
+                        ProviderError::HttpStatus {
+                            status,
+                            body,
+                            retry_after_ms,
+                            ..
+                        } => (
                             Some(ErrorEnvelope::classify_http(*status, body, tools_admitted)),
                             *retry_after_ms,
                         ),
@@ -473,7 +617,8 @@ impl AgentEngine {
                                 recoverable: true,
                                 code: Some("transport_error".to_string()),
                                 message: err.to_string(),
-                                remediation: "Verify network connectivity or local Ollama server.".to_string(),
+                                remediation: "Verify network connectivity or local Ollama server."
+                                    .to_string(),
                             }),
                             None,
                         ),
@@ -486,9 +631,8 @@ impl AgentEngine {
                         .unwrap_or_else(|| err.is_retryable());
                     // For scripted tests, preserve FT-04 exact behavior (`!tools_admitted`); for real HTTP providers,
                     // transient 429/503/timeout mid-turn IS safely retryable because the failed HTTP call produced no new tool calls!
-                    let can_retry = attempt < max_attempts
-                        && recoverable
-                        && (!is_scripted || !tools_admitted);
+                    let can_retry =
+                        attempt < max_attempts && recoverable && (!is_scripted || !tools_admitted);
 
                     self.emit_progress_internal(
                         on_progress,
@@ -517,7 +661,8 @@ impl AgentEngine {
                         .as_ref()
                         .map(|e| e.category)
                         .unwrap_or(ErrorCategory::ServerTransient);
-                    let delay_ms = compute_retry_delay_ms(attempt, cat, retry_after_ms, is_scripted);
+                    let delay_ms =
+                        compute_retry_delay_ms(attempt, cat, retry_after_ms, is_scripted);
                     if let Some(tok) = cancel_token.as_ref() {
                         let start_sleep = tokio::time::Instant::now();
                         let target_dur = Duration::from_millis(delay_ms);
@@ -525,7 +670,9 @@ impl AgentEngine {
                             if tok.is_cancelled() {
                                 return Err((ProviderError::Cancelled, None));
                             }
-                            let rem = target_dur.saturating_sub(start_sleep.elapsed()).min(Duration::from_millis(25));
+                            let rem = target_dur
+                                .saturating_sub(start_sleep.elapsed())
+                                .min(Duration::from_millis(25));
                             tokio::time::sleep(rem).await;
                         }
                     } else {
@@ -535,7 +682,11 @@ impl AgentEngine {
             }
         }
 
-        if !is_scripted && !tools_admitted && turn_route.is_none() && !cfg.fallback_providers.is_empty() {
+        if !is_scripted
+            && !tools_admitted
+            && turn_route.is_none()
+            && !cfg.fallback_providers.is_empty()
+        {
             let can_failover = last_err
                 .as_ref()
                 .map(|(err, env)| {
@@ -574,7 +725,8 @@ impl AgentEngine {
                         &cfg.provider_endpoints,
                         |env_key| std::env::var(env_key).ok(),
                     );
-                    let requires_key = lookup_provider_descriptor(&route.provider_id).is_some_and(|d| d.requires_api_key);
+                    let requires_key = lookup_provider_descriptor(&route.provider_id)
+                        .is_some_and(|d| d.requires_api_key);
                     if requires_key && route.api_key.is_none() {
                         continue;
                     }
@@ -597,7 +749,8 @@ impl AgentEngine {
                         Ok(resp) => {
                             *active_model = route.model_name;
                             *is_fallback_model = true;
-                            *turn_route = Some((Arc::new(fb_http), route.provider_id, route.api_endpoint));
+                            *turn_route =
+                                Some((Arc::new(fb_http), route.provider_id, route.api_endpoint));
                             return Ok(resp);
                         }
                         Err(ProviderError::Cancelled) => {
@@ -613,7 +766,12 @@ impl AgentEngine {
             }
         }
 
-        Err(last_err.unwrap_or_else(|| (ProviderError::Transport("Unknown provider failure".to_string()), None)))
+        Err(last_err.unwrap_or_else(|| {
+            (
+                ProviderError::Transport("Unknown provider failure".to_string()),
+                None,
+            )
+        }))
     }
 
     /// Builds and persists a prose-free `TurnReceipt` (`heav3ns.receipt/v1`) from runtime-verified CAS and execution facts.
@@ -636,7 +794,8 @@ impl AgentEngine {
     ) -> TurnReceipt {
         let snap_after = self
             .cas
-            .lock().unwrap_or_else(|e| e.into_inner())
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
             .capture_snapshot("post-turn", turn_num)
             .ok();
 
@@ -648,7 +807,8 @@ impl AgentEngine {
                     Vec::new()
                 } else {
                     self.cas
-                        .lock().unwrap_or_else(|e| e.into_inner())
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
                         .diff_between(b, Some(a.as_str()))
                         .map(|(changes, _)| changes)
                         .unwrap_or_default()
@@ -677,7 +837,11 @@ impl AgentEngine {
                 } else if rec.success {
                     "exit_0".to_string()
                 } else {
-                    let code = rec.output.get("exitCode").and_then(Value::as_i64).unwrap_or(-1);
+                    let code = rec
+                        .output
+                        .get("exitCode")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(-1);
                     format!("exit_{code}")
                 };
                 commands.push(CommandRunReceipt {
@@ -689,9 +853,20 @@ impl AgentEngine {
             }
         }
 
-        let approvals = self.tools().turn_approvals.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let approvals = self
+            .tools()
+            .turn_approvals
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         let catalog = global_pricing_registry().snapshot_catalog();
-        let billing = BillingMetering::evaluate_with_catalog(provider_name, active_model, api_endpoint, &usage, &catalog);
+        let billing = BillingMetering::evaluate_with_catalog(
+            provider_name,
+            active_model,
+            api_endpoint,
+            &usage,
+            &catalog,
+        );
         let outcome_slug = match outcome {
             EngineTickOutcome::Completed => "completed",
             EngineTickOutcome::Cancelled => "cancelled",
@@ -703,7 +878,10 @@ impl AgentEngine {
         if file_changes.is_empty() {
             claim_ceiling.push("no_workspace_files_modified".to_string());
         } else {
-            claim_ceiling.push(format!("{}_files_modified_verified_by_cas", file_changes.len()));
+            claim_ceiling.push(format!(
+                "{}_files_modified_verified_by_cas",
+                file_changes.len()
+            ));
         }
         if commands.is_empty() {
             claim_ceiling.push("no_shell_commands_executed".to_string());
@@ -740,7 +918,11 @@ impl AgentEngine {
             claim_ceiling,
         };
 
-        let _ = self.cas.lock().unwrap_or_else(|e| e.into_inner()).append_turn_receipt(&receipt);
+        let _ = self
+            .cas
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .append_turn_receipt(&receipt);
         let mut list = self.turn_receipts.lock().unwrap_or_else(|e| e.into_inner());
         if list.len() >= 128 {
             list.remove(0);

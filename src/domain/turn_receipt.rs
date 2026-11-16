@@ -90,16 +90,25 @@ impl TurnReceipt {
             self.usage.prompt_tokens,
             self.usage.cached_prompt_tokens,
             self.usage.completion_tokens,
-            if self.usage.is_exact { "exact" } else { "estimated" },
+            if self.usage.is_exact {
+                "exact"
+            } else {
+                "estimated"
+            },
             self.billing_display
         ));
         if let (Some(b), Some(a)) = (&self.snapshot_before, &self.snapshot_after) {
-            lines.push(format!("│ CAS Snapshots  : {b} -> {a} (undoable via `/undo`)"));
+            lines.push(format!(
+                "│ CAS Snapshots  : {b} -> {a} (undoable via `/undo`)"
+            ));
         }
         if self.file_changes.is_empty() {
             lines.push("│ Files Changed  : (none)".to_string());
         } else {
-            lines.push(format!("│ Files Changed  : {} file(s)", self.file_changes.len()));
+            lines.push(format!(
+                "│ Files Changed  : {} file(s)",
+                self.file_changes.len()
+            ));
             for fc in &self.file_changes {
                 lines.push(format!(
                     "│   • [{}] {} (+{} / -{}) [{}]",
@@ -108,7 +117,10 @@ impl TurnReceipt {
             }
         }
         if !self.commands.is_empty() {
-            lines.push(format!("│ Commands Run   : {} command(s)", self.commands.len()));
+            lines.push(format!(
+                "│ Commands Run   : {} command(s)",
+                self.commands.len()
+            ));
             for c in &self.commands {
                 lines.push(format!(
                     "│   • {} [{} · sandbox={} · {}ms]",
@@ -119,8 +131,14 @@ impl TurnReceipt {
         if !self.approvals.is_empty() {
             lines.push(format!("│ Approvals      : {}", self.approvals.join("; ")));
         }
-        lines.push(format!("│ Claim Ceiling  : {}", self.claim_ceiling.join(" | ")));
-        lines.push("└──────────────────────────────────────────────────────────────────────────".to_string());
+        lines.push(format!(
+            "│ Claim Ceiling  : {}",
+            self.claim_ceiling.join(" | ")
+        ));
+        lines.push(
+            "└──────────────────────────────────────────────────────────────────────────"
+                .to_string(),
+        );
         lines.join("\n")
     }
 }

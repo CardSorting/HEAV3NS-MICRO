@@ -42,8 +42,13 @@ pub struct WorkspaceSnapshotCas {
 
 impl WorkspaceSnapshotCas {
     pub fn open(workspace_root: &Path) -> Self {
-        let canonical_ws = workspace_root.canonicalize().unwrap_or_else(|_| workspace_root.to_path_buf());
-        let ws_hash = format!("{:08x}", fnv1a_32(canonical_ws.to_string_lossy().as_bytes()));
+        let canonical_ws = workspace_root
+            .canonicalize()
+            .unwrap_or_else(|_| workspace_root.to_path_buf());
+        let ws_hash = format!(
+            "{:08x}",
+            fnv1a_32(canonical_ws.to_string_lossy().as_bytes())
+        );
         let base_state = std::env::var("HOME")
             .ok()
             .filter(|h| !h.is_empty())
@@ -101,7 +106,9 @@ impl WorkspaceSnapshotCas {
     pub fn load_recent_receipts(&self, limit: usize) -> Vec<TurnReceipt> {
         use std::io::{Read, Seek, SeekFrom};
         let path = self.cas_root.join("receipts.jsonl");
-        let Ok(mut file) = fs::File::open(&path) else { return Vec::new() };
+        let Ok(mut file) = fs::File::open(&path) else {
+            return Vec::new();
+        };
         let len = file.metadata().map(|m| m.len()).unwrap_or(0);
         const MAX_RECEIPTS_TAIL: u64 = 4 * 1024 * 1024;
         let truncated = len > MAX_RECEIPTS_TAIL;
@@ -114,7 +121,9 @@ impl WorkspaceSnapshotCas {
         }
         let raw = String::from_utf8_lossy(&buf);
         let lines = raw.lines().skip(usize::from(truncated));
-        let mut parsed: Vec<TurnReceipt> = lines.filter_map(|l| serde_json::from_str::<TurnReceipt>(l).ok()).collect();
+        let mut parsed: Vec<TurnReceipt> = lines
+            .filter_map(|l| serde_json::from_str::<TurnReceipt>(l).ok())
+            .collect();
         if parsed.len() > limit {
             parsed = parsed.split_off(parsed.len() - limit);
         }
@@ -152,9 +161,11 @@ impl WorkspaceSnapshotCas {
         let dest = self.blob_path(&hash);
         if !dest.exists() {
             use std::io::Write;
-            static CAS_BLOB_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            static CAS_BLOB_SEQ: std::sync::atomic::AtomicU64 =
+                std::sync::atomic::AtomicU64::new(0);
             let seq = CAS_BLOB_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let tmp = dest.with_extension(format!("tmp.{}.{}.{}", std::process::id(), now_ms(), seq));
+            let tmp =
+                dest.with_extension(format!("tmp.{}.{}.{}", std::process::id(), now_ms(), seq));
             let write_res = (|| -> std::io::Result<()> {
                 let mut f = fs::File::create(&tmp)?;
                 f.write_all(bytes)?;
@@ -176,7 +187,10 @@ impl WorkspaceSnapshotCas {
         fs::read(self.blob_path(sha256)).ok()
     }
 
-    fn scan_working_tree(&self, store_blobs: bool) -> Result<BTreeMap<String, (CasFileEntry, Option<Vec<u8>>)>, String> {
+    fn scan_working_tree(
+        &self,
+        store_blobs: bool,
+    ) -> Result<BTreeMap<String, (CasFileEntry, Option<Vec<u8>>)>, String> {
         let mut tree = BTreeMap::new();
         self.walk_dir(&self.workspace_root, 0, store_blobs, &mut tree)?;
         Ok(tree)
@@ -200,7 +214,12 @@ impl WorkspaceSnapshotCas {
                 break;
             }
             let name = entry.file_name().to_string_lossy().into_owned();
-            if is_ignored_dir(&name) || matches!(name.as_str(), ".build" | ".heav3ns" | ".codewhale" | ".joy-state") {
+            if is_ignored_dir(&name)
+                || matches!(
+                    name.as_str(),
+                    ".build" | ".heav3ns" | ".codewhale" | ".joy-state"
+                )
+            {
                 continue;
             }
             let path = entry.path();
@@ -216,7 +235,12 @@ impl WorkspaceSnapshotCas {
                     .unwrap_or(&path)
                     .to_string_lossy()
                     .replace('\\', "/");
-                if DeterministicSecretRedactor::classify_sensitive_path(&rel, CredentialDenyScope::ModelContext).is_some() {
+                if DeterministicSecretRedactor::classify_sensitive_path(
+                    &rel,
+                    CredentialDenyScope::ModelContext,
+                )
+                .is_some()
+                {
                     continue;
                 }
                 let Ok(meta) = entry.metadata() else { continue };
@@ -246,7 +270,10 @@ impl WorkspaceSnapshotCas {
 
     fn atomic_write_workspace_file(&self, rel_path: &str, bytes: &[u8]) -> Result<(), String> {
         let p = Path::new(rel_path);
-        if p.is_absolute() || p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        if p.is_absolute()
+            || p.components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
             return Err(format!("Refusing unsafe CAS relative path '{rel_path}'"));
         }
         let mut cur = self.workspace_root.clone();
@@ -254,7 +281,9 @@ impl WorkspaceSnapshotCas {
             for comp in parent_rel.components() {
                 cur.push(comp);
                 if fs::symlink_metadata(&cur).is_ok_and(|m| m.file_type().is_symlink()) {
-                    return Err(format!("Refusing to traverse symlink parent in '{rel_path}'"));
+                    return Err(format!(
+                        "Refusing to traverse symlink parent in '{rel_path}'"
+                    ));
                 }
             }
         }
@@ -263,12 +292,18 @@ impl WorkspaceSnapshotCas {
             return Err(format!("Refusing to overwrite symlink '{rel_path}'"));
         }
         if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("mkdir failed for '{}': {e}", parent.display()))?;
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("mkdir failed for '{}': {e}", parent.display()))?;
         }
         let existing_perms = fs::metadata(&target).ok().map(|m| m.permissions());
         static CAS_WRITE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let seq = CAS_WRITE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let tmp = target.with_extension(format!("heav3ns-cas-tmp-{}-{}-{}", std::process::id(), now_ms(), seq));
+        let tmp = target.with_extension(format!(
+            "heav3ns-cas-tmp-{}-{}-{}",
+            std::process::id(),
+            now_ms(),
+            seq
+        ));
         let write_res = (|| -> std::io::Result<()> {
             use std::io::Write;
             let mut f = fs::File::create(&tmp)?;
@@ -289,12 +324,18 @@ impl WorkspaceSnapshotCas {
     }
 
     fn prune_empty_parents(&self, rel_path: &str) {
-        let mut cur = self.workspace_root.join(rel_path).parent().map(Path::to_path_buf);
+        let mut cur = self
+            .workspace_root
+            .join(rel_path)
+            .parent()
+            .map(Path::to_path_buf);
         while let Some(dir) = cur {
             if dir == self.workspace_root || !dir.starts_with(&self.workspace_root) {
                 break;
             }
-            let is_empty = fs::read_dir(&dir).map(|mut r| r.next().is_none()).unwrap_or(false);
+            let is_empty = fs::read_dir(&dir)
+                .map(|mut r| r.next().is_none())
+                .unwrap_or(false);
             if is_empty {
                 let _ = fs::remove_dir(&dir);
                 cur = dir.parent().map(Path::to_path_buf);
@@ -316,10 +357,14 @@ impl WorkspaceSnapshotCas {
             }
         }
         let blobs_dir = self.cas_root.join("blobs");
-        let Ok(rd) = fs::read_dir(&blobs_dir) else { return };
+        let Ok(rd) = fs::read_dir(&blobs_dir) else {
+            return;
+        };
         for entry in rd.flatten() {
             let name = entry.file_name();
-            let Some(name_str) = name.to_str() else { continue };
+            let Some(name_str) = name.to_str() else {
+                continue;
+            };
             if name_str.contains(".tmp.") {
                 continue;
             }
@@ -333,9 +378,11 @@ impl WorkspaceSnapshotCas {
 impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
     fn capture_snapshot(&mut self, label: &str, turn_number: u64) -> Result<String, String> {
         let scanned = self.scan_working_tree(true)?;
-        let files: BTreeMap<String, CasFileEntry> = scanned.into_iter().map(|(k, (v, _))| (k, v)).collect();
+        let files: BTreeMap<String, CasFileEntry> =
+            scanned.into_iter().map(|(k, (v, _))| (k, v)).collect();
         let ts = now_ms();
-        let tree_digest = Self::sha256_hex(serde_json::to_string(&files).unwrap_or_default().as_bytes());
+        let tree_digest =
+            Self::sha256_hex(serde_json::to_string(&files).unwrap_or_default().as_bytes());
         let mut seq = 0u64;
         let mut id = format!("snap_{turn_number}_{}", &tree_digest[..8]);
         while self.snapshots.iter().any(|s| s.id == id) {
@@ -349,12 +396,18 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
             timestamp_ms: ts,
             files,
         };
-        let manifest_path = self.cas_root.join("manifests").join(format!("{ts}_{id}.json"));
+        let manifest_path = self
+            .cas_root
+            .join("manifests")
+            .join(format!("{ts}_{id}.json"));
         let serialized = serde_json::to_string(&manifest)
             .map_err(|e| format!("CAS manifest serialization failed: {e}"))?;
         static CAS_TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let tmp_seq = CAS_TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let tmp_manifest = self.cas_root.join("manifests").join(format!(".tmp_{ts}_{id}_{}_{tmp_seq}.json", std::process::id()));
+        let tmp_manifest = self.cas_root.join("manifests").join(format!(
+            ".tmp_{ts}_{id}_{}_{tmp_seq}.json",
+            std::process::id()
+        ));
         if let Err(e) = fs::write(&tmp_manifest, serialized) {
             let _ = fs::remove_file(&tmp_manifest);
             return Err(format!("CAS manifest write failed: {e}"));
@@ -380,7 +433,11 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
         Ok(id)
     }
 
-    fn diff_between(&self, base_id: &str, target_id: Option<&str>) -> Result<(Vec<FileChangeReceipt>, String), String> {
+    fn diff_between(
+        &self,
+        base_id: &str,
+        target_id: Option<&str>,
+    ) -> Result<(Vec<FileChangeReceipt>, String), String> {
         let base = self
             .find_manifest(base_id)
             .ok_or_else(|| format!("Snapshot '{base_id}' not found"))?;
@@ -393,7 +450,15 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
             target
                 .files
                 .iter()
-                .map(|(k, v)| (k.clone(), (v.sha256.clone(), self.read_blob(&v.sha256).unwrap_or_default())))
+                .map(|(k, v)| {
+                    (
+                        k.clone(),
+                        (
+                            v.sha256.clone(),
+                            self.read_blob(&v.sha256).unwrap_or_default(),
+                        ),
+                    )
+                })
                 .collect()
         } else {
             live_tree = self.scan_working_tree(false)?;
@@ -425,7 +490,8 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
                         kind: "added".to_string(),
                         lines_added: added,
                         lines_removed: removed,
-                        after_hash: crate::plumbing::text_tokens::safe_utf8_prefix(t_sha, 8).to_string(),
+                        after_hash: crate::plumbing::text_tokens::safe_utf8_prefix(t_sha, 8)
+                            .to_string(),
                     });
                 }
                 (Some(b), None) => {
@@ -452,7 +518,8 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
                         kind: "modified".to_string(),
                         lines_added: added,
                         lines_removed: removed,
-                        after_hash: crate::plumbing::text_tokens::safe_utf8_prefix(t_sha, 8).to_string(),
+                        after_hash: crate::plumbing::text_tokens::safe_utf8_prefix(t_sha, 8)
+                            .to_string(),
                     });
                 }
                 (None, None) => {}
@@ -462,7 +529,12 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
         Ok((receipts, unified_chunks.join("\n")))
     }
 
-    fn undo_turn_changes(&mut self, pre_turn_id: &str, post_turn_id: &str, force: bool) -> Result<Vec<String>, String> {
+    fn undo_turn_changes(
+        &mut self,
+        pre_turn_id: &str,
+        post_turn_id: &str,
+        force: bool,
+    ) -> Result<Vec<String>, String> {
         let pre = self
             .find_manifest(pre_turn_id)
             .cloned()
@@ -499,7 +571,9 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
                 }
                 let disk_path = self.workspace_root.join(rel);
                 if fs::symlink_metadata(&disk_path).is_ok_and(|m| m.file_type().is_symlink()) {
-                    return Err(format!("WouldBlock: '{rel}' is a symlink; refusing CAS undo."));
+                    return Err(format!(
+                        "WouldBlock: '{rel}' is a symlink; refusing CAS undo."
+                    ));
                 }
                 let disk_sha = fs::File::open(&disk_path).ok().and_then(|mut f| {
                     use std::io::Read;
@@ -557,15 +631,22 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
                 actions.push(format!("[Restored] {rel}"));
             } else {
                 let rel_p = Path::new(&rel);
-                if rel_p.is_absolute() || rel_p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+                if rel_p.is_absolute()
+                    || rel_p
+                        .components()
+                        .any(|c| matches!(c, std::path::Component::ParentDir))
+                {
                     return Err(format!("Refusing unsafe CAS undo path '{rel}'"));
                 }
                 let disk_path = self.workspace_root.join(rel_p);
                 if let Ok(meta) = fs::symlink_metadata(&disk_path) {
                     if meta.file_type().is_symlink() {
-                        return Err(format!("Refusing to remove symlink '{rel}' during CAS undo"));
+                        return Err(format!(
+                            "Refusing to remove symlink '{rel}' during CAS undo"
+                        ));
                     }
-                    fs::remove_file(&disk_path).map_err(|e| format!("Failed to remove '{rel}': {e}"))?;
+                    fs::remove_file(&disk_path)
+                        .map_err(|e| format!("Failed to remove '{rel}': {e}"))?;
                     self.prune_empty_parents(&rel);
                 }
                 actions.push(format!("[Removed] {rel}"));
@@ -602,12 +683,16 @@ impl IWorkspaceSnapshotCas for WorkspaceSnapshotCas {
         for (rel, _) in &live {
             if !target.files.contains_key(rel) {
                 let p = Path::new(rel);
-                if p.is_absolute() || p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+                if p.is_absolute()
+                    || p.components()
+                        .any(|c| matches!(c, std::path::Component::ParentDir))
+                {
                     continue;
                 }
                 let disk_path = self.workspace_root.join(p);
                 if fs::symlink_metadata(&disk_path).is_ok_and(|m| !m.file_type().is_symlink()) {
-                    fs::remove_file(&disk_path).map_err(|e| format!("Failed to remove '{rel}': {e}"))?;
+                    fs::remove_file(&disk_path)
+                        .map_err(|e| format!("Failed to remove '{rel}': {e}"))?;
                     self.prune_empty_parents(rel);
                     actions.push(format!("[Removed] {rel}"));
                 }

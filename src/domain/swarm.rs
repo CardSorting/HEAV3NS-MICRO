@@ -53,19 +53,83 @@ pub fn classify_task_for_legion(
     let max_cap = max_specialists.clamp(1, 7);
 
     // Score each of the 7 Legion personas
-    let has_arch = ["architect", "design", "zone", "joyzoning", "layer", "contract", "interface", "refactor", "structure"]
-        .iter().any(|k| lower.contains(k));
-    let has_research = ["audit", "investigate", "explore", "find", "analyze", "discover", "understand", "survey"]
-        .iter().any(|k| lower.contains(k));
-    let has_ux = ["ux", "ui", "ergonomics", "window", "display", "click", "browser", "navigation", "view", "swift", "appkit"]
-        .iter().any(|k| lower.contains(k))
-        || target_files.iter().any(|f| f.contains("ui/") || f.ends_with(".swift"));
-    let has_harden = ["harden", "security", "resilient", "robust", "failure", "weakpoint", "ssrf", "redact", "safety", "guard"]
-        .iter().any(|k| lower.contains(k));
-    let has_data = ["db", "persistence", "session", "vfs", "journal", "memory", "compaction", "schema", "store"]
-        .iter().any(|k| lower.contains(k));
+    let has_arch = [
+        "architect",
+        "design",
+        "zone",
+        "joyzoning",
+        "layer",
+        "contract",
+        "interface",
+        "refactor",
+        "structure",
+    ]
+    .iter()
+    .any(|k| lower.contains(k));
+    let has_research = [
+        "audit",
+        "investigate",
+        "explore",
+        "find",
+        "analyze",
+        "discover",
+        "understand",
+        "survey",
+    ]
+    .iter()
+    .any(|k| lower.contains(k));
+    let has_ux = [
+        "ux",
+        "ui",
+        "ergonomics",
+        "window",
+        "display",
+        "click",
+        "browser",
+        "navigation",
+        "view",
+        "swift",
+        "appkit",
+    ]
+    .iter()
+    .any(|k| lower.contains(k))
+        || target_files
+            .iter()
+            .any(|f| f.contains("ui/") || f.ends_with(".swift"));
+    let has_harden = [
+        "harden",
+        "security",
+        "resilient",
+        "robust",
+        "failure",
+        "weakpoint",
+        "ssrf",
+        "redact",
+        "safety",
+        "guard",
+    ]
+    .iter()
+    .any(|k| lower.contains(k));
+    let has_data = [
+        "db",
+        "persistence",
+        "session",
+        "vfs",
+        "journal",
+        "memory",
+        "compaction",
+        "schema",
+        "store",
+    ]
+    .iter()
+    .any(|k| lower.contains(k));
 
-    let strategy = match strategy_override.unwrap_or("adaptive").trim().to_ascii_lowercase().as_str() {
+    let strategy = match strategy_override
+        .unwrap_or("adaptive")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "tactical_strike" | "tactical" => "tactical_strike",
         "balanced_squad" | "balanced" => "balanced_squad",
         "full_legion" | "full" => "full_legion",
@@ -87,46 +151,102 @@ pub fn classify_task_for_legion(
     match strategy {
         "tactical_strike" => {
             roles.push(("legion_implementer", "Core Implementation Specialist", 1));
-            roles.push(("legion_verifier", "Deterministic Verification & QA Specialist", 2));
+            roles.push((
+                "legion_verifier",
+                "Deterministic Verification & QA Specialist",
+                2,
+            ));
         }
         "verification_heavy" => {
-            roles.push(("legion_researcher", "Deep Codebase & Failure-Mode Researcher", 1));
+            roles.push((
+                "legion_researcher",
+                "Deep Codebase & Failure-Mode Researcher",
+                1,
+            ));
             roles.push(("legion_implementer", "Core Implementation Specialist", 2));
-            roles.push(("legion_hardener", "Security & Adversarial Hardening Specialist", 2));
-            roles.push(("legion_verifier", "Deterministic Verification & QA Specialist", 3));
+            roles.push((
+                "legion_hardener",
+                "Security & Adversarial Hardening Specialist",
+                2,
+            ));
+            roles.push((
+                "legion_verifier",
+                "Deterministic Verification & QA Specialist",
+                3,
+            ));
         }
         "full_legion" => {
             roles.push(("legion_architect", "Sovereign Systems Architect", 1));
-            roles.push(("legion_researcher", "Deep Codebase & Failure-Mode Researcher", 1));
+            roles.push((
+                "legion_researcher",
+                "Deep Codebase & Failure-Mode Researcher",
+                1,
+            ));
             roles.push(("legion_implementer", "Core Implementation Specialist", 2));
-            roles.push(("legion_ux_ergonomics", "World-Class UX & Ergonomics Specialist", 2));
-            roles.push(("legion_hardener", "Security & Adversarial Hardening Specialist", 2));
+            roles.push((
+                "legion_ux_ergonomics",
+                "World-Class UX & Ergonomics Specialist",
+                2,
+            ));
+            roles.push((
+                "legion_hardener",
+                "Security & Adversarial Hardening Specialist",
+                2,
+            ));
             roles.push(("legion_data_steward", "State, VFS & Persistence Steward", 2));
-            roles.push(("legion_verifier", "Deterministic Verification & QA Specialist", 3));
+            roles.push((
+                "legion_verifier",
+                "Deterministic Verification & QA Specialist",
+                3,
+            ));
         }
         _ => {
             // balanced_squad
             roles.push(("legion_architect", "Sovereign Systems Architect", 1));
             if has_research {
-                roles.push(("legion_researcher", "Deep Codebase & Failure-Mode Researcher", 1));
+                roles.push((
+                    "legion_researcher",
+                    "Deep Codebase & Failure-Mode Researcher",
+                    1,
+                ));
             }
             roles.push(("legion_implementer", "Core Implementation Specialist", 2));
             if has_ux {
-                roles.push(("legion_ux_ergonomics", "World-Class UX & Ergonomics Specialist", 2));
+                roles.push((
+                    "legion_ux_ergonomics",
+                    "World-Class UX & Ergonomics Specialist",
+                    2,
+                ));
             }
             if has_harden {
-                roles.push(("legion_hardener", "Security & Adversarial Hardening Specialist", 2));
+                roles.push((
+                    "legion_hardener",
+                    "Security & Adversarial Hardening Specialist",
+                    2,
+                ));
             }
             if has_data {
                 roles.push(("legion_data_steward", "State, VFS & Persistence Steward", 2));
             }
-            roles.push(("legion_verifier", "Deterministic Verification & QA Specialist", 3));
+            roles.push((
+                "legion_verifier",
+                "Deterministic Verification & QA Specialist",
+                3,
+            ));
         }
     }
     roles.truncate(max_cap);
 
-    let stage1_ids: Vec<String> = roles.iter().filter(|r| r.2 == 1).map(|r| r.0.to_string()).collect();
-    let stage2_ids: Vec<String> = roles.iter().filter(|r| r.2 == 2).map(|r| r.0.to_string()).collect();
+    let stage1_ids: Vec<String> = roles
+        .iter()
+        .filter(|r| r.2 == 1)
+        .map(|r| r.0.to_string())
+        .collect();
+    let stage2_ids: Vec<String> = roles
+        .iter()
+        .filter(|r| r.2 == 2)
+        .map(|r| r.0.to_string())
+        .collect();
 
     let mut specialists = Vec::new();
     let mut assignments = Vec::new();
@@ -134,7 +254,11 @@ pub fn classify_task_for_legion(
         let deps: Vec<String> = if *stage == 2 {
             stage1_ids.clone()
         } else if *stage == 3 {
-            if !stage2_ids.is_empty() { stage2_ids.clone() } else { stage1_ids.clone() }
+            if !stage2_ids.is_empty() {
+                stage2_ids.clone()
+            } else {
+                stage1_ids.clone()
+            }
         } else {
             Vec::new()
         };
@@ -148,7 +272,9 @@ pub fn classify_task_for_legion(
                 .map(|(_, f)| f.clone())
                 .collect()
         };
-        let obj = format!("[{title}] Execute stage-{stage} analysis and implementation for: {task_description}");
+        let obj = format!(
+            "[{title}] Execute stage-{stage} analysis and implementation for: {task_description}"
+        );
         specialists.push(json!({
             "id": id,
             "role": title,
@@ -166,7 +292,13 @@ pub fn classify_task_for_legion(
         });
     }
 
-    let complexity = if roles.len() >= 5 { "high" } else if roles.len() >= 3 { "medium" } else { "low" };
+    let complexity = if roles.len() >= 5 {
+        "high"
+    } else if roles.len() >= 3 {
+        "medium"
+    } else {
+        "low"
+    };
     json!({
         "classified": true,
         "codename": "THE_LEGION",
@@ -178,4 +310,3 @@ pub fn classify_task_for_legion(
         "assignments": assignments
     })
 }
-

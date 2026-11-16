@@ -21,8 +21,14 @@ const PARAM_ALIASES: &[(&str, &[&str])] = &[
             "subpath",
         ],
     ),
-    ("paths", &["filePaths", "file_paths", "files", "targetFiles"]),
-    ("source", &["sourcePath", "source_path", "from", "src", "inputPath"]),
+    (
+        "paths",
+        &["filePaths", "file_paths", "files", "targetFiles"],
+    ),
+    (
+        "source",
+        &["sourcePath", "source_path", "from", "src", "inputPath"],
+    ),
     (
         "target",
         &[
@@ -53,17 +59,40 @@ const PARAM_ALIASES: &[(&str, &[&str])] = &[
             "new_content",
         ],
     ),
-    ("command", &["cmd", "script", "shellCommand", "shell_command", "run"]),
+    (
+        "command",
+        &["cmd", "script", "shellCommand", "shell_command", "run"],
+    ),
     (
         "content",
-        &["text", "body", "data", "code", "fileContent", "file_content", "value", "fact"],
+        &[
+            "text",
+            "body",
+            "data",
+            "code",
+            "fileContent",
+            "file_content",
+            "value",
+            "fact",
+        ],
     ),
     ("diff", &["patch", "patchText", "unifiedDiff", "v4aPatch"]),
     (
         "query",
-        &["pattern", "symbol", "search_term", "searchTerm", "search_query", "term", "q"],
+        &[
+            "pattern",
+            "symbol",
+            "search_term",
+            "searchTerm",
+            "search_query",
+            "term",
+            "q",
+        ],
     ),
-    ("name", &["skillName", "skill_name", "skill", "toolName", "tool_name"]),
+    (
+        "name",
+        &["skillName", "skill_name", "skill", "toolName", "tool_name"],
+    ),
     ("startLine", &["start_line", "fromLine", "start"]),
     ("endLine", &["end_line", "toLine", "end"]),
 ];
@@ -114,7 +143,9 @@ impl ToolCallArgParser {
         }
         if let Some(first_brace) = sanitized.find('{') {
             sanitized = match sanitized.rfind('}') {
-                Some(last_brace) if last_brace > first_brace => sanitized[first_brace..=last_brace].to_string(),
+                Some(last_brace) if last_brace > first_brace => {
+                    sanitized[first_brace..=last_brace].to_string()
+                }
                 _ => sanitized[first_brace..].to_string(),
             };
         }
@@ -192,14 +223,20 @@ impl ToolCallArgParser {
             match args.get(name).cloned() {
                 None | Some(Value::Null) => {
                     if param.required {
-                        errors.push(format!("Missing required parameter '{}' ({})", name, param.r#type.as_str()));
+                        errors.push(format!(
+                            "Missing required parameter '{}' ({})",
+                            name,
+                            param.r#type.as_str()
+                        ));
                         suggestions.push(format!("Provide '{}': {}", name, param.description));
                     }
                 }
                 Some(val) => match param.r#type {
                     ParamType::String => match val.as_str() {
                         Some(s) if param.required && s.trim().is_empty() => {
-                            errors.push(format!("Required string parameter '{name}' cannot be empty"));
+                            errors.push(format!(
+                                "Required string parameter '{name}' cannot be empty"
+                            ));
                         }
                         Some(_) => {}
                         None => {
@@ -212,7 +249,9 @@ impl ToolCallArgParser {
                                 if let Ok(n) = s.trim().parse::<i64>() {
                                     args.insert(name.to_string(), Value::Number(n.into()));
                                 } else {
-                                    errors.push(format!("Parameter '{name}' expected integer, got '{s}'"));
+                                    errors.push(format!(
+                                        "Parameter '{name}' expected integer, got '{s}'"
+                                    ));
                                 }
                             } else {
                                 errors.push(format!("Parameter '{name}' expected integer"));
@@ -228,7 +267,9 @@ impl ToolCallArgParser {
                                     if let Some(num) = serde_json::Number::from_f64(f) {
                                         args.insert(name.to_string(), Value::Number(num));
                                     } else {
-                                        errors.push(format!("Parameter '{name}' expected finite number, got '{s}'"));
+                                        errors.push(format!(
+                                            "Parameter '{name}' expected finite number, got '{s}'"
+                                        ));
                                     }
                                 } else if let Some(pct) = s.trim().strip_suffix('%') {
                                     if let Ok(p) = pct.trim().parse::<f64>() {
@@ -238,10 +279,14 @@ impl ToolCallArgParser {
                                             errors.push(format!("Parameter '{name}' expected finite number, got '{s}'"));
                                         }
                                     } else {
-                                        errors.push(format!("Parameter '{name}' expected number, got '{s}'"));
+                                        errors.push(format!(
+                                            "Parameter '{name}' expected number, got '{s}'"
+                                        ));
                                     }
                                 } else {
-                                    errors.push(format!("Parameter '{name}' expected number, got '{s}'"));
+                                    errors.push(format!(
+                                        "Parameter '{name}' expected number, got '{s}'"
+                                    ));
                                 }
                             } else {
                                 errors.push(format!("Parameter '{name}' expected number"));
@@ -258,7 +303,9 @@ impl ToolCallArgParser {
                                     "false" | "0" | "no" => {
                                         args.insert(name.to_string(), Value::Bool(false));
                                     }
-                                    _ => errors.push(format!("Parameter '{name}' expected boolean, got '{s}'")),
+                                    _ => errors.push(format!(
+                                        "Parameter '{name}' expected boolean, got '{s}'"
+                                    )),
                                 }
                             } else {
                                 errors.push(format!("Parameter '{name}' expected boolean"));
@@ -295,7 +342,14 @@ impl ToolCallArgParser {
             }
         }
         let valid = errors.is_empty();
-        (args, SchemaValidationResult { valid, errors, suggestions })
+        (
+            args,
+            SchemaValidationResult {
+                valid,
+                errors,
+                suggestions,
+            },
+        )
     }
 
     pub fn prepare_arguments(

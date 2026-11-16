@@ -8,9 +8,15 @@ mod tests {
     use crate::domain::spatial_mediator::SpatialActionMediator;
     use crate::domain::types::computer_use_types::UiElement;
     use crate::domain::types::runtime::ExecutionAuthorityLevel;
-    use crate::domain::types::spatial_types::{AssuranceVerdict, SpatialActionContract, SpatialError, SpatialScene, SpatialTarget, TargetProvenance};
+    use crate::domain::types::spatial_types::{
+        AssuranceVerdict, SpatialActionContract, SpatialError, SpatialScene, SpatialTarget,
+        TargetProvenance,
+    };
     use crate::domain::types::tool_schedule::ScheduledToolCall;
-    use crate::plumbing::spatial_geometry::{normalize_coordinate_value, validate_trajectory, SpatialPoint, SpatialRect, ViewportTransform};
+    use crate::plumbing::spatial_geometry::{
+        normalize_coordinate_value, validate_trajectory, SpatialPoint, SpatialRect,
+        ViewportTransform,
+    };
     use serde_json::json;
     use std::sync::{Arc, Mutex};
     use std::time::Instant;
@@ -120,15 +126,30 @@ mod tests {
     fn test_universal_coordinate_normalization() {
         let dim = 1440.0;
         // 1. Raw integer/float
-        assert_eq!(normalize_coordinate_value(Some(&json!(500)), dim, 0.0, false), 500.0);
+        assert_eq!(
+            normalize_coordinate_value(Some(&json!(500)), dim, 0.0, false),
+            500.0
+        );
         // 2. Normalized unit [0.0, 1.0]
-        assert_eq!(normalize_coordinate_value(Some(&json!(0.5)), dim, 0.0, false), 720.0);
+        assert_eq!(
+            normalize_coordinate_value(Some(&json!(0.5)), dim, 0.0, false),
+            720.0
+        );
         // 3. Percentage string
-        assert_eq!(normalize_coordinate_value(Some(&json!("25%")), dim, 0.0, false), 360.0);
+        assert_eq!(
+            normalize_coordinate_value(Some(&json!("25%")), dim, 0.0, false),
+            360.0
+        );
         // 4. Pixel suffix string
-        assert_eq!(normalize_coordinate_value(Some(&json!("400px")), dim, 0.0, false), 400.0);
+        assert_eq!(
+            normalize_coordinate_value(Some(&json!("400px")), dim, 0.0, false),
+            400.0
+        );
         // 5. Normalized 1000
-        assert_eq!(normalize_coordinate_value(Some(&json!(500.0)), dim, 0.0, true), 720.0);
+        assert_eq!(
+            normalize_coordinate_value(Some(&json!(500.0)), dim, 0.0, true),
+            720.0
+        );
     }
 
     #[test]
@@ -143,7 +164,13 @@ mod tests {
 
         // Dangerous trajectory cutting straight through modal exclusion
         let p_end_penetrating = SpatialPoint::new(800.0, 400.0);
-        let res = validate_trajectory(&p_start, &p_end_penetrating, &screen, &[modal_exclusion], 20);
+        let res = validate_trajectory(
+            &p_start,
+            &p_end_penetrating,
+            &screen,
+            &[modal_exclusion],
+            20,
+        );
         assert!(res.is_err());
         assert!(res.unwrap_err().contains("forbidden exclusion zone"));
 
@@ -160,7 +187,13 @@ mod tests {
     fn test_wrapper_a_grounding_success_and_confidence() {
         let mut med = SpatialActionMediator::new(1440, 900, "win-1");
         let mut scene = SpatialScene::new(1440, 900, "win-1");
-        let mut btn = SpatialTarget::new("btn-submit", Some(1), "button", "Submit Order", [100, 100, 160, 40]);
+        let mut btn = SpatialTarget::new(
+            "btn-submit",
+            Some(1),
+            "button",
+            "Submit Order",
+            [100, 100, 160, 40],
+        );
         btn.confidence = 0.95;
         scene.targets.push(btn);
         med.update_scene(scene);
@@ -211,11 +244,18 @@ mod tests {
         let mut scene = SpatialScene::new(1440, 900, "win-1");
 
         // Target under a modal dialog
-        let mut base_btn = SpatialTarget::new("btn-under", Some(1), "button", "Save", [100, 100, 200, 50]);
+        let mut base_btn =
+            SpatialTarget::new("btn-under", Some(1), "button", "Save", [100, 100, 200, 50]);
         base_btn.z_order = 1;
 
         // Modal overlay covering 80% of button
-        let mut modal = SpatialTarget::new("modal-dialog", Some(2), "dialog", "Alert", [100, 100, 180, 50]);
+        let mut modal = SpatialTarget::new(
+            "modal-dialog",
+            Some(2),
+            "dialog",
+            "Alert",
+            [100, 100, 180, 50],
+        );
         modal.z_order = 2; // Higher z-order
 
         scene.targets.push(base_btn);
@@ -232,7 +272,11 @@ mod tests {
         let result = med.ground_action(&contract);
         assert!(!result.success);
         match result.error.unwrap() {
-            SpatialError::TargetOccluded { target_id, occlusion_ratio, occluded_by } => {
+            SpatialError::TargetOccluded {
+                target_id,
+                occlusion_ratio,
+                occluded_by,
+            } => {
                 assert_eq!(target_id, "btn-under");
                 assert_eq!(occluded_by, "modal-dialog");
                 assert!(occlusion_ratio >= 0.80);
@@ -246,7 +290,8 @@ mod tests {
         let med = SpatialActionMediator::new(1440, 900, "win-1");
 
         // 1. Role mismatch: Attempting to type into a non-input element (e.g. static link)
-        let link_target = SpatialTarget::new("lnk-home", Some(1), "link", "Home", [50, 50, 100, 30]);
+        let link_target =
+            SpatialTarget::new("lnk-home", Some(1), "link", "Home", [50, 50, 100, 30]);
         let grounded = crate::domain::spatial_action::GroundedSpatialTarget {
             target: link_target,
             safe_point: [100, 65],
@@ -276,7 +321,8 @@ mod tests {
         }
 
         // 2. Disabled target rejection
-        let mut disabled_btn = SpatialTarget::new("btn-dis", Some(2), "button", "Submit", [50, 50, 100, 30]);
+        let mut disabled_btn =
+            SpatialTarget::new("btn-dis", Some(2), "button", "Submit", [50, 50, 100, 30]);
         disabled_btn.enabled = false;
         let mut grounded_disabled = grounded.clone();
         grounded_disabled.target = disabled_btn;
@@ -284,7 +330,10 @@ mod tests {
             action_name: "click".into(),
             ..Default::default()
         };
-        assert!(matches!(med.assure_pre_execution(&grounded_disabled, &click_contract), Err(SpatialError::TargetDisabled(_))));
+        assert!(matches!(
+            med.assure_pre_execution(&grounded_disabled, &click_contract),
+            Err(SpatialError::TargetDisabled(_))
+        ));
     }
 
     #[test]
@@ -292,7 +341,8 @@ mod tests {
         let mut med = SpatialActionMediator::new(1440, 900, "win-1");
 
         let mut before_scene = SpatialScene::new(1440, 900, "win-1");
-        let btn_before = SpatialTarget::new("btn-play", Some(1), "button", "Play", [100, 100, 100, 40]);
+        let btn_before =
+            SpatialTarget::new("btn-play", Some(1), "button", "Play", [100, 100, 100, 40]);
         before_scene.targets.push(btn_before);
 
         let grounded = crate::domain::spatial_action::GroundedSpatialTarget {
@@ -310,13 +360,15 @@ mod tests {
         // Scenario A: Confirmed state change (focus updated)
         let mut after_confirmed = before_scene.clone();
         after_confirmed.targets[0].focused = true;
-        let receipt_confirmed = med.verify_post_execution("click", Some(&grounded), &before_scene, &after_confirmed, 2);
+        let receipt_confirmed =
+            med.verify_post_execution("click", Some(&grounded), &before_scene, &after_confirmed, 2);
         assert_eq!(receipt_confirmed.verdict, AssuranceVerdict::Confirmed);
         assert!(receipt_confirmed.postconditions_met);
 
         // Scenario B: Suspected no-op (no focus update, no frame change)
         let after_noop = before_scene.clone();
-        let receipt_noop = med.verify_post_execution("click", Some(&grounded), &before_scene, &after_noop, 2);
+        let receipt_noop =
+            med.verify_post_execution("click", Some(&grounded), &before_scene, &after_noop, 2);
         assert_eq!(receipt_noop.verdict, AssuranceVerdict::SuspectedNoop);
         assert!(!receipt_noop.postconditions_met);
         assert!(receipt_noop.recovery_suggestion.is_some());
@@ -388,7 +440,9 @@ mod tests {
                 "target_id": "btn-run"
             }),
         };
-        let res_ground = reg.execute_single(&call_ground, &ws, ExecutionAuthorityLevel::Autonomous, None).await;
+        let res_ground = reg
+            .execute_single(&call_ground, &ws, ExecutionAuthorityLevel::Autonomous, None)
+            .await;
         assert!(res_ground.success);
         assert_eq!(res_ground.output["success"], true);
         assert_eq!(res_ground.output["grounded"]["target"]["id"], "btn-run");
@@ -403,11 +457,15 @@ mod tests {
                 "target_id": "btn-run"
             }),
         };
-        let res_exec = reg.execute_single(&call_exec, &ws, ExecutionAuthorityLevel::Autonomous, None).await;
+        let res_exec = reg
+            .execute_single(&call_exec, &ws, ExecutionAuthorityLevel::Autonomous, None)
+            .await;
         assert!(res_exec.success);
         assert_eq!(res_exec.output["action"], "click");
         assert_eq!(res_exec.output["groundedTarget"]["id"], "btn-run");
-        assert!(res_exec.output["assuranceReceipt"]["postconditions_met"].as_bool().unwrap());
+        assert!(res_exec.output["assuranceReceipt"]["postconditions_met"]
+            .as_bool()
+            .unwrap());
 
         // 3. Directional query via tool
         let call_query = ScheduledToolCall {
@@ -419,7 +477,9 @@ mod tests {
                 "direction": "right"
             }),
         };
-        let res_query = reg.execute_single(&call_query, &ws, ExecutionAuthorityLevel::Autonomous, None).await;
+        let res_query = reg
+            .execute_single(&call_query, &ws, ExecutionAuthorityLevel::Autonomous, None)
+            .await;
         assert!(res_query.success);
         assert_eq!(res_query.output["matched"]["id"], "inp-cmd");
 
@@ -431,7 +491,9 @@ mod tests {
                 "action": "audit"
             }),
         };
-        let res_audit = reg.execute_single(&call_audit, &ws, ExecutionAuthorityLevel::Autonomous, None).await;
+        let res_audit = reg
+            .execute_single(&call_audit, &ws, ExecutionAuthorityLevel::Autonomous, None)
+            .await;
         assert!(res_audit.success);
         assert_eq!(res_audit.output["healthy"], true);
         assert!(res_audit.output["confirmedActions"].as_u64().unwrap() >= 1);
@@ -470,8 +532,15 @@ mod tests {
         }
         let elapsed = start.elapsed();
         let per_op_micros = elapsed.as_micros() as f64 / iters as f64;
-        println!("Spatial Grounding Benchmark: {:.3} µs / operation ({} ops in {:?})", per_op_micros, iters, elapsed);
-        assert!(per_op_micros < 10.0, "Spatial grounding must execute under 10 µs; got {:.3} µs", per_op_micros);
+        println!(
+            "Spatial Grounding Benchmark: {:.3} µs / operation ({} ops in {:?})",
+            per_op_micros, iters, elapsed
+        );
+        assert!(
+            per_op_micros < 10.0,
+            "Spatial grounding must execute under 10 µs; got {:.3} µs",
+            per_op_micros
+        );
     }
 
     #[test]
@@ -520,8 +589,15 @@ mod tests {
 
         {
             let d = disp.lock().unwrap();
-            assert!(d.scroll_offset[1] > 0, "Expected positive vertical scroll offset after offscreen plan");
-            let el = d.windows[0].elements.iter().find(|e| e.id == "inp-offscreen").unwrap();
+            assert!(
+                d.scroll_offset[1] > 0,
+                "Expected positive vertical scroll offset after offscreen plan"
+            );
+            let el = d.windows[0]
+                .elements
+                .iter()
+                .find(|e| e.id == "inp-offscreen")
+                .unwrap();
             assert!(el.focused);
             assert_eq!(el.value, "plus-ultra-77");
         }
@@ -532,7 +608,9 @@ mod tests {
             target_selector: Some("btn-offscreen".into()),
             ..Default::default()
         };
-        let click_res = engine.execute_spatially_grounded_action(&click_offscreen).unwrap();
+        let click_res = engine
+            .execute_spatially_grounded_action(&click_offscreen)
+            .unwrap();
         assert_eq!(click_res["success"], true);
         assert_eq!(click_res["autoScrolled"], true);
         assert_eq!(click_res["groundedTarget"]["visibilityRatio"], 1.0);

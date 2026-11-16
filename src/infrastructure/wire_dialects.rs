@@ -2,11 +2,17 @@
 use crate::domain::types::messages::{Role, SessionMessage};
 use crate::domain::types::provider_registry::lookup_provider_descriptor;
 use crate::domain::types::tick_result::ProviderRequest;
-use crate::infrastructure::reasoning_shaper::{apply_chat_completions_reasoning_controls, apply_responses_reasoning_controls, is_google_openai_compat_route};
-use crate::plumbing::schema_and_sse::{sanitize_tool_schema, sanitize_tool_schema_for_gemini, sanitize_tool_schema_for_responses};
+use crate::infrastructure::reasoning_shaper::{
+    apply_chat_completions_reasoning_controls, apply_responses_reasoning_controls,
+    is_google_openai_compat_route,
+};
+use crate::plumbing::schema_and_sse::{
+    sanitize_tool_schema, sanitize_tool_schema_for_gemini, sanitize_tool_schema_for_responses,
+};
 use serde_json::{json, Value};
 
-const SYNTHETIC_TOOL_INTERRUPT_NOTE: &str = "[interrupted: missing tool_result synthesized for protocol continuity]";
+const SYNTHETIC_TOOL_INTERRUPT_NOTE: &str =
+    "[interrupted: missing tool_result synthesized for protocol continuity]";
 
 /// Repairs bidirectional tool-call / tool-result protocol continuity across all 4 wire dialects:
 /// 1. Synthesizes missing `Role::Tool` outputs for dangling `Assistant.tool_calls` (after cancellation/failover).
@@ -21,7 +27,11 @@ pub(crate) fn normalize_transcript_tool_continuity(raw: &[SessionMessage]) -> Ve
                           pending: &mut Vec<(String, String)>,
                           deferred_sys: &mut Vec<SessionMessage>| {
         for (id, name) in pending.drain(..) {
-            out.push(SessionMessage::tool_result(id, name, SYNTHETIC_TOOL_INTERRUPT_NOTE));
+            out.push(SessionMessage::tool_result(
+                id,
+                name,
+                SYNTHETIC_TOOL_INTERRUPT_NOTE,
+            ));
         }
         out.append(deferred_sys);
     };
@@ -36,13 +46,14 @@ pub(crate) fn normalize_transcript_tool_continuity(raw: &[SessionMessage]) -> Ve
                 }
             }
             Role::Tool => {
-                let matched_pos = if let Some(cid) = msg.tool_call_id.as_deref().filter(|s| !s.is_empty()) {
-                    pending_calls.iter().position(|(pid, _)| pid == cid)
-                } else if !pending_calls.is_empty() {
-                    Some(0)
-                } else {
-                    None
-                };
+                let matched_pos =
+                    if let Some(cid) = msg.tool_call_id.as_deref().filter(|s| !s.is_empty()) {
+                        pending_calls.iter().position(|(pid, _)| pid == cid)
+                    } else if !pending_calls.is_empty() {
+                        Some(0)
+                    } else {
+                        None
+                    };
 
                 if let Some(pos) = matched_pos {
                     let (matched_id, matched_name) = pending_calls.remove(pos);
@@ -61,10 +72,17 @@ pub(crate) fn normalize_transcript_tool_continuity(raw: &[SessionMessage]) -> Ve
                     if !pending_calls.is_empty() {
                         flush_dangling(&mut out, &mut pending_calls, &mut deferred_system);
                     }
-                    let label = msg.name.as_deref().filter(|s| !s.is_empty()).unwrap_or("tool");
+                    let label = msg
+                        .name
+                        .as_deref()
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or("tool");
                     out.push(SessionMessage::new(
                         Role::User,
-                        format!("<tool_output_context name=\"{label}\">\n{}\n</tool_output_context>", msg.content),
+                        format!(
+                            "<tool_output_context name=\"{label}\">\n{}\n</tool_output_context>",
+                            msg.content
+                        ),
                     ));
                 }
             }
@@ -141,8 +159,11 @@ pub(crate) fn build_chat_completions_payload_with_endpoint(
                             }
                         });
                         if google_openai {
-                            if let Some(sig) = tc.thought_signature.as_deref().filter(|s| !s.is_empty()) {
-                                tc_obj["extra_content"] = json!({ "google": { "thought_signature": sig } });
+                            if let Some(sig) =
+                                tc.thought_signature.as_deref().filter(|s| !s.is_empty())
+                            {
+                                tc_obj["extra_content"] =
+                                    json!({ "google": { "thought_signature": sig } });
                             }
                         }
                         tc_obj
@@ -160,7 +181,10 @@ pub(crate) fn build_chat_completions_payload_with_endpoint(
     let is_o_series = model_lower.starts_with("o1")
         || model_lower.starts_with("o3")
         || model_lower.starts_with("o4");
-    let is_heav3ns_sol = model_lower == "sol" || model_lower.ends_with("-sol") || model_lower.starts_with("gpt-5") || model_lower.starts_with("gpt-6");
+    let is_heav3ns_sol = model_lower == "sol"
+        || model_lower.ends_with("-sol")
+        || model_lower.starts_with("gpt-5")
+        || model_lower.starts_with("gpt-6");
     let is_reasoning_or_modern = is_o_series
         || is_heav3ns_sol
         || model_lower.contains("terra")
@@ -188,7 +212,10 @@ pub(crate) fn build_chat_completions_payload_with_endpoint(
             .iter()
             .map(|t| {
                 let mut cloned = t.clone();
-                if let Some(params) = cloned.get_mut("function").and_then(|f| f.get_mut("parameters")) {
+                if let Some(params) = cloned
+                    .get_mut("function")
+                    .and_then(|f| f.get_mut("parameters"))
+                {
                     if is_xai {
                         sanitize_tool_schema_for_responses(params);
                     } else {
@@ -303,7 +330,10 @@ pub(crate) fn build_openai_responses_payload(provider_name: &str, req: &Provider
         .filter_map(|t| {
             let f = t.get("function")?;
             let name = f.get("name")?.as_str()?;
-            let mut params = f.get("parameters").cloned().unwrap_or_else(|| json!({ "type": "object", "properties": {} }));
+            let mut params = f
+                .get("parameters")
+                .cloned()
+                .unwrap_or_else(|| json!({ "type": "object", "properties": {} }));
             sanitize_tool_schema_for_responses(&mut params);
             Some(json!({
                 "type": "function",
@@ -319,7 +349,11 @@ pub(crate) fn build_openai_responses_payload(provider_name: &str, req: &Provider
         payload["parallel_tool_calls"] = json!(true);
     }
 
-    apply_responses_reasoning_controls(&mut payload, provider_name, req.reasoning_effort.as_deref());
+    apply_responses_reasoning_controls(
+        &mut payload,
+        provider_name,
+        req.reasoning_effort.as_deref(),
+    );
 
     payload
 }
@@ -329,7 +363,11 @@ pub(crate) fn build_openai_responses_payload(provider_name: &str, req: &Provider
 /// 2. Consecutive `Role::Tool` coalescing into a single `user` `tool_result` array!
 /// 3. Automatic dangling `tool_use` repair (preventing HTTP 400 after cancelled/compacted turns)!
 /// 4. Adaptive/budget `thinking` + `output_config.effort` when `reasoning_effort` is configured!
-pub(crate) fn build_anthropic_messages_payload(provider_name: &str, endpoint: &str, req: &ProviderRequest) -> Value {
+pub(crate) fn build_anthropic_messages_payload(
+    provider_name: &str,
+    endpoint: &str,
+    req: &ProviderRequest,
+) -> Value {
     let normalized_messages = normalize_transcript_tool_continuity(&req.messages);
     let mut system_parts = Vec::new();
     let mut messages: Vec<Value> = Vec::new();
@@ -360,8 +398,13 @@ pub(crate) fn build_anthropic_messages_payload(provider_name: &str, endpoint: &s
                 }
                 if let Some(calls) = &m.tool_calls {
                     for tc in calls {
-                        let parsed = serde_json::from_str::<Value>(&tc.function.arguments).unwrap_or_else(|_| json!({}));
-                        let input = if parsed.is_object() { parsed } else { json!({}) };
+                        let parsed = serde_json::from_str::<Value>(&tc.function.arguments)
+                            .unwrap_or_else(|_| json!({}));
+                        let input = if parsed.is_object() {
+                            parsed
+                        } else {
+                            json!({})
+                        };
                         blocks.push(json!({
                             "type": "tool_use",
                             "id": tc.id,
@@ -400,7 +443,10 @@ pub(crate) fn build_anthropic_messages_payload(provider_name: &str, endpoint: &s
         .iter()
         .filter_map(|t| {
             let f = t.get("function")?;
-            let mut schema = f.get("parameters").cloned().unwrap_or_else(|| json!({"type": "object", "properties": {}}));
+            let mut schema = f
+                .get("parameters")
+                .cloned()
+                .unwrap_or_else(|| json!({"type": "object", "properties": {}}));
             sanitize_tool_schema(&mut schema);
             Some(json!({
                 "name": f.get("name")?.as_str()?,
@@ -436,7 +482,10 @@ pub(crate) fn build_anthropic_messages_payload(provider_name: &str, endpoint: &s
 
 fn push_or_coalesce_anthropic_user_block(messages: &mut Vec<Value>, block: Value) {
     let is_tool_result = block.get("type").and_then(Value::as_str) == Some("tool_result");
-    if let Some(last) = messages.last_mut().filter(|v| v.get("role") == Some(&Value::String("user".into()))) {
+    if let Some(last) = messages
+        .last_mut()
+        .filter(|v| v.get("role") == Some(&Value::String("user".into())))
+    {
         if let Some(arr) = last.get_mut("content").and_then(Value::as_array_mut) {
             if is_tool_result {
                 let insert_pos = arr
@@ -454,7 +503,10 @@ fn push_or_coalesce_anthropic_user_block(messages: &mut Vec<Value>, block: Value
 }
 
 fn push_or_coalesce_anthropic_assistant_blocks(messages: &mut Vec<Value>, mut blocks: Vec<Value>) {
-    if let Some(last) = messages.last_mut().filter(|v| v.get("role") == Some(&Value::String("assistant".into()))) {
+    if let Some(last) = messages
+        .last_mut()
+        .filter(|v| v.get("role") == Some(&Value::String("assistant".into())))
+    {
         if let Some(arr) = last.get_mut("content").and_then(Value::as_array_mut) {
             arr.append(&mut blocks);
             return;
@@ -466,20 +518,21 @@ fn push_or_coalesce_anthropic_assistant_blocks(messages: &mut Vec<Value>, mut bl
 fn repair_dangling_anthropic_tool_uses(messages: &mut Vec<Value>) {
     let mut idx = 0usize;
     while idx < messages.len() {
-        let required_ids: Vec<String> = if messages[idx].get("role").and_then(Value::as_str) == Some("assistant") {
-            messages[idx]
-                .get("content")
-                .and_then(Value::as_array)
-                .map(|arr| {
-                    arr.iter()
-                        .filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_use"))
-                        .filter_map(|b| b.get("id").and_then(Value::as_str).map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
+        let required_ids: Vec<String> =
+            if messages[idx].get("role").and_then(Value::as_str) == Some("assistant") {
+                messages[idx]
+                    .get("content")
+                    .and_then(Value::as_array)
+                    .map(|arr| {
+                        arr.iter()
+                            .filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_use"))
+                            .filter_map(|b| b.get("id").and_then(Value::as_str).map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
 
         if !required_ids.is_empty() {
             let next_is_user = messages
@@ -488,12 +541,16 @@ fn repair_dangling_anthropic_tool_uses(messages: &mut Vec<Value>) {
                 .and_then(Value::as_str)
                 == Some("user");
             if next_is_user {
-                if let Some(arr) = messages[idx + 1].get_mut("content").and_then(Value::as_array_mut) {
+                if let Some(arr) = messages[idx + 1]
+                    .get_mut("content")
+                    .and_then(Value::as_array_mut)
+                {
                     let mut missing_blocks = Vec::new();
                     for req_id in &required_ids {
                         let found = arr.iter().any(|b| {
                             b.get("type").and_then(Value::as_str) == Some("tool_result")
-                                && b.get("tool_use_id").and_then(Value::as_str) == Some(req_id.as_str())
+                                && b.get("tool_use_id").and_then(Value::as_str)
+                                    == Some(req_id.as_str())
                         });
                         if !found {
                             missing_blocks.push(json!({
@@ -505,7 +562,12 @@ fn repair_dangling_anthropic_tool_uses(messages: &mut Vec<Value>) {
                         }
                     }
                     if !missing_blocks.is_empty() {
-                        let insert_pos = arr.iter().position(|b| b.get("type").and_then(Value::as_str) != Some("tool_result")).unwrap_or(arr.len());
+                        let insert_pos = arr
+                            .iter()
+                            .position(|b| {
+                                b.get("type").and_then(Value::as_str) != Some("tool_result")
+                            })
+                            .unwrap_or(arr.len());
                         arr.splice(insert_pos..insert_pos, missing_blocks);
                     }
                 }
@@ -528,8 +590,18 @@ fn repair_dangling_anthropic_tool_uses(messages: &mut Vec<Value>) {
     }
 }
 
-fn apply_anthropic_reasoning_shaping(payload: &mut Value, provider_name: &str, endpoint: &str, req: &ProviderRequest) {
-    let Some(raw) = req.reasoning_effort.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
+fn apply_anthropic_reasoning_shaping(
+    payload: &mut Value,
+    provider_name: &str,
+    endpoint: &str,
+    req: &ProviderRequest,
+) {
+    let Some(raw) = req
+        .reasoning_effort
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
         return;
     };
     let eff = raw.to_ascii_lowercase();
@@ -538,13 +610,18 @@ fn apply_anthropic_reasoning_shaping(payload: &mut Value, provider_name: &str, e
     let ep_low = endpoint.to_ascii_lowercase();
 
     if matches!(eff.as_str(), "off" | "none" | "disabled") {
-        if prov_low.contains("deepseek") || prov_low.contains("minimax") || prov_low.contains("qwen") {
+        if prov_low.contains("deepseek")
+            || prov_low.contains("minimax")
+            || prov_low.contains("qwen")
+        {
             payload["thinking"] = json!({ "type": "disabled" });
         }
         return;
     }
 
-    let is_adaptive_claude = (ep_low.contains("api.anthropic.com") || prov_low == "anthropic" || prov_low.contains("claude"))
+    let is_adaptive_claude = (ep_low.contains("api.anthropic.com")
+        || prov_low == "anthropic"
+        || prov_low.contains("claude"))
         && (model_low.contains("4.6")
             || model_low.contains("4-6")
             || model_low.contains("4.7")
@@ -591,7 +668,10 @@ pub(crate) fn build_google_gemini_payload(req: &ProviderRequest) -> Value {
         if parts.is_empty() {
             return;
         }
-        if let Some(last) = contents.last_mut().filter(|v| v.get("role").and_then(Value::as_str) == Some(role)) {
+        if let Some(last) = contents
+            .last_mut()
+            .filter(|v| v.get("role").and_then(Value::as_str) == Some(role))
+        {
             if let Some(arr) = last.get_mut("parts").and_then(Value::as_array_mut) {
                 arr.append(&mut parts);
                 return;
@@ -609,7 +689,9 @@ pub(crate) fn build_google_gemini_payload(req: &ProviderRequest) -> Value {
                     push_gemini_parts(
                         &mut contents,
                         "user",
-                        vec![json!({ "text": format!("<system_note>\n{}\n</system_note>", m.content) })],
+                        vec![
+                            json!({ "text": format!("<system_note>\n{}\n</system_note>", m.content) }),
+                        ],
                     );
                 }
             }
@@ -620,7 +702,11 @@ pub(crate) fn build_google_gemini_payload(req: &ProviderRequest) -> Value {
             Role::Assistant => {
                 conversation_started = true;
                 if contents.is_empty() {
-                    push_gemini_parts(&mut contents, "user", vec![json!({ "text": "[resumed session context]" })]);
+                    push_gemini_parts(
+                        &mut contents,
+                        "user",
+                        vec![json!({ "text": "[resumed session context]" })],
+                    );
                 }
                 let mut parts = Vec::new();
                 if !m.content.is_empty() {
@@ -628,10 +714,17 @@ pub(crate) fn build_google_gemini_payload(req: &ProviderRequest) -> Value {
                 }
                 if let Some(calls) = &m.tool_calls {
                     for tc in calls {
-                        let parsed = serde_json::from_str::<Value>(&tc.function.arguments).unwrap_or_else(|_| json!({}));
-                        let args = if parsed.is_object() { parsed } else { json!({}) };
-                        let mut fc_part = json!({ "functionCall": { "name": tc.function.name, "args": args } });
-                        if let Some(sig) = tc.thought_signature.as_deref().filter(|s| !s.is_empty()) {
+                        let parsed = serde_json::from_str::<Value>(&tc.function.arguments)
+                            .unwrap_or_else(|_| json!({}));
+                        let args = if parsed.is_object() {
+                            parsed
+                        } else {
+                            json!({})
+                        };
+                        let mut fc_part =
+                            json!({ "functionCall": { "name": tc.function.name, "args": args } });
+                        if let Some(sig) = tc.thought_signature.as_deref().filter(|s| !s.is_empty())
+                        {
                             fc_part["thoughtSignature"] = Value::String(sig.to_string());
                         }
                         parts.push(fc_part);
@@ -669,7 +762,12 @@ pub(crate) fn build_google_gemini_payload(req: &ProviderRequest) -> Value {
         "maxOutputTokens": req.max_tokens,
         "temperature": req.temperature
     });
-    if let Some(raw_eff) = req.reasoning_effort.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(raw_eff) = req
+        .reasoning_effort
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         let eff = raw_eff.to_ascii_lowercase();
         let model_low = req.model.to_ascii_lowercase();
         if matches!(eff.as_str(), "off" | "none" | "disabled") {

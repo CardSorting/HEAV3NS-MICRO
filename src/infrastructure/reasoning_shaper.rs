@@ -1,11 +1,17 @@
 // [LAYER: INFRASTRUCTURE]
-use crate::domain::types::provider_registry::{canonicalize_provider_id, lookup_provider_descriptor};
+use crate::domain::types::provider_registry::{
+    canonicalize_provider_id, lookup_provider_descriptor,
+};
 use serde_json::{json, Value};
 
 /// Returns `true` when a Chat Completions route targets Google's OpenAI-compatible Gemini endpoint.
 pub(crate) fn is_google_openai_compat_route(provider_name: &str, endpoint: &str) -> bool {
     let ep_low = endpoint.trim().to_ascii_lowercase();
-    let path_part = ep_low.split(['?', '#']).next().unwrap_or(&ep_low).trim_end_matches('/');
+    let path_part = ep_low
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(&ep_low)
+        .trim_end_matches('/');
     (ep_low.contains("generativelanguage.googleapis.com")
         && (path_part.ends_with("/openai") || path_part.contains("/openai/")))
         || canonicalize_provider_id(provider_name) == "gemini"
@@ -36,7 +42,9 @@ pub(crate) fn apply_chat_completions_reasoning_controls(
     let Some(raw) = raw_effort.map(str::trim).filter(|s| !s.is_empty()) else {
         if (canon == "openai" || canon.is_empty())
             && has_tools
-            && (model_low.contains("terra") || model_low.starts_with("gpt-6") || model_low.starts_with("gpt-5"))
+            && (model_low.contains("terra")
+                || model_low.starts_with("gpt-6")
+                || model_low.starts_with("gpt-5"))
         {
             payload["reasoning_effort"] = json!("none");
         }
@@ -47,15 +55,23 @@ pub(crate) fn apply_chat_completions_reasoning_controls(
     if matches!(eff.as_str(), "default" | "auto" | "clear") {
         if (canon == "openai" || canon.is_empty())
             && has_tools
-            && (model_low.contains("terra") || model_low.starts_with("gpt-6") || model_low.starts_with("gpt-5"))
+            && (model_low.contains("terra")
+                || model_low.starts_with("gpt-6")
+                || model_low.starts_with("gpt-5"))
         {
             payload["reasoning_effort"] = json!("none");
         }
         return;
     }
 
-    let is_off = matches!(eff.as_str(), "off" | "none" | "disable" | "disabled" | "false");
-    let is_max = matches!(eff.as_str(), "xhigh" | "extrahigh" | "max" | "ultra" | "highest" | "ultracode");
+    let is_off = matches!(
+        eff.as_str(),
+        "off" | "none" | "disable" | "disabled" | "false"
+    );
+    let is_max = matches!(
+        eff.as_str(),
+        "xhigh" | "extrahigh" | "max" | "ultra" | "highest" | "ultracode"
+    );
     let is_high = matches!(eff.as_str(), "high" | "deep");
     let is_med = matches!(eff.as_str(), "medium" | "med" | "mid" | "balanced");
     let is_min = eff == "minimal";
@@ -83,7 +99,11 @@ pub(crate) fn apply_chat_completions_reasoning_controls(
     // 2. Google OpenAI-compatible `/v1beta/openai`
     if google_openai {
         if is_off {
-            let off_effort = if model_low.contains("2.5-flash") { "none" } else { "minimal" };
+            let off_effort = if model_low.contains("2.5-flash") {
+                "none"
+            } else {
+                "minimal"
+            };
             payload["reasoning_effort"] = json!(off_effort);
         } else {
             let mapped = if is_max || is_high {
@@ -137,7 +157,10 @@ pub(crate) fn apply_chat_completions_reasoning_controls(
     }
 
     // 5. Unified-effort multi-vendor routers (`openrouter`, `orcarouter`, `novita`, `together`)
-    if matches!(canon.as_str(), "openrouter" | "orcarouter" | "novita" | "together") {
+    if matches!(
+        canon.as_str(),
+        "openrouter" | "orcarouter" | "novita" | "together"
+    ) {
         if is_off {
             payload["thinking"] = json!({ "type": "disabled" });
         } else {
@@ -232,7 +255,8 @@ pub(crate) fn apply_chat_completions_reasoning_controls(
             payload["chat_template_kwargs"] = json!({ "thinking": false });
         } else {
             let n_eff = if is_max { "max" } else { "high" };
-            payload["chat_template_kwargs"] = json!({ "thinking": true, "reasoning_effort": n_eff });
+            payload["chat_template_kwargs"] =
+                json!({ "thinking": true, "reasoning_effort": n_eff });
         }
         return;
     }
@@ -259,8 +283,10 @@ pub(crate) fn apply_chat_completions_reasoning_controls(
     }
 
     // 11. Alibaba Qwen / Model Studio (`enable_thinking` + thinking-only exclusions)
-    if matches!(canon.as_str(), "qwen" | "modelstudio-token-plan" | "modelstudio-coding-plan")
-        && is_official_alibaba_host(&ep_low)
+    if matches!(
+        canon.as_str(),
+        "qwen" | "modelstudio-token-plan" | "modelstudio-coding-plan"
+    ) && is_official_alibaba_host(&ep_low)
     {
         if matches!(
             model_low.as_str(),
@@ -341,7 +367,11 @@ pub(crate) fn apply_chat_completions_reasoning_controls(
             return;
         }
         let grok_eff = if model_low.starts_with("grok-3-mini") {
-            if is_max || is_high { "high" } else { "low" }
+            if is_max || is_high {
+                "high"
+            } else {
+                "low"
+            }
         } else if model_low.starts_with("grok-4.5") {
             if is_max || is_high {
                 "high"
@@ -364,7 +394,8 @@ pub(crate) fn apply_chat_completions_reasoning_controls(
     }
 
     // 17. Standard OpenAI & compatible Chat Completions models
-    let is_o_series = model_low.starts_with("o1") || model_low.starts_with("o3") || model_low.starts_with("o4");
+    let is_o_series =
+        model_low.starts_with("o1") || model_low.starts_with("o3") || model_low.starts_with("o4");
     if is_off {
         if model_low.starts_with("gpt-5")
             || model_low.starts_with("gpt-6")
@@ -391,7 +422,11 @@ pub(crate) fn apply_chat_completions_reasoning_controls(
 }
 
 /// Applies Responses API (`/v1/responses` & DeepSeek `/responses`) profile-specific shaping.
-pub(crate) fn apply_responses_reasoning_controls(payload: &mut Value, provider_name: &str, raw_effort: Option<&str>) {
+pub(crate) fn apply_responses_reasoning_controls(
+    payload: &mut Value,
+    provider_name: &str,
+    raw_effort: Option<&str>,
+) {
     let profile = lookup_provider_descriptor(provider_name)
         .and_then(|d| d.responses_profile)
         .unwrap_or("standard");
@@ -409,8 +444,14 @@ pub(crate) fn apply_responses_reasoning_controls(payload: &mut Value, provider_n
     if matches!(eff.as_str(), "default" | "auto" | "clear") {
         return;
     }
-    let is_off = matches!(eff.as_str(), "off" | "none" | "disable" | "disabled" | "false");
-    let is_max = matches!(eff.as_str(), "xhigh" | "extrahigh" | "max" | "ultra" | "highest" | "ultracode");
+    let is_off = matches!(
+        eff.as_str(),
+        "off" | "none" | "disable" | "disabled" | "false"
+    );
+    let is_max = matches!(
+        eff.as_str(),
+        "xhigh" | "extrahigh" | "max" | "ultra" | "highest" | "ultracode"
+    );
     let is_high = matches!(eff.as_str(), "high" | "deep");
     let is_med = matches!(eff.as_str(), "medium" | "med" | "mid" | "balanced");
 
@@ -461,4 +502,3 @@ pub(crate) fn apply_responses_reasoning_controls(payload: &mut Value, provider_n
         }
     }
 }
-

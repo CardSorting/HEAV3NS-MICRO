@@ -1,7 +1,13 @@
 // [LAYER: DOMAIN]
-use crate::domain::spatial_action::{GroundedSpatialTarget, SpatialExecutionReceipt, SpatialGroundingResult};
-use crate::domain::types::spatial_types::{AssuranceVerdict, SpatialActionContract, SpatialError, SpatialScene, SpatialTarget};
-use crate::plumbing::spatial_geometry::{calculate_rectangles_union_area, normalize_coordinate_value, SpatialPoint, ViewportTransform};
+use crate::domain::spatial_action::{
+    GroundedSpatialTarget, SpatialExecutionReceipt, SpatialGroundingResult,
+};
+use crate::domain::types::spatial_types::{
+    AssuranceVerdict, SpatialActionContract, SpatialError, SpatialScene, SpatialTarget,
+};
+use crate::plumbing::spatial_geometry::{
+    calculate_rectangles_union_area, normalize_coordinate_value, SpatialPoint, ViewportTransform,
+};
 use serde::{Deserialize, Serialize};
 
 /// The primary spatial interaction class, managing the spatial scene, target arbitration,
@@ -55,8 +61,14 @@ impl SpatialActionMediator {
         if let Some(expected) = contract.expected_epoch {
             if expected != self.layout_epoch {
                 return SpatialGroundingResult::failed(
-                    SpatialError::StaleTargetEpoch { expected, current: self.layout_epoch },
-                    Some(format!("Re-query spatial scene for fresh epoch {}", self.layout_epoch)),
+                    SpatialError::StaleTargetEpoch {
+                        expected,
+                        current: self.layout_epoch,
+                    },
+                    Some(format!(
+                        "Re-query spatial scene for fresh epoch {}",
+                        self.layout_epoch
+                    )),
                 );
             }
         }
@@ -66,7 +78,10 @@ impl SpatialActionMediator {
         let candidates = {
             let mut c = self.resolve_target_candidates(contract);
             let act_lower = contract.action_name.to_ascii_lowercase();
-            let is_keyboard_act = matches!(act_lower.as_str(), "key" | "hotkey" | "press" | "tab" | "escape");
+            let is_keyboard_act = matches!(
+                act_lower.as_str(),
+                "key" | "hotkey" | "press" | "tab" | "escape"
+            );
             let is_scroll_act = act_lower == "scroll";
             if c.is_empty() && (is_keyboard_act || is_scroll_act) {
                 // If keyboard action has no explicit target, ground to active focus or active window plane;
@@ -82,7 +97,12 @@ impl SpatialActionMediator {
                         None,
                         "window",
                         "Active Window",
-                        [0, 0, self.active_scene.width as i32, self.active_scene.height as i32],
+                        [
+                            0,
+                            0,
+                            self.active_scene.width as i32,
+                            self.active_scene.height as i32,
+                        ],
                     );
                     c.push(&fallback_window_target);
                 }
@@ -91,7 +111,11 @@ impl SpatialActionMediator {
         };
 
         if candidates.is_empty() {
-            let id = contract.target_selector.clone().or_else(|| contract.som_id.map(|s| s.to_string())).unwrap_or_else(|| "unspecified".into());
+            let id = contract
+                .target_selector
+                .clone()
+                .or_else(|| contract.som_id.map(|s| s.to_string()))
+                .unwrap_or_else(|| "unspecified".into());
             return SpatialGroundingResult::failed(
                 SpatialError::TargetNotFound(id),
                 Some("Perform capture or som element scan to locate target".into()),
@@ -130,10 +154,14 @@ impl SpatialActionMediator {
         }
 
         // 5. Viewport Transform & Visibility
-        let vp_rect = self.viewport_transform.element_to_viewport_rect(&target_rect);
+        let vp_rect = self
+            .viewport_transform
+            .element_to_viewport_rect(&target_rect);
         let visibility = self.viewport_transform.visibility_ratio(&target_rect);
         let (requires_scroll, scroll_delta) = if visibility <= 0.05 {
-            let (dx, dy) = self.viewport_transform.compute_centering_scroll_delta(&target_rect);
+            let (dx, dy) = self
+                .viewport_transform
+                .compute_centering_scroll_delta(&target_rect);
             (true, (dx, dy))
         } else {
             (false, (0.0, 0.0))
@@ -168,8 +196,12 @@ impl SpatialActionMediator {
         } else if occluding_intersections.len() == 1 {
             occluding_intersections[0].area()
         } else if occluding_intersections.len() == 2 {
-            let inter_area = occluding_intersections[0].intersection(&occluding_intersections[1]).map(|i| i.area()).unwrap_or(0.0);
-            (occluding_intersections[0].area() + occluding_intersections[1].area() - inter_area).max(0.0)
+            let inter_area = occluding_intersections[0]
+                .intersection(&occluding_intersections[1])
+                .map(|i| i.area())
+                .unwrap_or(0.0);
+            (occluding_intersections[0].area() + occluding_intersections[1].area() - inter_area)
+                .max(0.0)
         } else {
             calculate_rectangles_union_area(&occluding_intersections)
         };
@@ -208,7 +240,10 @@ impl SpatialActionMediator {
         })
     }
 
-    fn resolve_target_candidates<'a>(&'a self, contract: &SpatialActionContract) -> Vec<&'a SpatialTarget> {
+    fn resolve_target_candidates<'a>(
+        &'a self,
+        contract: &SpatialActionContract,
+    ) -> Vec<&'a SpatialTarget> {
         // A. Match by exact som_id
         if let Some(sid) = contract.som_id {
             if let Some(t) = self.active_scene.find_by_som(sid) {
@@ -221,7 +256,9 @@ impl SpatialActionMediator {
             let trimmed = sel.trim();
             if let Some(tok) = trimmed.strip_prefix('s') {
                 if let Some((seq_str, sid_str)) = tok.split_once(':') {
-                    if let (Ok(seq), Ok(sid)) = (u64::from_str_radix(seq_str, 16), sid_str.parse::<u32>()) {
+                    if let (Ok(seq), Ok(sid)) =
+                        (u64::from_str_radix(seq_str, 16), sid_str.parse::<u32>())
+                    {
                         if seq == self.active_scene.frame_seq {
                             if let Some(t) = self.active_scene.find_by_som(sid) {
                                 return vec![t];
@@ -230,18 +267,31 @@ impl SpatialActionMediator {
                     }
                 }
             }
-            if let Some(stripped) = trimmed.strip_prefix('#').or_else(|| trimmed.strip_prefix("som:")) {
+            if let Some(stripped) = trimmed
+                .strip_prefix('#')
+                .or_else(|| trimmed.strip_prefix("som:"))
+            {
                 if let Ok(sid) = stripped.parse::<u32>() {
                     if let Some(t) = self.active_scene.find_by_som(sid) {
                         return vec![t];
                     }
                 }
             }
-            let by_id = self.active_scene.targets.iter().filter(|t| t.id == trimmed).collect::<Vec<_>>();
+            let by_id = self
+                .active_scene
+                .targets
+                .iter()
+                .filter(|t| t.id == trimmed)
+                .collect::<Vec<_>>();
             if !by_id.is_empty() {
                 return by_id;
             }
-            let by_label = self.active_scene.targets.iter().filter(|t| t.label.eq_ignore_ascii_case(trimmed)).collect::<Vec<_>>();
+            let by_label = self
+                .active_scene
+                .targets
+                .iter()
+                .filter(|t| t.label.eq_ignore_ascii_case(trimmed))
+                .collect::<Vec<_>>();
             if !by_label.is_empty() {
                 return by_label;
             }
@@ -253,9 +303,21 @@ impl SpatialActionMediator {
                 let dim_w = self.active_scene.width as f64;
                 let dim_h = self.active_scene.height as f64;
                 let is_norm_1000 = contract.coordinate_space == "normalized_1000";
-                let nx = normalize_coordinate_value(Some(&serde_json::json!(cx)), dim_w, cx, is_norm_1000);
-                let ny = normalize_coordinate_value(Some(&serde_json::json!(cy)), dim_h, cy, is_norm_1000);
-                return self.active_scene.find_at_point(nx.round() as i32, ny.round() as i32);
+                let nx = normalize_coordinate_value(
+                    Some(&serde_json::json!(cx)),
+                    dim_w,
+                    cx,
+                    is_norm_1000,
+                );
+                let ny = normalize_coordinate_value(
+                    Some(&serde_json::json!(cy)),
+                    dim_h,
+                    cy,
+                    is_norm_1000,
+                );
+                return self
+                    .active_scene
+                    .find_at_point(nx.round() as i32, ny.round() as i32);
             }
         }
 
@@ -267,10 +329,17 @@ impl SpatialActionMediator {
     // ========================================================================
 
     /// Validates execution preconditions, role permissions, and coordinate containment before dispatch.
-    pub fn assure_pre_execution(&self, grounded: &GroundedSpatialTarget, contract: &SpatialActionContract) -> Result<(), SpatialError> {
+    pub fn assure_pre_execution(
+        &self,
+        grounded: &GroundedSpatialTarget,
+        contract: &SpatialActionContract,
+    ) -> Result<(), SpatialError> {
         let act = contract.action_name.to_ascii_lowercase();
         // Keyboard and viewport scroll inputs target the active window or focus plane and bypass pointer coordinate containment
-        if matches!(act.as_str(), "key" | "hotkey" | "press" | "tab" | "escape" | "scroll") {
+        if matches!(
+            act.as_str(),
+            "key" | "hotkey" | "press" | "tab" | "escape" | "scroll"
+        ) {
             return Ok(());
         }
 
@@ -279,7 +348,10 @@ impl SpatialActionMediator {
         }
 
         // Permitted action by role check
-        if (act == "type" || act == "set_value" || act == "fill") && !grounded.target.is_input_capable() && !grounded.target.focused {
+        if (act == "type" || act == "set_value" || act == "fill")
+            && !grounded.target.is_input_capable()
+            && !grounded.target.focused
+        {
             return Err(SpatialError::ActionNotPermittedForRole {
                 role: grounded.target.role.clone(),
                 action: act,
@@ -312,10 +384,25 @@ impl SpatialActionMediator {
         let (verdict, postconditions_met, recovery_suggestion) = match lower_action.as_str() {
             "click" | "double_click" => {
                 if let Some(g) = grounded {
-                    let target_focused_after = after.targets.iter().find(|t| t.id == g.target.id).map(|t| t.focused).unwrap_or(false);
+                    let target_focused_after = after
+                        .targets
+                        .iter()
+                        .find(|t| t.id == g.target.id)
+                        .map(|t| t.focused)
+                        .unwrap_or(false);
                     let state_changed = before.window_id != after.window_id
                         || before.targets.len() != after.targets.len()
-                        || before.targets.iter().zip(after.targets.iter()).any(|(b, a)| b.id != a.id || b.bounds != a.bounds || b.value != a.value || b.focused != a.focused || b.enabled != a.enabled);
+                        || before
+                            .targets
+                            .iter()
+                            .zip(after.targets.iter())
+                            .any(|(b, a)| {
+                                b.id != a.id
+                                    || b.bounds != a.bounds
+                                    || b.value != a.value
+                                    || b.focused != a.focused
+                                    || b.enabled != a.enabled
+                            });
                     if target_focused_after || state_changed {
                         (AssuranceVerdict::Confirmed, true, None)
                     } else {
@@ -331,8 +418,18 @@ impl SpatialActionMediator {
             }
             "type" | "set_value" | "fill" => {
                 if let Some(g) = grounded {
-                    let new_val = after.targets.iter().find(|t| t.id == g.target.id).map(|t| t.value.as_str()).unwrap_or("");
-                    let old_val = before.targets.iter().find(|t| t.id == g.target.id).map(|t| t.value.as_str()).unwrap_or("");
+                    let new_val = after
+                        .targets
+                        .iter()
+                        .find(|t| t.id == g.target.id)
+                        .map(|t| t.value.as_str())
+                        .unwrap_or("");
+                    let old_val = before
+                        .targets
+                        .iter()
+                        .find(|t| t.id == g.target.id)
+                        .map(|t| t.value.as_str())
+                        .unwrap_or("");
                     if new_val != old_val {
                         (AssuranceVerdict::Confirmed, true, None)
                     } else {
@@ -350,7 +447,11 @@ impl SpatialActionMediator {
                 if before.scroll_offset != after.scroll_offset {
                     (AssuranceVerdict::Confirmed, true, None)
                 } else {
-                    (AssuranceVerdict::SuspectedNoop, false, Some("Scroll offset did not change; document may be at boundary".into()))
+                    (
+                        AssuranceVerdict::SuspectedNoop,
+                        false,
+                        Some("Scroll offset did not change; document may be at boundary".into()),
+                    )
                 }
             }
             _ => (AssuranceVerdict::Confirmed, true, None),
@@ -376,7 +477,10 @@ impl SpatialActionMediator {
     pub fn plan_action(&self, contract: &SpatialActionContract) -> SpatialActionPlan {
         let grounding = self.ground_action(contract);
         let mut steps = Vec::new();
-        let target_id = contract.target_selector.clone().unwrap_or_else(|| "target".into());
+        let target_id = contract
+            .target_selector
+            .clone()
+            .unwrap_or_else(|| "target".into());
 
         if let Some(ref g) = grounding.grounded {
             if g.requires_scroll {
@@ -428,9 +532,21 @@ pub struct SpatialInteractionAudit {
 impl SpatialActionMediator {
     pub fn generate_audit(&self) -> SpatialInteractionAudit {
         let total = self.audit_history.len();
-        let confirmed = self.audit_history.iter().filter(|r| r.verdict == AssuranceVerdict::Confirmed).count();
-        let suspected = self.audit_history.iter().filter(|r| r.verdict == AssuranceVerdict::SuspectedNoop).count();
-        let rate = if total == 0 { 1.0 } else { confirmed as f64 / total as f64 };
+        let confirmed = self
+            .audit_history
+            .iter()
+            .filter(|r| r.verdict == AssuranceVerdict::Confirmed)
+            .count();
+        let suspected = self
+            .audit_history
+            .iter()
+            .filter(|r| r.verdict == AssuranceVerdict::SuspectedNoop)
+            .count();
+        let rate = if total == 0 {
+            1.0
+        } else {
+            confirmed as f64 / total as f64
+        };
         SpatialInteractionAudit {
             total_actions: total,
             confirmed_count: confirmed,
@@ -454,11 +570,22 @@ impl crate::domain::interfaces::ISpatialGroundingGate for SpatialActionMediator 
 }
 
 impl crate::domain::interfaces::IExecutionAssuranceGate for SpatialActionMediator {
-    fn assure_pre(&self, grounded: &GroundedSpatialTarget, contract: &SpatialActionContract) -> Result<(), SpatialError> {
+    fn assure_pre(
+        &self,
+        grounded: &GroundedSpatialTarget,
+        contract: &SpatialActionContract,
+    ) -> Result<(), SpatialError> {
         self.assure_pre_execution(grounded, contract)
     }
 
-    fn verify_post(&mut self, action: &str, grounded: Option<&GroundedSpatialTarget>, before: &SpatialScene, after: &SpatialScene, duration_ms: u64) -> SpatialExecutionReceipt {
+    fn verify_post(
+        &mut self,
+        action: &str,
+        grounded: Option<&GroundedSpatialTarget>,
+        before: &SpatialScene,
+        after: &SpatialScene,
+        duration_ms: u64,
+    ) -> SpatialExecutionReceipt {
         self.verify_post_execution(action, grounded, before, after, duration_ms)
     }
 }

@@ -3,7 +3,11 @@ use crate::domain::interfaces::{BoxFuture, ICodexAccountStore};
 use crate::domain::types::account_types::{ChatGptAccountCredentials, ChatGptAccountStoreData};
 use crate::domain::types::runtime::CancellationToken;
 use crate::plumbing::hash_and_math::{lock_unpoison, now_ms};
-use crate::plumbing::oauth_pkce::{build_openai_authorize_url, encode_base64url, encode_hex_lower, extract_jwt_expiry_ms, extract_openai_account_id, extract_openai_email, extract_openai_plan_type, generate_pkce_challenge, parse_query_params, url_encode_component};
+use crate::plumbing::oauth_pkce::{
+    build_openai_authorize_url, encode_base64url, encode_hex_lower, extract_jwt_expiry_ms,
+    extract_openai_account_id, extract_openai_email, extract_openai_plan_type,
+    generate_pkce_challenge, parse_query_params, url_encode_component,
+};
 use serde_json::{json, Value};
 use std::fs;
 use std::io::Read;
@@ -16,8 +20,12 @@ use tokio::sync::Mutex as AsyncMutex;
 
 static REFRESH_FLIGHT_LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
 static STORE_IO_LOCK: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
-fn refresh_flight_lock() -> &'static AsyncMutex<()> { REFRESH_FLIGHT_LOCK.get_or_init(|| AsyncMutex::new(())) }
-fn store_io_lock() -> &'static std::sync::Mutex<()> { STORE_IO_LOCK.get_or_init(|| std::sync::Mutex::new(())) }
+fn refresh_flight_lock() -> &'static AsyncMutex<()> {
+    REFRESH_FLIGHT_LOCK.get_or_init(|| AsyncMutex::new(()))
+}
+fn store_io_lock() -> &'static std::sync::Mutex<()> {
+    STORE_IO_LOCK.get_or_init(|| std::sync::Mutex::new(()))
+}
 
 pub const OPENAI_CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 pub const OPENAI_OAUTH_AUTH_URL: &str = "https://auth.openai.com/oauth/authorize";
@@ -30,56 +38,99 @@ const TOKEN_REFRESH_SKEW_MS: u64 = 60_000;
 
 fn is_safe_oauth_url(url: &str) -> bool {
     let lower = url.to_ascii_lowercase();
-    if lower.starts_with("https://") { return true; }
-    let Some(rest) = lower.strip_prefix("http://") else { return false; };
+    if lower.starts_with("https://") {
+        return true;
+    }
+    let Some(rest) = lower.strip_prefix("http://") else {
+        return false;
+    };
     let host_port = rest.split(['/', '?', '#']).next().unwrap_or("");
-    !host_port.contains('@') && (matches!(host_port.split(':').next().unwrap_or(""), "127.0.0.1" | "localhost") || host_port == "[::1]" || host_port.starts_with("[::1]:"))
+    !host_port.contains('@')
+        && (matches!(
+            host_port.split(':').next().unwrap_or(""),
+            "127.0.0.1" | "localhost"
+        ) || host_port == "[::1]"
+            || host_port.starts_with("[::1]:"))
 }
 
 pub(crate) fn resolve_token_url() -> String {
-    std::env::var("HEAV3NS_OPENAI_TOKEN_URL").ok().map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty() && is_safe_oauth_url(s)).unwrap_or_else(|| OPENAI_OAUTH_TOKEN_URL.to_string())
+    std::env::var("HEAV3NS_OPENAI_TOKEN_URL")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty() && is_safe_oauth_url(s))
+        .unwrap_or_else(|| OPENAI_OAUTH_TOKEN_URL.to_string())
 }
 
 pub(crate) fn resolve_codex_base_url() -> String {
-    std::env::var("HEAV3NS_CODEX_BASE_URL").ok().map(|s| s.trim().trim_end_matches('/').to_string())
-        .filter(|s| !s.is_empty() && is_safe_oauth_url(s)).unwrap_or_else(|| CHATGPT_CODEX_BASE_URL.to_string())
+    std::env::var("HEAV3NS_CODEX_BASE_URL")
+        .ok()
+        .map(|s| s.trim().trim_end_matches('/').to_string())
+        .filter(|s| !s.is_empty() && is_safe_oauth_url(s))
+        .unwrap_or_else(|| CHATGPT_CODEX_BASE_URL.to_string())
 }
 
 #[derive(Debug, Clone)]
-pub struct CodexAccountStore { path: PathBuf }
+pub struct CodexAccountStore {
+    path: PathBuf,
+}
 
 impl CodexAccountStore {
-    pub fn default_store() -> Self { Self { path: resolve_accounts_path() } }
+    pub fn default_store() -> Self {
+        Self {
+            path: resolve_accounts_path(),
+        }
+    }
 
     pub fn at_path(path: impl Into<PathBuf>) -> Self {
         Self { path: path.into() }
     }
 
     pub fn try_load_accounts_store(&self) -> Result<ChatGptAccountStoreData, String> {
-        match fs::read_to_string(&self.path) { Ok(raw) => serde_json::from_str(&raw).map_err(|e| format!("Corrupt accounts store: {e}")), Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(ChatGptAccountStoreData::default()), Err(e) => Err(format!("Failed reading accounts store: {e}")) }
+        match fs::read_to_string(&self.path) {
+            Ok(raw) => {
+                serde_json::from_str(&raw).map_err(|e| format!("Corrupt accounts store: {e}"))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                Ok(ChatGptAccountStoreData::default())
+            }
+            Err(e) => Err(format!("Failed reading accounts store: {e}")),
+        }
     }
-    pub fn load_accounts_store(&self) -> ChatGptAccountStoreData { self.try_load_accounts_store().unwrap_or_default() }
+    pub fn load_accounts_store(&self) -> ChatGptAccountStoreData {
+        self.try_load_accounts_store().unwrap_or_default()
+    }
 
     pub fn save_accounts_store(&self, data: &ChatGptAccountStoreData) -> Result<(), String> {
         if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("Failed to create accounts dir: {e}"))?;
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create accounts dir: {e}"))?;
         }
-        let serialized = serde_json::to_string_pretty(data).map_err(|e| format!("Failed to serialize accounts: {e}"))?;
+        let serialized = serde_json::to_string_pretty(data)
+            .map_err(|e| format!("Failed to serialize accounts: {e}"))?;
         static TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let seq = TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let tmp = self.path.with_extension(format!("json.tmp.{}.{}", std::process::id(), seq));
+        let tmp = self
+            .path
+            .with_extension(format!("json.tmp.{}.{}", std::process::id(), seq));
         let _ = fs::remove_file(&tmp);
         #[cfg(unix)]
         {
             use std::{io::Write, os::unix::fs::OpenOptionsExt};
-            fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)
+            fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&tmp)
                 .and_then(|mut f| f.write_all(serialized.as_bytes()))
                 .map_err(|e| format!("Failed to write accounts file: {e}"))?;
         }
         #[cfg(not(unix))]
-        fs::write(&tmp, serialized.as_bytes()).map_err(|e| format!("Failed to write accounts file: {e}"))?;
-        fs::rename(&tmp, &self.path).map_err(|e| { let _ = fs::remove_file(&tmp); format!("Failed to persist accounts file: {e}") })
+        fs::write(&tmp, serialized.as_bytes())
+            .map_err(|e| format!("Failed to write accounts file: {e}"))?;
+        fs::rename(&tmp, &self.path).map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            format!("Failed to persist accounts file: {e}")
+        })
     }
 
     pub fn rpc_snapshot(&self) -> Value {
@@ -89,7 +140,9 @@ impl CodexAccountStore {
     pub fn switch_account(&self, target_id: &str) -> Result<Value, String> {
         let _io = lock_unpoison(store_io_lock());
         let mut data = self.try_load_accounts_store()?;
-        if !data.accounts.iter().any(|a| a.id == target_id) { return Err(format!("Account '{target_id}' was not found.")); }
+        if !data.accounts.iter().any(|a| a.id == target_id) {
+            return Err(format!("Account '{target_id}' was not found."));
+        }
         data.active_id = Some(target_id.to_string());
         self.save_accounts_store(&data)?;
         Ok(snapshot_value(&data))
@@ -97,11 +150,16 @@ impl CodexAccountStore {
 
     pub fn rename_account(&self, target_id: &str, new_label: &str) -> Result<Value, String> {
         let trimmed = new_label.trim();
-        if trimmed.is_empty() { return Err("Account name cannot be empty.".to_string()); }
+        if trimmed.is_empty() {
+            return Err("Account name cannot be empty.".to_string());
+        }
         let _io = lock_unpoison(store_io_lock());
         let mut data = self.try_load_accounts_store()?;
-        let Some(acc) = data.accounts.iter_mut().find(|a| a.id == target_id) else { return Err(format!("Account '{target_id}' was not found.")); };
-        acc.label = trimmed.chars().take(100).collect(); acc.updated_at_ms = now_ms();
+        let Some(acc) = data.accounts.iter_mut().find(|a| a.id == target_id) else {
+            return Err(format!("Account '{target_id}' was not found."));
+        };
+        acc.label = trimmed.chars().take(100).collect();
+        acc.updated_at_ms = now_ms();
         self.save_accounts_store(&data)?;
         Ok(snapshot_value(&data))
     }
@@ -111,8 +169,12 @@ impl CodexAccountStore {
         let mut data = self.try_load_accounts_store()?;
         let before = data.accounts.len();
         data.accounts.retain(|a| a.id != target_id);
-        if data.accounts.len() == before { return Err(format!("Account '{target_id}' was not found.")); }
-        if data.active_id.as_deref() == Some(target_id) { data.active_id = data.accounts.first().map(|a| a.id.clone()); }
+        if data.accounts.len() == before {
+            return Err(format!("Account '{target_id}' was not found."));
+        }
+        if data.active_id.as_deref() == Some(target_id) {
+            data.active_id = data.accounts.first().map(|a| a.id.clone());
+        }
         self.save_accounts_store(&data)?;
         Ok(snapshot_value(&data))
     }
@@ -120,8 +182,13 @@ impl CodexAccountStore {
     pub fn sign_out(&self, all: bool) -> Result<Value, String> {
         let _io = lock_unpoison(store_io_lock());
         let mut data = self.try_load_accounts_store()?;
-        if all { data.accounts.clear(); data.active_id = None; }
-        else if let Some(active) = data.active_id.clone() { data.accounts.retain(|a| a.id != active); data.active_id = data.accounts.first().map(|a| a.id.clone()); }
+        if all {
+            data.accounts.clear();
+            data.active_id = None;
+        } else if let Some(active) = data.active_id.clone() {
+            data.accounts.retain(|a| a.id != active);
+            data.active_id = data.accounts.first().map(|a| a.id.clone());
+        }
         self.save_accounts_store(&data)?;
         Ok(snapshot_value(&data))
     }
@@ -129,8 +196,12 @@ impl CodexAccountStore {
     pub fn clear_limit(&self, target_id: &str) -> Result<Value, String> {
         let _io = lock_unpoison(store_io_lock());
         let mut data = self.try_load_accounts_store()?;
-        let Some(acc) = data.accounts.iter_mut().find(|a| a.id == target_id) else { return Err(format!("Account '{target_id}' was not found.")); };
-        acc.limited_until_ms = None; acc.limit_estimated = false; acc.updated_at_ms = now_ms();
+        let Some(acc) = data.accounts.iter_mut().find(|a| a.id == target_id) else {
+            return Err(format!("Account '{target_id}' was not found."));
+        };
+        acc.limited_until_ms = None;
+        acc.limit_estimated = false;
+        acc.updated_at_ms = now_ms();
         self.save_accounts_store(&data)?;
         Ok(snapshot_value(&data))
     }
@@ -144,7 +215,11 @@ impl CodexAccountStore {
     }
 
     /// Runs the full OpenAI OAuth PKCE browser sign-in flow and saves the resulting account.
-    pub async fn sign_in<F>(&self, cancel: CancellationToken, on_browser_url: F) -> Result<Value, String>
+    pub async fn sign_in<F>(
+        &self,
+        cancel: CancellationToken,
+        on_browser_url: F,
+    ) -> Result<Value, String>
     where
         F: FnOnce(String),
     {
@@ -162,7 +237,11 @@ impl CodexAccountStore {
 
         let listener = TcpListener::bind(OPENAI_OAUTH_CALLBACK_ADDR)
             .await
-            .map_err(|e| format!("Could not start local sign-in listener on {OPENAI_OAUTH_CALLBACK_ADDR}: {e}"))?;
+            .map_err(|e| {
+                format!(
+                    "Could not start local sign-in listener on {OPENAI_OAUTH_CALLBACK_ADDR}: {e}"
+                )
+            })?;
         on_browser_url(auth_url);
 
         let code = wait_for_oauth_callback(listener, &state, &cancel).await?;
@@ -171,7 +250,8 @@ impl CodexAccountStore {
         }
 
         let creds = exchange_code_for_tokens(&code, &verifier).await?;
-        let (access_checked, model_count) = probe_codex_models(&creds.access_token, creds.account_id.as_deref()).await;
+        let (access_checked, model_count) =
+            probe_codex_models(&creds.access_token, creds.account_id.as_deref()).await;
 
         let (data, created) = {
             let _io = lock_unpoison(store_io_lock());
@@ -186,13 +266,18 @@ impl CodexAccountStore {
             obj.insert("created".to_string(), json!(created));
             obj.insert("accessChecked".to_string(), json!(access_checked));
             obj.insert("modelCount".to_string(), json!(model_count));
-            obj.insert("account".to_string(), json!({ "id": creds.id, "label": creds.label }));
+            obj.insert(
+                "account".to_string(),
+                json!({ "id": creds.id, "label": creds.label }),
+            );
         }
         Ok(out)
     }
 
     /// Returns `(access_token, chatgpt_account_id)` for the active account, refreshing if near expiry.
-    pub async fn get_valid_active_credentials(&self) -> Result<Option<(String, Option<String>)>, String> {
+    pub async fn get_valid_active_credentials(
+        &self,
+    ) -> Result<Option<(String, Option<String>)>, String> {
         let data = self.load_accounts_store();
         let Some(active) = active_account(&data).cloned() else {
             return Ok(None);
@@ -208,14 +293,21 @@ impl CodexAccountStore {
     }
 
     /// Forces an OAuth token refresh for the active account (e.g. after HTTP 401).
-    pub async fn force_refresh_active(&self, rejected_token: &str) -> Result<(String, Option<String>), String> {
+    pub async fn force_refresh_active(
+        &self,
+        rejected_token: &str,
+    ) -> Result<(String, Option<String>), String> {
         let data = self.load_accounts_store();
         let active = active_account(&data)
             .ok_or_else(|| "No active ChatGPT account is signed in.".to_string())?;
         self.refresh_account(&active.id, Some(rejected_token)).await
     }
 
-    async fn refresh_account(&self, id: &str, rejected_token: Option<&str>) -> Result<(String, Option<String>), String> {
+    async fn refresh_account(
+        &self,
+        id: &str,
+        rejected_token: Option<&str>,
+    ) -> Result<(String, Option<String>), String> {
         let _guard = refresh_flight_lock().lock().await;
         let data = self.load_accounts_store();
         let current = data
@@ -236,7 +328,9 @@ impl CodexAccountStore {
             .refresh_token
             .clone()
             .filter(|s| !s.is_empty())
-            .ok_or_else(|| "ChatGPT session expired and has no refresh token. Sign in again.".to_string())?;
+            .ok_or_else(|| {
+                "ChatGPT session expired and has no refresh token. Sign in again.".to_string()
+            })?;
 
         let refreshed = refresh_oauth_token(&refresh_tok, &current).await?;
         let result = (refreshed.access_token.clone(), refreshed.account_id.clone());
@@ -247,7 +341,10 @@ impl CodexAccountStore {
             slot.refresh_token = refreshed.refresh_token;
             slot.id_token = refreshed.id_token;
             slot.expires_at_ms = refreshed.expires_at_ms;
-            slot.account_id = refreshed.account_id; slot.email = refreshed.email; slot.plan_type = refreshed.plan_type; slot.updated_at_ms = refreshed.updated_at_ms;
+            slot.account_id = refreshed.account_id;
+            slot.email = refreshed.email;
+            slot.plan_type = refreshed.plan_type;
+            slot.updated_at_ms = refreshed.updated_at_ms;
         }
         self.save_accounts_store(&data)?;
         Ok(result)
@@ -256,7 +353,9 @@ impl CodexAccountStore {
     /// Records a 429 usage limit on the active account and auto-switches if another ready account exists.
     pub fn record_rate_limit(&self, retry_after_ms: Option<u64>) {
         let _io = lock_unpoison(store_io_lock());
-        let Ok(mut data) = self.try_load_accounts_store() else { return; };
+        let Ok(mut data) = self.try_load_accounts_store() else {
+            return;
+        };
         let now = now_ms();
         let until = now.saturating_add(retry_after_ms.unwrap_or(15 * 60_000).max(5_000));
         if let Some(active_id) = data.active_id.clone() {
@@ -266,13 +365,17 @@ impl CodexAccountStore {
                 acc.updated_at_ms = now;
             }
             if data.auto_switch {
-                if let Some(next) = data.accounts.iter().find(|a| {
-                    a.id != active_id && a.limited_until_ms.is_none_or(|u| u <= now)
-                }) {
+                if let Some(next) = data
+                    .accounts
+                    .iter()
+                    .find(|a| a.id != active_id && a.limited_until_ms.is_none_or(|u| u <= now))
+                {
                     data.active_id = Some(next.id.clone());
                 }
             }
-            if let Err(e) = self.save_accounts_store(&data) { eprintln!("[heav3ns] Failed to persist rate limit: {e}"); }
+            if let Err(e) = self.save_accounts_store(&data) {
+                eprintln!("[heav3ns] Failed to persist rate limit: {e}");
+            }
         }
     }
 }
@@ -351,7 +454,10 @@ fn active_account(data: &ChatGptAccountStoreData) -> Option<&ChatGptAccountCrede
 fn snapshot_value(data: &ChatGptAccountStoreData) -> Value {
     let summaries = data.summaries(now_ms());
     let saved = !summaries.is_empty();
-    let active_summary = summaries.iter().find(|s| s.active).or_else(|| summaries.first());
+    let active_summary = summaries
+        .iter()
+        .find(|s| s.active)
+        .or_else(|| summaries.first());
     let mut obj = json!({
         "saved": saved,
         "accounts": summaries,
@@ -363,7 +469,10 @@ fn snapshot_value(data: &ChatGptAccountStoreData) -> Value {
     obj
 }
 
-fn upsert_account(data: &mut ChatGptAccountStoreData, mut incoming: ChatGptAccountCredentials) -> bool {
+fn upsert_account(
+    data: &mut ChatGptAccountStoreData,
+    mut incoming: ChatGptAccountCredentials,
+) -> bool {
     let existing_idx = data.accounts.iter().position(|a| {
         (incoming.account_id.is_some() && a.account_id == incoming.account_id)
             || (incoming.email.is_some() && a.email == incoming.email)
@@ -371,7 +480,8 @@ fn upsert_account(data: &mut ChatGptAccountStoreData, mut incoming: ChatGptAccou
     });
     if let Some(idx) = existing_idx {
         incoming.id = data.accounts[idx].id.clone();
-        if !data.accounts[idx].label.is_empty() && !data.accounts[idx].label.starts_with("ChatGPT") {
+        if !data.accounts[idx].label.is_empty() && !data.accounts[idx].label.starts_with("ChatGPT")
+        {
             incoming.label = data.accounts[idx].label.clone();
         }
         data.accounts[idx] = incoming.clone();
@@ -390,12 +500,17 @@ fn upsert_account(data: &mut ChatGptAccountStoreData, mut incoming: ChatGptAccou
 
 fn random_bytes_32() -> Result<[u8; 32], String> {
     let mut buf = [0u8; 32];
-    let mut f = fs::File::open("/dev/urandom").map_err(|e| format!("CSPRNG /dev/urandom unavailable: {e}"))?;
-    f.read_exact(&mut buf).map_err(|e| format!("Failed reading CSPRNG bytes: {e}"))?;
+    let mut f = fs::File::open("/dev/urandom")
+        .map_err(|e| format!("CSPRNG /dev/urandom unavailable: {e}"))?;
+    f.read_exact(&mut buf)
+        .map_err(|e| format!("Failed reading CSPRNG bytes: {e}"))?;
     Ok(buf)
 }
 
-async fn read_oauth_body_bounded(mut resp: reqwest::Response, max_bytes: usize) -> Result<String, String> {
+async fn read_oauth_body_bounded(
+    mut resp: reqwest::Response,
+    max_bytes: usize,
+) -> Result<String, String> {
     let mut buf = Vec::new();
     while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
         if buf.len().saturating_add(chunk.len()) > max_bytes {
@@ -424,29 +539,52 @@ async fn wait_for_oauth_callback(
         };
         let (mut stream, _) = accepted;
         let mut req_buf = [0u8; 8192];
-        let Ok(Ok(n)) = tokio::time::timeout(Duration::from_secs(5), stream.read(&mut req_buf)).await else {
+        let Ok(Ok(n)) =
+            tokio::time::timeout(Duration::from_secs(5), stream.read(&mut req_buf)).await
+        else {
             continue;
         };
         let req_text = String::from_utf8_lossy(&req_buf[..n]);
         let first_line = req_text.lines().next().unwrap_or("");
         let target = first_line.split_whitespace().nth(1).unwrap_or("/");
         if !target.starts_with("/auth/callback") {
-            let _ = write_http_html(&mut stream, 404, "Not found", "Waiting for ChatGPT sign-in.").await;
+            let _ = write_http_html(
+                &mut stream,
+                404,
+                "Not found",
+                "Waiting for ChatGPT sign-in.",
+            )
+            .await;
             continue;
         }
         let query = target.split_once('?').map(|(_, q)| q).unwrap_or("");
         let params = parse_query_params(query);
         if params.get("state").map(String::as_str) != Some(expected_state) {
-            let _ = write_http_html(&mut stream, 400, "Invalid state", "We couldn't verify this sign-in link.").await;
+            let _ = write_http_html(
+                &mut stream,
+                400,
+                "Invalid state",
+                "We couldn't verify this sign-in link.",
+            )
+            .await;
             continue;
         }
         if let Some(err) = params.get("error") {
-            let desc = params.get("error_description").cloned().unwrap_or_else(|| err.clone());
+            let desc = params
+                .get("error_description")
+                .cloned()
+                .unwrap_or_else(|| err.clone());
             let _ = write_http_html(&mut stream, 400, "Sign-in cancelled", &desc).await;
             return Err(format!("ChatGPT sign-in failed: {desc}"));
         }
         let Some(code) = params.get("code").filter(|s| !s.is_empty()).cloned() else {
-            let _ = write_http_html(&mut stream, 400, "Missing code", "Authorization code missing.").await;
+            let _ = write_http_html(
+                &mut stream,
+                400,
+                "Missing code",
+                "Authorization code missing.",
+            )
+            .await;
             continue;
         };
         let _ = write_http_html(
@@ -461,7 +599,11 @@ async fn wait_for_oauth_callback(
 }
 
 fn escape_html(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&#39;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
 async fn write_http_html(
@@ -487,12 +629,23 @@ async fn write_http_html(
 }
 
 fn oauth_http_client() -> Result<&'static reqwest::Client, String> {
-    static CLIENT: std::sync::OnceLock<Result<reqwest::Client, String>> = std::sync::OnceLock::new();
-    CLIENT.get_or_init(|| reqwest::Client::builder().timeout(Duration::from_secs(20)).build().map_err(|e| e.to_string()))
-        .as_ref().map_err(Clone::clone)
+    static CLIENT: std::sync::OnceLock<Result<reqwest::Client, String>> =
+        std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(20))
+                .build()
+                .map_err(|e| e.to_string())
+        })
+        .as_ref()
+        .map_err(Clone::clone)
 }
 
-async fn exchange_code_for_tokens(code: &str, verifier: &str) -> Result<ChatGptAccountCredentials, String> {
+async fn exchange_code_for_tokens(
+    code: &str,
+    verifier: &str,
+) -> Result<ChatGptAccountCredentials, String> {
     let body = format!(
         "grant_type=authorization_code&client_id={}&code={}&redirect_uri={}&code_verifier={}",
         url_encode_component(OPENAI_CODEX_CLIENT_ID),
@@ -512,7 +665,8 @@ async fn exchange_code_for_tokens(code: &str, verifier: &str) -> Result<ChatGptA
     if !status.is_success() {
         return Err(format!("OpenAI token exchange failed ({status}): {text}"));
     }
-    let parsed: Value = serde_json::from_str(&text).map_err(|e| format!("Invalid token JSON: {e}"))?;
+    let parsed: Value =
+        serde_json::from_str(&text).map_err(|e| format!("Invalid token JSON: {e}"))?;
     parse_token_response(&parsed, None)
 }
 
@@ -537,7 +691,8 @@ async fn refresh_oauth_token(
     if !status.is_success() {
         return Err(format!("OpenAI token refresh rejected ({status}): {text}"));
     }
-    let parsed: Value = serde_json::from_str(&text).map_err(|e| format!("Invalid refresh JSON: {e}"))?;
+    let parsed: Value =
+        serde_json::from_str(&text).map_err(|e| format!("Invalid refresh JSON: {e}"))?;
     parse_token_response(&parsed, Some(prev))
 }
 
@@ -629,19 +784,41 @@ pub(crate) fn build_codex_oauth_post(
 }
 
 async fn probe_codex_models(access_token: &str, account_id: Option<&str>) -> (bool, usize) {
-    let Ok(client) = oauth_http_client() else { return (false, 0); };
-    let url = format!("{}/models?client_version={}", resolve_codex_base_url(), env!("CARGO_PKG_VERSION"));
-    let mut req = client.get(&url).timeout(Duration::from_secs(5)).header("Accept", "application/json").header("originator", "codex_cli").bearer_auth(access_token);
+    let Ok(client) = oauth_http_client() else {
+        return (false, 0);
+    };
+    let url = format!(
+        "{}/models?client_version={}",
+        resolve_codex_base_url(),
+        env!("CARGO_PKG_VERSION")
+    );
+    let mut req = client
+        .get(&url)
+        .timeout(Duration::from_secs(5))
+        .header("Accept", "application/json")
+        .header("originator", "codex_cli")
+        .bearer_auth(access_token);
     if let Some(id) = account_id.filter(|s| !s.is_empty()) {
         req = req.header("ChatGPT-Account-ID", id);
     }
-    let Ok(resp) = req.send().await else { return (false, 0); };
+    let Ok(resp) = req.send().await else {
+        return (false, 0);
+    };
     if !resp.status().is_success() {
         return (false, 0);
     }
-    let Ok(text) = read_oauth_body_bounded(resp, 2 * 1024 * 1024).await else { return (false, 0); };
-    let Ok(body) = serde_json::from_str::<Value>(&text) else { return (false, 0); };
-    let count = body.get("models").and_then(Value::as_array).or_else(|| body.as_array()).map(|a| a.len()).unwrap_or(0);
+    let Ok(text) = read_oauth_body_bounded(resp, 2 * 1024 * 1024).await else {
+        return (false, 0);
+    };
+    let Ok(body) = serde_json::from_str::<Value>(&text) else {
+        return (false, 0);
+    };
+    let count = body
+        .get("models")
+        .and_then(Value::as_array)
+        .or_else(|| body.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
     (true, count)
 }
 
@@ -657,7 +834,10 @@ mod tests {
             "exp": 2_000_000_000u64,
             "https://api.openai.com/auth": { "chatgpt_account_id": account_id, "chatgpt_plan_type": plan }
         });
-        format!("{header}.{}.sig", encode_base64url(payload.to_string().as_bytes()))
+        format!(
+            "{header}.{}.sig",
+            encode_base64url(payload.to_string().as_bytes())
+        )
     }
 
     #[test]
@@ -670,8 +850,16 @@ mod tests {
 
         let jwt1 = sample_jwt("one@example.com", "acct_1", "pro");
         let jwt2 = sample_jwt("two@example.com", "acct_2", "plus");
-        let c1 = parse_token_response(&json!({ "access_token": jwt1, "refresh_token": "rt_1" }), None).unwrap();
-        let c2 = parse_token_response(&json!({ "access_token": jwt2, "refresh_token": "rt_2" }), None).unwrap();
+        let c1 = parse_token_response(
+            &json!({ "access_token": jwt1, "refresh_token": "rt_1" }),
+            None,
+        )
+        .unwrap();
+        let c2 = parse_token_response(
+            &json!({ "access_token": jwt2, "refresh_token": "rt_2" }),
+            None,
+        )
+        .unwrap();
 
         let mut data = store.load_accounts_store();
         assert!(upsert_account(&mut data, c1));
@@ -714,7 +902,9 @@ mod tests {
             wait_for_oauth_callback(listener, "expected_state_123", &cancel).await
         });
 
-        let mut stream = tokio::net::TcpStream::connect(format!("127.0.0.1:{port}")).await.unwrap();
+        let mut stream = tokio::net::TcpStream::connect(format!("127.0.0.1:{port}"))
+            .await
+            .unwrap();
         stream.write_all(b"GET /auth/callback?code=auth_code_xyz&state=expected_state_123 HTTP/1.1\r\nHost: localhost\r\n\r\n").await.unwrap();
         let mut resp = vec![0u8; 1024];
         let n = stream.read(&mut resp).await.unwrap();
@@ -727,7 +917,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_single_flight_refresh_deduplication_and_429_auto_switch() {
-        let _env_guard = ENV_TEST_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).lock().await;
+        let _env_guard = ENV_TEST_LOCK
+            .get_or_init(|| tokio::sync::Mutex::new(()))
+            .lock()
+            .await;
         let dir = std::env::temp_dir().join(format!("heav3ns-rtr-test-{}", now_ms()));
         let acct_path = dir.join("accounts.json");
         let store = CodexAccountStore::at_path(&acct_path);
@@ -736,10 +929,18 @@ mod tests {
         let fresh_jwt = sample_jwt("one@example.com", "acct_1", "pro");
         let backup_jwt = sample_jwt("two@example.com", "acct_2", "plus");
 
-        let mut c1 = parse_token_response(&json!({ "access_token": stale_jwt, "refresh_token": "rt_1" }), None).unwrap();
+        let mut c1 = parse_token_response(
+            &json!({ "access_token": stale_jwt, "refresh_token": "rt_1" }),
+            None,
+        )
+        .unwrap();
         c1.expires_at_ms = Some(1_000); // expired
         c1.access_token = "stale_access_token".to_string();
-        let c2 = parse_token_response(&json!({ "access_token": backup_jwt, "refresh_token": "rt_2" }), None).unwrap();
+        let c2 = parse_token_response(
+            &json!({ "access_token": backup_jwt, "refresh_token": "rt_2" }),
+            None,
+        )
+        .unwrap();
 
         let mut data = store.load_accounts_store();
         upsert_account(&mut data, c2);
@@ -772,18 +973,27 @@ mod tests {
             }
         });
 
-        std::env::set_var("HEAV3NS_OPENAI_TOKEN_URL", format!("http://127.0.0.1:{port}/oauth/token"));
+        std::env::set_var(
+            "HEAV3NS_OPENAI_TOKEN_URL",
+            format!("http://127.0.0.1:{port}/oauth/token"),
+        );
         let mut tasks = Vec::new();
         for _ in 0..5 {
             let s = store.clone();
-            tasks.push(tokio::spawn(async move { s.get_valid_active_credentials().await }));
+            tasks.push(tokio::spawn(async move {
+                s.get_valid_active_credentials().await
+            }));
         }
         for t in tasks {
             let (tok, acct) = t.await.unwrap().unwrap().unwrap();
             assert_eq!(tok, fresh_jwt);
             assert_eq!(acct.as_deref(), Some("acct_1"));
         }
-        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1, "Single-flight refresh must coalesce concurrent callers");
+        assert_eq!(
+            hits.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "Single-flight refresh must coalesce concurrent callers"
+        );
 
         // Verify 429 rate-limit auto-switches to acct_2
         store.record_rate_limit(Some(60_000));

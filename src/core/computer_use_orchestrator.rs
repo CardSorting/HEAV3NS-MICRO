@@ -1,13 +1,23 @@
 // [LAYER: CORE]
 use crate::core::spatial_engine::SpatialInteractionEngine;
 use crate::domain::computer_use::VirtualDisplayState;
-use crate::domain::interfaces::{IBehavioralKnowledgeStore, IComputerUseOrchestrator, IEnvironmentalDiffer, IEnvironmentalObserver, ISpatialGeometry, ISwarmIntelligenceConsultant};
-use crate::domain::types::environmental_types::{BehavioralAffordance, EnvironmentalObservation, EnvironmentalRegion, RegionKind};
+use crate::domain::interfaces::{
+    IBehavioralKnowledgeStore, IComputerUseOrchestrator, IEnvironmentalDiffer,
+    IEnvironmentalObserver, ISpatialGeometry, ISwarmIntelligenceConsultant,
+};
+use crate::domain::types::environmental_types::{
+    BehavioralAffordance, EnvironmentalObservation, EnvironmentalRegion, RegionKind,
+};
 use crate::domain::types::learned_knowledge_types::LearnedWorkflowProcedure;
 use crate::domain::types::spatial_types::SpatialActionContract;
-use crate::domain::types::swarm_intelligence_types::{ConsultationRiskLevel, SpecialistInsight, SwarmConsultationRequest, SwarmConsultationResponse};
+use crate::domain::types::swarm_intelligence_types::{
+    ConsultationRiskLevel, SpecialistInsight, SwarmConsultationRequest, SwarmConsultationResponse,
+};
 use crate::infrastructure::behavioral_store::BehavioralKnowledgeStore;
-use crate::plumbing::environmental_diff::{analyze_spider_structural_relationships, classify_element_affordance, compute_element_deltas, detect_modal_or_dialog, diagnose_failure_cause};
+use crate::plumbing::environmental_diff::{
+    analyze_spider_structural_relationships, classify_element_affordance, compute_element_deltas,
+    detect_modal_or_dialog, diagnose_failure_cause,
+};
 use crate::plumbing::hash_and_math::{fnv1a_32, now_ms};
 use crate::plumbing::secret_redactor::SafetyPolicy;
 use serde_json::{json, Value};
@@ -51,9 +61,18 @@ impl ComputerUseOrchestrator {
     /// Captures the complete multi-modal environmental state from the active virtual display.
     pub fn observe(&self) -> EnvironmentalObservation {
         let disp = self.display.lock().unwrap_or_else(|e| e.into_inner());
-        let active_win = disp.windows.iter().find(|w| w.id == disp.active_window_id).or_else(|| disp.windows.first());
+        let active_win = disp
+            .windows
+            .iter()
+            .find(|w| w.id == disp.active_window_id)
+            .or_else(|| disp.windows.first());
         let (win_id, app, title, mut elements) = match active_win {
-            Some(w) => (w.id.clone(), w.app.clone(), w.title.clone(), w.elements.clone()),
+            Some(w) => (
+                w.id.clone(),
+                w.app.clone(),
+                w.title.clone(),
+                w.elements.clone(),
+            ),
             None => ("none".into(), "none".into(), "none".into(), Vec::new()),
         };
 
@@ -61,7 +80,12 @@ impl ComputerUseOrchestrator {
         let mut modal_window_element_ids = Vec::new();
         for w in &disp.windows {
             let t = w.title.to_ascii_lowercase();
-            if w.id != win_id && (t.contains("dialog") || t.contains("alert") || t.contains("confirm") || t.contains("modal")) {
+            if w.id != win_id
+                && (t.contains("dialog")
+                    || t.contains("alert")
+                    || t.contains("confirm")
+                    || t.contains("modal"))
+            {
                 for el in &w.elements {
                     modal_window_element_ids.push(el.id.clone());
                     if !elements.iter().any(|existing| existing.id == el.id) {
@@ -71,8 +95,14 @@ impl ComputerUseOrchestrator {
             }
         }
 
-        let layout_epoch = self.spatial_engine.mediator.lock().unwrap_or_else(|e| e.into_inner()).layout_epoch;
-        let mut obs = EnvironmentalObservation::new(win_id, app, title, disp.frame_seq, layout_epoch);
+        let layout_epoch = self
+            .spatial_engine
+            .mediator
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .layout_epoch;
+        let mut obs =
+            EnvironmentalObservation::new(win_id, app, title, disp.frame_seq, layout_epoch);
         obs.cursor = disp.cursor;
         obs.elements = elements.clone();
         obs.timestamp_ms = now_ms();
@@ -92,39 +122,78 @@ impl ComputerUseOrchestrator {
             let r = el.role.to_ascii_lowercase();
             let id_l = el.id.to_ascii_lowercase();
             let lbl_l = el.label.to_ascii_lowercase();
-            if matches!(r.as_str(), "navigation" | "banner" | "menubar") || id_l.contains("header") || id_l.contains("navbar") {
+            if matches!(r.as_str(), "navigation" | "banner" | "menubar")
+                || id_l.contains("header")
+                || id_l.contains("navbar")
+            {
                 header_ids.push(el.id.clone());
-            } else if matches!(r.as_str(), "complementary" | "tree" | "sidebar") || id_l.contains("sidebar") || lbl_l.contains("sidebar") {
+            } else if matches!(r.as_str(), "complementary" | "tree" | "sidebar")
+                || id_l.contains("sidebar")
+                || lbl_l.contains("sidebar")
+            {
                 sidebar_ids.push(el.id.clone());
             } else if r == "toolbar" || id_l.contains("toolbar") {
                 toolbar_ids.push(el.id.clone());
-            } else if matches!(r.as_str(), "status" | "contentinfo") || id_l.contains("status") || id_l.contains("footer") {
+            } else if matches!(r.as_str(), "status" | "contentinfo")
+                || id_l.contains("status")
+                || id_l.contains("footer")
+            {
                 footer_ids.push(el.id.clone());
             }
         }
 
         if !header_ids.is_empty() {
-            let mut reg = EnvironmentalRegion::new("reg-header", RegionKind::HeaderNav, [0, 0, disp.width as i32, 64], 2);
+            let mut reg = EnvironmentalRegion::new(
+                "reg-header",
+                RegionKind::HeaderNav,
+                [0, 0, disp.width as i32, 64],
+                2,
+            );
             reg.element_ids = header_ids;
             obs.regions.push(reg);
         }
         if !sidebar_ids.is_empty() {
-            let mut reg = EnvironmentalRegion::new("reg-sidebar", RegionKind::Sidebar, [0, 64, 260, (disp.height as i32).saturating_sub(64)], 2);
+            let mut reg = EnvironmentalRegion::new(
+                "reg-sidebar",
+                RegionKind::Sidebar,
+                [0, 64, 260, (disp.height as i32).saturating_sub(64)],
+                2,
+            );
             reg.element_ids = sidebar_ids;
             obs.regions.push(reg);
         }
         if !toolbar_ids.is_empty() {
-            let mut reg = EnvironmentalRegion::new("reg-toolbar", RegionKind::Toolbar, [0, 64, disp.width as i32, 48], 3);
+            let mut reg = EnvironmentalRegion::new(
+                "reg-toolbar",
+                RegionKind::Toolbar,
+                [0, 64, disp.width as i32, 48],
+                3,
+            );
             reg.element_ids = toolbar_ids;
             obs.regions.push(reg);
         }
         if !footer_ids.is_empty() {
-            let mut reg = EnvironmentalRegion::new("reg-footer", RegionKind::FooterStatusBar, [0, (disp.height as i32).saturating_sub(40), disp.width as i32, 40], 2);
+            let mut reg = EnvironmentalRegion::new(
+                "reg-footer",
+                RegionKind::FooterStatusBar,
+                [
+                    0,
+                    (disp.height as i32).saturating_sub(40),
+                    disp.width as i32,
+                    40,
+                ],
+                2,
+            );
             reg.element_ids = footer_ids;
             obs.regions.push(reg);
         }
 
-        let mut content_region = EnvironmentalRegion::new("reg-main", RegionKind::ContentArea, [0, 0, disp.width as i32, disp.height as i32], 1);
+        let mut content_region = EnvironmentalRegion::new(
+            "reg-main",
+            RegionKind::ContentArea,
+            [0, 0, disp.width as i32, disp.height as i32],
+            1,
+        );
         content_region.element_ids = elements.iter().map(|e| e.id.clone()).collect();
         obs.regions.push(content_region);
 
@@ -139,10 +208,17 @@ impl ComputerUseOrchestrator {
             // Determine dynamic modal bounds from inline modal container or modal window elements
             let inline_modal_bounds = elements
                 .iter()
-                .find(|e| matches!(e.role.to_ascii_lowercase().as_str(), "dialog" | "alertdialog" | "modal") && e.bounds[2] > 0 && e.bounds[3] > 0)
+                .find(|e| {
+                    matches!(
+                        e.role.to_ascii_lowercase().as_str(),
+                        "dialog" | "alertdialog" | "modal"
+                    ) && e.bounds[2] > 0
+                        && e.bounds[3] > 0
+                })
                 .map(|e| e.bounds);
             let modal_bounds = inline_modal_bounds.unwrap_or([200, 150, 1040, 600]);
-            let mut modal_region = EnvironmentalRegion::new("reg-modal", RegionKind::ModalDialog, modal_bounds, 99);
+            let mut modal_region =
+                EnvironmentalRegion::new("reg-modal", RegionKind::ModalDialog, modal_bounds, 99);
 
             if !modal_window_element_ids.is_empty() {
                 // Separate modal window: only elements from the modal window(s) or explicit modal roles belong to the modal
@@ -153,21 +229,37 @@ impl ComputerUseOrchestrator {
                 }
                 for el in &elements {
                     let r = el.role.to_ascii_lowercase();
-                    if (r == "dialog" || r == "alertdialog" || r == "modal") && !modal_region.element_ids.contains(&el.id) {
+                    if (r == "dialog" || r == "alertdialog" || r == "modal")
+                        && !modal_region.element_ids.contains(&el.id)
+                    {
                         modal_region.element_ids.push(el.id.clone());
                     }
                 }
             } else {
                 // Inline DOM modal within the active window: use actual inline modal bounds
-                let (mx, my, mw, mh) = (modal_bounds[0], modal_bounds[1], modal_bounds[2], modal_bounds[3]);
+                let (mx, my, mw, mh) = (
+                    modal_bounds[0],
+                    modal_bounds[1],
+                    modal_bounds[2],
+                    modal_bounds[3],
+                );
                 for el in &elements {
                     let r = el.role.to_ascii_lowercase();
                     let is_modal_role = r == "dialog" || r == "alertdialog" || r == "modal";
-                    let is_full_bleed_bg = el.bounds[0] == 0 && el.bounds[1] == 0 && el.bounds[2] >= disp.width as i32 && el.bounds[3] >= disp.height as i32;
+                    let is_full_bleed_bg = el.bounds[0] == 0
+                        && el.bounds[1] == 0
+                        && el.bounds[2] >= disp.width as i32
+                        && el.bounds[3] >= disp.height as i32;
                     let cx = el.bounds[0].saturating_add(el.bounds[2] / 2);
                     let cy = el.bounds[1].saturating_add(el.bounds[3] / 2);
-                    let inside_bounds = !is_full_bleed_bg && cx >= mx && cx <= mx.saturating_add(mw) && cy >= my && cy <= my.saturating_add(mh);
-                    if (is_modal_role || inside_bounds) && !modal_region.element_ids.contains(&el.id) {
+                    let inside_bounds = !is_full_bleed_bg
+                        && cx >= mx
+                        && cx <= mx.saturating_add(mw)
+                        && cy >= my
+                        && cy <= my.saturating_add(mh);
+                    if (is_modal_role || inside_bounds)
+                        && !modal_region.element_ids.contains(&el.id)
+                    {
                         modal_region.element_ids.push(el.id.clone());
                     }
                 }
@@ -175,7 +267,13 @@ impl ComputerUseOrchestrator {
             obs.regions.push(modal_region);
         }
 
-        let state_bytes = serde_json::to_vec(&(&obs.window_id, &obs.frame_seq, &obs.active_focus_id, obs.elements.len())).unwrap_or_default();
+        let state_bytes = serde_json::to_vec(&(
+            &obs.window_id,
+            &obs.frame_seq,
+            &obs.active_focus_id,
+            obs.elements.len(),
+        ))
+        .unwrap_or_default();
         obs.frame_hash = format!("{:08x}", fnv1a_32(&state_bytes));
 
         obs
@@ -192,7 +290,11 @@ impl ComputerUseOrchestrator {
 
         for el in &obs.elements {
             let (aff_type, outcome, conf) = if !el.enabled {
-                ("disabled_control".to_string(), "non_interactive_unless_enabled".to_string(), 0.98)
+                (
+                    "disabled_control".to_string(),
+                    "non_interactive_unless_enabled".to_string(),
+                    0.98,
+                )
             } else {
                 classify_element_affordance(&el.role, &el.label, &el.value, el.bounds)
             };
@@ -270,7 +372,12 @@ impl ComputerUseOrchestrator {
         }
 
         let cid = format!("consult-{}", now_ms());
-        let mut req = SwarmConsultationRequest::new(cid, &contract.action_name, &obs.app_name, &obs.window_title);
+        let mut req = SwarmConsultationRequest::new(
+            cid,
+            &contract.action_name,
+            &obs.app_name,
+            &obs.window_title,
+        );
         req.active_focus = obs.active_focus_id.clone();
         req.modal_blocking = obs.modal_detected;
         req.candidate_target_ids = obs.elements.iter().map(|e| e.id.clone()).collect();
@@ -321,7 +428,11 @@ impl ComputerUseOrchestrator {
         let mut contract = initial_contract.clone();
         let mut modal_intercepted = false;
         if before_obs.modal_detected {
-            let target_in_modal = contract.target_selector.as_ref().map(|tid| before_obs.is_element_in_modal(tid)).unwrap_or(false);
+            let target_in_modal = contract
+                .target_selector
+                .as_ref()
+                .map(|tid| before_obs.is_element_in_modal(tid))
+                .unwrap_or(false);
             if !target_in_modal && contract.action_name != "key" {
                 // Auto-route to dismiss modal
                 contract.action_name = "key".into();
@@ -333,11 +444,18 @@ impl ComputerUseOrchestrator {
             }
         }
 
-        let effective_key = if modal_intercepted { "key:Escape".to_string() } else { target_key.clone() };
+        let effective_key = if modal_intercepted {
+            "key:Escape".to_string()
+        } else {
+            target_key.clone()
+        };
 
         // Check loop breaker: prevent repeated identical failures
         let current_fails = {
-            let fc = self.failure_counts.lock().unwrap_or_else(|e| e.into_inner());
+            let fc = self
+                .failure_counts
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             fc.get(&effective_key).copied().unwrap_or(0)
         };
         if current_fails >= 3 {
@@ -380,7 +498,9 @@ impl ComputerUseOrchestrator {
         // Step 5: PLAN
         // Check if typing into an unfocused textbox; if so, plan auto-focus click
         let mut auto_focused = false;
-        if (contract.action_name == "type" || contract.action_name == "set_value" || contract.action_name == "fill")
+        if (contract.action_name == "type"
+            || contract.action_name == "set_value"
+            || contract.action_name == "fill")
             && before_obs.active_focus_id.as_deref() != contract.target_selector.as_deref()
         {
             if let Some(ref tid) = contract.target_selector {
@@ -391,7 +511,10 @@ impl ComputerUseOrchestrator {
                     expected_epoch: contract.expected_epoch,
                     ..SpatialActionContract::default()
                 };
-                if let Ok(res) = self.spatial_engine.execute_spatially_grounded_action(&focus_click_contract) {
+                if let Ok(res) = self
+                    .spatial_engine
+                    .execute_spatially_grounded_action(&focus_click_contract)
+                {
                     if res.get("success").and_then(|v| v.as_bool()) == Some(true) {
                         auto_focused = true;
                         contract.expected_epoch = None;
@@ -402,20 +525,33 @@ impl ComputerUseOrchestrator {
 
         // Save internal checkpoint epoch for Rewind reconciliation
         {
-            let mut ckpt = self.last_checkpoint_epoch.lock().unwrap_or_else(|e| e.into_inner());
+            let mut ckpt = self
+                .last_checkpoint_epoch
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             *ckpt = before_obs.layout_epoch;
         }
 
         // Step 6: ACT (Dispatch via Double-Wrapped Spatial Engine)
-        let execution_result = match self.spatial_engine.execute_spatially_grounded_action(&contract) {
+        let execution_result = match self
+            .spatial_engine
+            .execute_spatially_grounded_action(&contract)
+        {
             Ok(res) => res,
             Err(err) => {
                 if let Ok(mut kstore) = self.knowledge_store.lock() {
-                    kstore.record_outcome(&effective_key, &before_obs.app_name, false, before_obs.layout_epoch);
+                    kstore.record_outcome(
+                        &effective_key,
+                        &before_obs.app_name,
+                        false,
+                        before_obs.layout_epoch,
+                    );
                 }
                 if let Ok(mut fc) = self.failure_counts.lock() {
                     if !fc.contains_key(&effective_key) && fc.len() >= 128 {
-                        if let Some(victim) = fc.iter().min_by_key(|(_, v)| *v).map(|(k, _)| k.clone()) {
+                        if let Some(victim) =
+                            fc.iter().min_by_key(|(_, v)| *v).map(|(k, _)| k.clone())
+                        {
                             fc.remove(&victim);
                         }
                     }
@@ -439,16 +575,30 @@ impl ComputerUseOrchestrator {
         }
         let deltas = compute_element_deltas(&raw_before_el, &raw_after_el);
 
-        let success = execution_result.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+        let success = execution_result
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let receipt = execution_result.get("assuranceReceipt");
-        let is_noop = receipt.and_then(|r| r.get("verdict")).and_then(|v| v.as_str()) == Some("SuspectedNoop");
+        let is_noop = receipt
+            .and_then(|r| r.get("verdict"))
+            .and_then(|v| v.as_str())
+            == Some("SuspectedNoop");
 
         // Step 9: LEARN (Feedback & Durable Knowledge Update)
         {
-            let mut kstore = self.knowledge_store.lock().unwrap_or_else(|e| e.into_inner());
+            let mut kstore = self
+                .knowledge_store
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             kstore.set_epoch(after_obs.layout_epoch);
             if success && !is_noop {
-                kstore.record_outcome(&effective_key, &after_obs.app_name, true, after_obs.layout_epoch);
+                kstore.record_outcome(
+                    &effective_key,
+                    &after_obs.app_name,
+                    true,
+                    after_obs.layout_epoch,
+                );
                 let step_desc = format!("{}:{}", contract.action_name, target_key);
                 if let Ok(mut steps) = self.session_steps.lock() {
                     if modal_intercepted {
@@ -462,7 +612,11 @@ impl ComputerUseOrchestrator {
                         steps.remove(0);
                     }
                     if auto_focused || modal_intercepted {
-                        let proc_id = format!("proc_{}_{}", after_obs.app_name.to_ascii_lowercase(), target_key);
+                        let proc_id = format!(
+                            "proc_{}_{}",
+                            after_obs.app_name.to_ascii_lowercase(),
+                            target_key
+                        );
                         let mut proc_steps = Vec::new();
                         if modal_intercepted {
                             proc_steps.push("key:Escape".into());
@@ -480,13 +634,25 @@ impl ComputerUseOrchestrator {
                         ));
                     }
                 }
-                let mut fc = self.failure_counts.lock().unwrap_or_else(|e| e.into_inner());
+                let mut fc = self
+                    .failure_counts
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
                 fc.remove(&effective_key);
             } else {
-                kstore.record_outcome(&effective_key, &after_obs.app_name, false, after_obs.layout_epoch);
-                let mut fc = self.failure_counts.lock().unwrap_or_else(|e| e.into_inner());
+                kstore.record_outcome(
+                    &effective_key,
+                    &after_obs.app_name,
+                    false,
+                    after_obs.layout_epoch,
+                );
+                let mut fc = self
+                    .failure_counts
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
                 if !fc.contains_key(&effective_key) && fc.len() >= 128 {
-                    if let Some(victim) = fc.iter().min_by_key(|(_, v)| *v).map(|(k, _)| k.clone()) {
+                    if let Some(victim) = fc.iter().min_by_key(|(_, v)| *v).map(|(k, _)| k.clone())
+                    {
                         fc.remove(&victim);
                     }
                 }
@@ -497,9 +663,19 @@ impl ComputerUseOrchestrator {
 
         // Environmental state reconciliation check
         let reconciliation = {
-            let kstore = self.knowledge_store.lock().unwrap_or_else(|e| e.into_inner());
-            let ckpt = *self.last_checkpoint_epoch.lock().unwrap_or_else(|e| e.into_inner());
-            let expected_epoch = if success && !is_noop { after_obs.layout_epoch } else { ckpt };
+            let kstore = self
+                .knowledge_store
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            let ckpt = *self
+                .last_checkpoint_epoch
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            let expected_epoch = if success && !is_noop {
+                after_obs.layout_epoch
+            } else {
+                ckpt
+            };
             let hash_drift = before_obs.frame_hash != after_obs.frame_hash && !success;
             kstore.reconcile_state(expected_epoch, after_obs.layout_epoch, hash_drift)
         };
@@ -510,7 +686,13 @@ impl ComputerUseOrchestrator {
                 .target_selector
                 .as_ref()
                 .and_then(|tid| before_obs.find_element_by_id(tid))
-                .map(|el| if !el.enabled { "disabled" } else { el.role.as_str() })
+                .map(|el| {
+                    if !el.enabled {
+                        "disabled"
+                    } else {
+                        el.role.as_str()
+                    }
+                })
                 .unwrap_or("generic");
             let (cause, escalation) = diagnose_failure_cause(
                 &contract.action_name,
@@ -581,11 +763,16 @@ impl ISwarmIntelligenceConsultant for ComputerUseOrchestrator {
             let modal_conflict = req.modal_blocking && pat.recommended_modality != "key";
             let target_missing_conflict = !req.candidate_target_ids.is_empty()
                 && pat.app_pattern != "*"
-                && !req.candidate_target_ids.iter().any(|id| id == &pat.pattern_id || id == &pat.ui_trigger || req.task_objective.contains(id));
+                && !req.candidate_target_ids.iter().any(|id| {
+                    id == &pat.pattern_id
+                        || id == &pat.ui_trigger
+                        || req.task_objective.contains(id)
+                });
             let prior_failure_conflict = req.last_failure_reason.is_some()
                 && req.last_failed_action.as_deref() == Some(pat.recommended_modality.as_str());
 
-            historical_conflict_detected = modal_conflict || target_missing_conflict || prior_failure_conflict;
+            historical_conflict_detected =
+                modal_conflict || target_missing_conflict || prior_failure_conflict;
 
             insights.push(SpecialistInsight::new(
                 "HistoricalKnowledge",
@@ -610,7 +797,11 @@ impl ISwarmIntelligenceConsultant for ComputerUseOrchestrator {
         // 1. VisualPerceiver Specialist Insight
         insights.push(SpecialistInsight::new(
             "VisualPerceiver",
-            format!("Screen has {} interactive targets; primary application is '{}'", req.candidate_target_ids.len(), req.target_app),
+            format!(
+                "Screen has {} interactive targets; primary application is '{}'",
+                req.candidate_target_ids.len(),
+                req.target_app
+            ),
             0.92,
             "SyntheticVisionModel",
         ));
@@ -654,7 +845,10 @@ impl ISwarmIntelligenceConsultant for ComputerUseOrchestrator {
                 req.task_objective, rec_action, proc.procedure_id, proc.steps
             )
         } else {
-            format!("Recommended action for objective '{}' is '{}'", req.task_objective, rec_action)
+            format!(
+                "Recommended action for objective '{}' is '{}'",
+                req.task_objective, rec_action
+            )
         };
         insights.push(SpecialistInsight::new(
             "WorkflowNavigator",
@@ -664,18 +858,30 @@ impl ISwarmIntelligenceConsultant for ComputerUseOrchestrator {
         ));
 
         // 4. RiskAssessor Specialist Insight
-        let is_high_risk = req.task_objective.contains("delete") || req.task_objective.contains("rm ") || req.task_objective.contains("format");
-        let risk_level = if is_high_risk { ConsultationRiskLevel::High } else { ConsultationRiskLevel::Low };
+        let is_high_risk = req.task_objective.contains("delete")
+            || req.task_objective.contains("rm ")
+            || req.task_objective.contains("format");
+        let risk_level = if is_high_risk {
+            ConsultationRiskLevel::High
+        } else {
+            ConsultationRiskLevel::Low
+        };
         insights.push(SpecialistInsight::new(
             "RiskAssessor",
-            if is_high_risk { "High risk destructive action flagged; requires confirmation fence" } else { "Standard non-destructive action" },
+            if is_high_risk {
+                "High risk destructive action flagged; requires confirmation fence"
+            } else {
+                "Standard non-destructive action"
+            },
             0.99,
             "SafetySentinel",
         ));
 
         // 5. RecoverySpecialist Specialist Insight
         let recovery_advice = if let Some(ref reason) = req.last_failure_reason {
-            format!("Escalate delivery mode to 'foreground' and verify focus; prior error: {reason}")
+            format!(
+                "Escalate delivery mode to 'foreground' and verify focus; prior error: {reason}"
+            )
         } else {
             "Preemptive fallback: Keyboard Tab navigation available if pointer delivery encounters no-op".into()
         };
@@ -689,19 +895,34 @@ impl ISwarmIntelligenceConsultant for ComputerUseOrchestrator {
         let candidate_target = if let Some(ref pat) = learned_pattern {
             req.candidate_target_ids
                 .iter()
-                .find(|id| id.as_str() == pat.pattern_id.as_str() || id.as_str() == pat.ui_trigger.as_str())
+                .find(|id| {
+                    id.as_str() == pat.pattern_id.as_str() || id.as_str() == pat.ui_trigger.as_str()
+                })
                 .cloned()
                 .or_else(|| {
-                    req.candidate_target_ids.iter().find(|id| {
-                        let lower_id = id.to_ascii_lowercase();
-                        req.task_objective.to_ascii_lowercase().split_whitespace().any(|word| word.len() > 2 && lower_id.contains(word))
-                    }).cloned()
+                    req.candidate_target_ids
+                        .iter()
+                        .find(|id| {
+                            let lower_id = id.to_ascii_lowercase();
+                            req.task_objective
+                                .to_ascii_lowercase()
+                                .split_whitespace()
+                                .any(|word| word.len() > 2 && lower_id.contains(word))
+                        })
+                        .cloned()
                 })
         } else {
-            req.candidate_target_ids.iter().find(|id| {
-                let lower_id = id.to_ascii_lowercase();
-                req.task_objective.to_ascii_lowercase().split_whitespace().any(|word| word.len() > 2 && lower_id.contains(word))
-            }).cloned().or_else(|| req.candidate_target_ids.first().cloned())
+            req.candidate_target_ids
+                .iter()
+                .find(|id| {
+                    let lower_id = id.to_ascii_lowercase();
+                    req.task_objective
+                        .to_ascii_lowercase()
+                        .split_whitespace()
+                        .any(|word| word.len() > 2 && lower_id.contains(word))
+                })
+                .cloned()
+                .or_else(|| req.candidate_target_ids.first().cloned())
         };
 
         let mut resp = SwarmConsultationResponse::autonomous_recommendation(
@@ -720,7 +941,11 @@ impl ISwarmIntelligenceConsultant for ComputerUseOrchestrator {
 }
 
 impl IComputerUseOrchestrator for ComputerUseOrchestrator {
-    fn execute_closed_loop(&self, goal: &str, contract: &SpatialActionContract) -> Result<Value, String> {
+    fn execute_closed_loop(
+        &self,
+        goal: &str,
+        contract: &SpatialActionContract,
+    ) -> Result<Value, String> {
         self.execute_closed_loop_cycle(goal, contract)
     }
 }

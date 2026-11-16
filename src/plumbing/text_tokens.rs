@@ -81,7 +81,10 @@ enum DiffOp {
 
 fn compute_positional_diff_ops<'a>(old_lines: &[&'a str], new_lines: &[&'a str]) -> Vec<DiffOp> {
     let mut prefix = 0usize;
-    while prefix < old_lines.len() && prefix < new_lines.len() && old_lines[prefix] == new_lines[prefix] {
+    while prefix < old_lines.len()
+        && prefix < new_lines.len()
+        && old_lines[prefix] == new_lines[prefix]
+    {
         prefix += 1;
     }
     let mut old_end = old_lines.len();
@@ -257,35 +260,71 @@ pub fn render_unified_diff(path: &str, old_text: &str, new_text: &str) -> String
 pub fn canonical_tool_name(name: &str) -> &str {
     match name.trim() {
         "read_file" | "readFile" | "read" | "cat" | "viewFile" | "view_file" => "view_file",
-        "writeFile" | "write_to_file" | "create_file" | "createFile" | "write" | "write_file" => "write_file",
-        "replaceFileContent" | "replace_in_file" | "replace_content" | "edit_file" | "editFile"
-        | "heal_and_apply_patch" | "replace_file_content" => "replace_file_content",
-        "multi_replace" | "multiReplaceFileContent" | "multi_replace_file_content" => "multi_replace_file_content",
+        "writeFile" | "write_to_file" | "create_file" | "createFile" | "write" | "write_file" => {
+            "write_file"
+        }
+        "replaceFileContent"
+        | "replace_in_file"
+        | "replace_content"
+        | "edit_file"
+        | "editFile"
+        | "heal_and_apply_patch"
+        | "replace_file_content" => "replace_file_content",
+        "multi_replace" | "multiReplaceFileContent" | "multi_replace_file_content" => {
+            "multi_replace_file_content"
+        }
         "edit_file_anchored" | "anchored_edit" | "hashline_edit" => "edit_file_anchored",
-        "apply_patch" | "v4a_apply_patch" | "patch_file" | "apply_unified_diff" => "apply_unified_diff",
-        "runCommand" | "execute_command" | "executeCommand" | "bash" | "sh" | "terminal" | "exec" | "run_command" => {
-            "run_command"
+        "apply_patch" | "v4a_apply_patch" | "patch_file" | "apply_unified_diff" => {
+            "apply_unified_diff"
         }
+        "runCommand" | "execute_command" | "executeCommand" | "bash" | "sh" | "terminal"
+        | "exec" | "run_command" => "run_command",
         "list_files" | "listFiles" | "list_directory" | "ls" | "dir" | "list_dir" => "list_dir",
-        "grep" | "search" | "search_files" | "grep_files" | "ripgrep" | "rg" | "grep_search" => "grep_search",
-        "find_file" | "findFiles" | "find_by_name" | "find_files_by_pattern" | "file_search" | "glob" | "glob_files" | "find_files" => {
-            "find_files"
+        "grep" | "search" | "search_files" | "grep_files" | "ripgrep" | "rg" | "grep_search" => {
+            "grep_search"
         }
-        "stat" | "stat_file" | "fileInfo" | "path_exists" | "file_hash" | "file_info" => "file_info",
+        "find_file"
+        | "findFiles"
+        | "find_by_name"
+        | "find_files_by_pattern"
+        | "file_search"
+        | "glob"
+        | "glob_files"
+        | "find_files" => "find_files",
+        "stat" | "stat_file" | "fileInfo" | "path_exists" | "file_hash" | "file_info" => {
+            "file_info"
+        }
         "tree" | "directoryTree" | "get_workspace_file_tree" | "directory_tree" => "directory_tree",
-        "remove_file" | "removeFile" | "deleteFile" | "rm" | "unlink" | "delete_file" => "delete_file",
-        "rename_file" | "renameFile" | "moveFile" | "copy_file" | "mv" | "rename" | "move_file" => "move_file",
-        "undo" | "rollback" | "revert_turn" | "rollback_turn_mutations" | "rollback_last_mutation" => "rollback_last_mutation",
+        "remove_file" | "removeFile" | "deleteFile" | "rm" | "unlink" | "delete_file" => {
+            "delete_file"
+        }
+        "rename_file" | "renameFile" | "moveFile" | "copy_file" | "mv" | "rename" | "move_file" => {
+            "move_file"
+        }
+        "undo"
+        | "rollback"
+        | "revert_turn"
+        | "rollback_turn_mutations"
+        | "rollback_last_mutation" => "rollback_last_mutation",
         "search_codebase_symbols"
         | "get_file_outline"
         | "get_symbol_definition"
         | "get_symbol_references"
         | "search_symbols" => "search_symbols",
-        "rename_symbol_across_codebase" | "search_and_replace" | "batch_replace_regex" => "batch_replace_regex",
-        "workspace_diff" | "v4a_collect_working_diff" | "get_workspace_diff" => "get_workspace_diff",
+        "rename_symbol_across_codebase" | "search_and_replace" | "batch_replace_regex" => {
+            "batch_replace_regex"
+        }
+        "workspace_diff" | "v4a_collect_working_diff" | "get_workspace_diff" => {
+            "get_workspace_diff"
+        }
         "memory_remember" | "remember" | "save_memory" => "save_memory",
         "memory_recall" | "recall" | "search_memory" => "search_memory",
-        "spawn_subagent" | "agent" | "execute_parallel_batch" | "legion_classify" | "swarm_classify" | "engage_swarm" => "engage_swarm",
+        "spawn_subagent"
+        | "agent"
+        | "execute_parallel_batch"
+        | "legion_classify"
+        | "swarm_classify"
+        | "engage_swarm" => "engage_swarm",
         "execute_tools" | "batch_tools" | "run_tool_batch" | "codemode" => "execute_tools",
         "tool_search" | "discover_tools" | "find_tools" => "tool_search",
         "computer_action"
@@ -317,17 +356,11 @@ pub fn canonical_tool_name(name: &str) -> &str {
         | "read_window_below"
         | "gui_action"
         | "computer_use" => "computer_use",
-        "browser_navigate"
-        | "browser_snapshot"
-        | "browser_click"
-        | "browser_type"
-        | "browser_dialog"
-        | "browser_eval"
-        | "cdp_navigate"
-        | "cdp_snapshot"
-        | "browser_action"
-        | "browser_use" => "browser_use",
-        "vision_describe" | "vision_generate" | "inspect_image" | "decode_image" | "vision_inspect" => "vision_inspect",
+        "browser_navigate" | "browser_snapshot" | "browser_click" | "browser_type"
+        | "browser_dialog" | "browser_eval" | "cdp_navigate" | "cdp_snapshot"
+        | "browser_action" | "browser_use" => "browser_use",
+        "vision_describe" | "vision_generate" | "inspect_image" | "decode_image"
+        | "vision_inspect" => "vision_inspect",
         "skill_forge_custom"
         | "skill_lint_node"
         | "skill_autofix_node"
@@ -338,12 +371,8 @@ pub fn canonical_tool_name(name: &str) -> &str {
         | "skill_tree"
         | "soul_vault"
         | "skill_forge" => "skill_forge",
-        "spatial_action"
-        | "spatial_ground"
-        | "spatial_execute"
-        | "spatial_query"
-        | "spatial_plan"
-        | "spatial_interact" => "spatial_interact",
+        "spatial_action" | "spatial_ground" | "spatial_execute" | "spatial_query"
+        | "spatial_plan" | "spatial_interact" => "spatial_interact",
         other => other,
     }
 }

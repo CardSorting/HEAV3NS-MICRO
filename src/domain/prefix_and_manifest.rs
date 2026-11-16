@@ -124,9 +124,16 @@ impl PrefixStabilityTracker {
 /// Formats volatile memory/context updates as an append-only `<context_update>` block inside a `Role::User` turn
 /// instead of mutating `Role::System` or injecting `Role::Assistant` at index 1 (preserving 100% KV-cache hits
 /// AND maintaining strict Anthropic `user`-first alternation).
-pub fn format_append_only_context_update(memory_envelope: Option<&str>, posture: ExecutionPosture) -> Option<String> {
+pub fn format_append_only_context_update(
+    memory_envelope: Option<&str>,
+    posture: ExecutionPosture,
+) -> Option<String> {
     let mut blocks = Vec::new();
-    blocks.push(format!("active_posture: {} ({})", posture.display_label(), posture.slug()));
+    blocks.push(format!(
+        "active_posture: {} ({})",
+        posture.display_label(),
+        posture.slug()
+    ));
     if let Some(mem) = memory_envelope {
         let trimmed = mem.trim();
         if !trimmed.is_empty() {
@@ -152,11 +159,23 @@ pub struct RequestManifest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
     pub model: String,
-    #[serde(default, skip_serializing_if = "Option::is_none", rename = "wireDialect")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "wireDialect"
+    )]
     pub wire_dialect: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none", rename = "endpointDisplay")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "endpointDisplay"
+    )]
     pub endpoint_display: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none", rename = "reasoningEffort")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "reasoningEffort"
+    )]
     pub reasoning_effort: Option<String>,
     pub posture: String,
     #[serde(rename = "prefixFingerprint")]
@@ -230,7 +249,12 @@ impl RequestManifest {
 
         let active_tools = tools
             .iter()
-            .filter_map(|t| t.get("function").and_then(|f| f.get("name")).and_then(Value::as_str).map(String::from))
+            .filter_map(|t| {
+                t.get("function")
+                    .and_then(|f| f.get("name"))
+                    .and_then(Value::as_str)
+                    .map(String::from)
+            })
             .collect();
 
         let redacted_sys = DeterministicSecretRedactor::redact(safe_utf8_prefix(system_text, 600));

@@ -31,7 +31,10 @@ pub struct Heav3nsUserConfig {
 impl Heav3nsUserConfig {
     pub fn redacted_for_display(&self) -> Self {
         let mut out = self.clone();
-        out.api_key = out.api_key.as_deref().map(crate::plumbing::text_tokens::mask_secret_preview);
+        out.api_key = out
+            .api_key
+            .as_deref()
+            .map(crate::plumbing::text_tokens::mask_secret_preview);
         for v in out.provider_keys.values_mut() {
             *v = crate::plumbing::text_tokens::mask_secret_preview(v);
         }
@@ -115,7 +118,10 @@ impl Heav3nsUserConfig {
                     let val = if raw_v.starts_with('"') || raw_v.starts_with('\'') {
                         raw_v.trim_matches('"').trim_matches('\'')
                     } else {
-                        raw_v.split_once('#').map(|(a, _)| a.trim()).unwrap_or(raw_v)
+                        raw_v
+                            .split_once('#')
+                            .map(|(a, _)| a.trim())
+                            .unwrap_or(raw_v)
                     };
                     if !key.is_empty() && !val.is_empty() {
                         map.insert(key.to_string(), val.to_string());
@@ -167,9 +173,14 @@ impl Heav3nsUserConfig {
         if p.is_empty() || m.is_empty() {
             return;
         }
-        let r = if reasoning.trim().is_empty() { "default" } else { reasoning.trim() };
+        let r = if reasoning.trim().is_empty() {
+            "default"
+        } else {
+            reasoning.trim()
+        };
         let prefix = format!("{p}|{m}|");
-        self.recent_models.retain(|entry| !entry.starts_with(&prefix));
+        self.recent_models
+            .retain(|entry| !entry.starts_with(&prefix));
         self.recent_models.insert(0, format!("{p}|{m}|{r}"));
         self.recent_models.truncate(8);
     }
@@ -185,7 +196,15 @@ impl Heav3nsUserConfig {
                 if p.is_empty() || m.is_empty() {
                     None
                 } else {
-                    Some((p.to_string(), m.to_string(), if r.is_empty() { "default".to_string() } else { r.to_string() }))
+                    Some((
+                        p.to_string(),
+                        m.to_string(),
+                        if r.is_empty() {
+                            "default".to_string()
+                        } else {
+                            r.to_string()
+                        },
+                    ))
                 }
             })
             .collect()
@@ -300,7 +319,10 @@ pub fn parse_args_from(args: Vec<String>) -> CliOptions {
                 if let Some(sub) = args.get(i + 1) {
                     if sub == "set" {
                         if let (Some(k), Some(v)) = (args.get(i + 2), args.get(i + 3)) {
-                            opts.mode = RunMode::ConfigSet { key: k.clone(), value: v.clone() };
+                            opts.mode = RunMode::ConfigSet {
+                                key: k.clone(),
+                                value: v.clone(),
+                            };
                             i += 3;
                         } else {
                             opts.mode = RunMode::ConfigShow;
@@ -326,7 +348,9 @@ pub fn parse_args_from(args: Vec<String>) -> CliOptions {
                 }
             }
             "smoke" | "--smoke" => opts.mode = RunMode::Smoke,
-            "stdio" | "--stdio" | "--worker" | "--desktop-worker" | "--desktop-account" => opts.mode = RunMode::StdioWorker,
+            "stdio" | "--stdio" | "--worker" | "--desktop-worker" | "--desktop-account" => {
+                opts.mode = RunMode::StdioWorker
+            }
             "help" | "-h" | "--help" => opts.mode = RunMode::Help,
             "version" | "-v" | "-V" | "--version" => opts.mode = RunMode::Version,
             "--json" => opts.format = "json".to_string(),
@@ -392,7 +416,11 @@ pub fn parse_args_from(args: Vec<String>) -> CliOptions {
                     i += 1;
                 }
             }
-            other if !other.starts_with('-') && opts.prompt.is_none() && opts.mode == RunMode::Interactive => {
+            other
+                if !other.starts_with('-')
+                    && opts.prompt.is_none()
+                    && opts.mode == RunMode::Interactive =>
+            {
                 opts.prompt = Some(other.to_string());
                 opts.mode = RunMode::SinglePrompt;
             }
@@ -507,8 +535,19 @@ mod tests {
         let opt_flight = parse_args_from(vec!["flight".into()]);
         assert_eq!(opt_flight.mode, RunMode::FlightTest);
 
-        let opt_cfg_set = parse_args_from(vec!["config".into(), "set".into(), "provider".into(), "gemini".into()]);
-        assert_eq!(opt_cfg_set.mode, RunMode::ConfigSet { key: "provider".into(), value: "gemini".into() });
+        let opt_cfg_set = parse_args_from(vec![
+            "config".into(),
+            "set".into(),
+            "provider".into(),
+            "gemini".into(),
+        ]);
+        assert_eq!(
+            opt_cfg_set.mode,
+            RunMode::ConfigSet {
+                key: "provider".into(),
+                value: "gemini".into()
+            }
+        );
 
         let opt_run = parse_args_from(vec!["run".into(), "hello world".into()]);
         assert_eq!(opt_run.mode, RunMode::SinglePrompt);
@@ -546,8 +585,14 @@ mod tests {
         ucfg.set_provider_key("openai", "sk-openai-slot".into());
         ucfg.set_provider_key("deepseek-anthropic", "sk-ds-slot".into());
         let vault = ucfg.effective_provider_keys();
-        assert_eq!(vault.get("openai").map(String::as_str), Some("sk-openai-slot"));
-        assert_eq!(vault.get("deepseek").map(String::as_str), Some("sk-ds-slot"));
+        assert_eq!(
+            vault.get("openai").map(String::as_str),
+            Some("sk-openai-slot")
+        );
+        assert_eq!(
+            vault.get("deepseek").map(String::as_str),
+            Some("sk-ds-slot")
+        );
         assert_eq!(vault.get("anthropic"), None);
     }
 }

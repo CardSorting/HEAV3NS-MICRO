@@ -33,9 +33,15 @@ pub struct ArenaAllocator {
 }
 
 impl IArenaSlab for ArenaAllocator {
-    fn capacity_bytes(&self) -> usize { self.capacity_bytes() }
-    fn allocated_bytes(&self) -> usize { self.allocated_bytes() }
-    fn snapshot(&self) -> SlabBufferSnapshot { self.snapshot() }
+    fn capacity_bytes(&self) -> usize {
+        self.capacity_bytes()
+    }
+    fn allocated_bytes(&self) -> usize {
+        self.allocated_bytes()
+    }
+    fn snapshot(&self) -> SlabBufferSnapshot {
+        self.snapshot()
+    }
 }
 
 impl Default for ArenaAllocator {
@@ -116,11 +122,13 @@ impl ArenaAllocator {
     }
 
     pub fn read_str(&self, byte_offset: usize, byte_len: usize) -> Result<&str, String> {
-        let end = byte_offset
-            .checked_add(byte_len)
-            .ok_or_else(|| format!("Out of bounds read_str: offset {byte_offset}, len {byte_len}"))?;
+        let end = byte_offset.checked_add(byte_len).ok_or_else(|| {
+            format!("Out of bounds read_str: offset {byte_offset}, len {byte_len}")
+        })?;
         if end > self.allocated_bytes() {
-            return Err(format!("Out of bounds read_str: offset {byte_offset}, len {byte_len}"));
+            return Err(format!(
+                "Out of bounds read_str: offset {byte_offset}, len {byte_len}"
+            ));
         }
         std::str::from_utf8(&self.buffer[byte_offset..end])
             .map_err(|e| format!("Invalid UTF-8 in arena slab: {e}"))

@@ -403,4 +403,3 @@ pub fn builtin_tool_specs() -> Vec<ToolSpec> {
         },
     ]
 }
-

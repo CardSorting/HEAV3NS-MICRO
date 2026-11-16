@@ -4,13 +4,25 @@ use crate::core::flight_runner::run_agent_flight_test;
 use crate::domain::compaction::CompactionPolicy;
 use crate::domain::interfaces::IProjectRunner;
 use crate::domain::swarm::{classify_task_for_legion, SwarmAssignment};
-use crate::domain::types::provider_registry::{canonicalize_provider_id, lookup_provider_descriptor, retired_provider_remediation, ReasoningEffortLevel, PROVIDER_DESCRIPTORS};
+use crate::domain::types::provider_registry::{
+    canonicalize_provider_id, lookup_provider_descriptor, retired_provider_remediation,
+    ReasoningEffortLevel, PROVIDER_DESCRIPTORS,
+};
 use crate::domain::types::runtime::{CancellationToken, ExecutionPosture, UserApprovalChoice};
 use crate::plumbing::hash_and_math::{fnv1a_32, lock_unpoison, now_ms};
 use crate::ui::cli_presenter::Heav3nsUserConfig;
 use crate::ui::provider_rpc::handle_account_mutation_rpc;
-use crate::ui::rpc_dispatch::{build_context_history_response, build_context_inspect_response, build_hello_response, build_model_selection, build_prompt_inspect_response, build_spider_check_multi_response, build_state_inspect_response, handle_files_rpc, handle_memory_rpc, sha256_hex};
-use crate::ui::worker_handlers::{build_artifact_run_response, build_sovereign_model_catalog_with_recent, build_sovereign_model_discovery, emit_jsonl_line, emit_seq_event, execute_multiplexed_submit, handle_automation_rpc, handle_posture_and_receipts_rpc, handle_provider_credential_rpc, read_bounded_stdin_line, resolve_worker_run, switch_worker_conversation, WorkerSharedState};
+use crate::ui::rpc_dispatch::{
+    build_context_history_response, build_context_inspect_response, build_hello_response,
+    build_model_selection, build_prompt_inspect_response, build_spider_check_multi_response,
+    build_state_inspect_response, handle_files_rpc, handle_memory_rpc, sha256_hex,
+};
+use crate::ui::worker_handlers::{
+    build_artifact_run_response, build_sovereign_model_catalog_with_recent,
+    build_sovereign_model_discovery, emit_jsonl_line, emit_seq_event, execute_multiplexed_submit,
+    handle_automation_rpc, handle_posture_and_receipts_rpc, handle_provider_credential_rpc,
+    read_bounded_stdin_line, resolve_worker_run, switch_worker_conversation, WorkerSharedState,
+};
 use serde_json::{json, Value};
 use std::io;
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
@@ -20,14 +32,20 @@ use tokio::task::JoinHandle;
 
 pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn IProjectRunner>) {
     let stdout_lock = Arc::new(Mutex::new(io::stdout()));
-    let state = Arc::new(Mutex::new(WorkerSharedState::from_engine_config(&engine.config_snapshot())));
+    let state = Arc::new(Mutex::new(WorkerSharedState::from_engine_config(
+        &engine.config_snapshot(),
+    )));
     let event_seq = Arc::new(AtomicI64::new(0));
     let legacy_turn_gate = Arc::new(tokio::sync::Mutex::new(()));
     let pending_submits = Arc::new(AtomicUsize::new(0));
     let mut spawned_turns: Vec<JoinHandle<()>> = Vec::new();
     let mut active_signin_cancel: Option<CancellationToken> = None;
 
-    let root_bytes = engine.workspace_root().to_string_lossy().as_bytes().to_vec();
+    let root_bytes = engine
+        .workspace_root()
+        .to_string_lossy()
+        .as_bytes()
+        .to_vec();
     let default_ws = format!("ws-{:08x}", fnv1a_32(&root_bytes));
     let default_sess = format!("sess-{:08x}", fnv1a_32(&root_bytes));
 
@@ -48,8 +66,13 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
             Ok(Some(line)) => line,
             Ok(None) => break,
             Err(e) => {
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "type": "error", "code": "STDIN_READ_ERROR", "message": e.to_string() }));
-                if e.kind() == io::ErrorKind::InvalidData { continue; }
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "type": "error", "code": "STDIN_READ_ERROR", "message": e.to_string() }),
+                );
+                if e.kind() == io::ErrorKind::InvalidData {
+                    continue;
+                }
                 break;
             }
         };
@@ -62,25 +85,56 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
         let parsed: Value = match serde_json::from_str(trimmed) {
             Ok(v) => v,
             Err(e) => {
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "type": "error", "code": "INVALID_JSON", "message": e.to_string() }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "type": "error", "code": "INVALID_JSON", "message": e.to_string() }),
+                );
                 continue;
             }
         };
 
-        let req_id = parsed.get("id").and_then(|v| v.as_str()).unwrap_or("req_0").to_string();
-        let ws_id = parsed.get("workspace").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or(&default_ws).to_string();
-        let sess_id = parsed.get("session").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or(&default_sess).to_string();
-        let is_rpc = parsed.get("v").and_then(|v| v.as_i64()) == Some(1) || parsed.get("kind").and_then(|v| v.as_str()) == Some("request");
-        let method = parsed.get("method").or_else(|| parsed.get("type")).and_then(|v| v.as_str()).unwrap_or("tick");
-        let params = parsed.get("params").cloned().unwrap_or_else(|| parsed.clone());
+        let req_id = parsed
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("req_0")
+            .to_string();
+        let ws_id = parsed
+            .get("workspace")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&default_ws)
+            .to_string();
+        let sess_id = parsed
+            .get("session")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&default_sess)
+            .to_string();
+        let is_rpc = parsed.get("v").and_then(|v| v.as_i64()) == Some(1)
+            || parsed.get("kind").and_then(|v| v.as_str()) == Some("request");
+        let method = parsed
+            .get("method")
+            .or_else(|| parsed.get("type"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("tick");
+        let params = parsed
+            .get("params")
+            .cloned()
+            .unwrap_or_else(|| parsed.clone());
 
         match method {
             "hello" => {
                 let resp = build_hello_response(&ws_id, &sess_id, engine.workspace_root());
                 if is_rpc {
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }),
+                    );
                 } else {
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "id": req_id, "type": "result", "result": resp }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "id": req_id, "type": "result", "result": resp }),
+                    );
                 }
             }
             "snapshot" => {
@@ -90,7 +144,12 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                         .session_runs
                         .iter()
                         .rev()
-                        .find(|r| matches!(r.get("state").and_then(|s| s.as_str()), Some("running" | "queued")))
+                        .find(|r| {
+                            matches!(
+                                r.get("state").and_then(|s| s.as_str()),
+                                Some("running" | "queued")
+                            )
+                        })
                         .and_then(|r| r.get("id"))
                         .cloned();
                     json!({
@@ -107,33 +166,80 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                     })
                 };
                 if is_rpc {
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }),
+                    );
                 } else {
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "id": req_id, "type": "result", "result": resp }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "id": req_id, "type": "result", "result": resp }),
+                    );
                 }
             }
             "models.list" => {
                 spawned_turns.retain(|h| !h.is_finished());
-                if spawned_turns.len() >= 32 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } })); continue; }
+                if spawned_turns.len() >= 32 {
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } }),
+                    );
+                    continue;
+                }
                 let (st, out) = (Arc::clone(&state), Arc::clone(&stdout_lock));
                 spawned_turns.push(tokio::spawn(async move {
                     let local_ollama = AgentEngine::probe_ollama_models().await;
-                    let resp = { let st = lock_unpoison(&st); build_sovereign_model_catalog_with_recent(&st.active_provider, &st.active_model, &st.active_reasoning, st.model_revision, &local_ollama, &st.recent_selections) };
-                    emit_jsonl_line(&out, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
+                    let resp = {
+                        let st = lock_unpoison(&st);
+                        build_sovereign_model_catalog_with_recent(
+                            &st.active_provider,
+                            &st.active_model,
+                            &st.active_reasoning,
+                            st.model_revision,
+                            &local_ollama,
+                            &st.recent_selections,
+                        )
+                    };
+                    emit_jsonl_line(
+                        &out,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }),
+                    );
                 }));
             }
             "models.select" => {
-                if let Some(p_raw) = params.get("provider").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                if let Some(p_raw) = params
+                    .get("provider")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                {
                     if let Some(retired_msg) = retired_provider_remediation(p_raw) {
-                        emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": -32602, "message": retired_msg } }));
+                        emit_jsonl_line(
+                            &stdout_lock,
+                            &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": -32602, "message": retired_msg } }),
+                        );
                         continue;
                     }
                 }
                 spawned_turns.retain(|h| !h.is_finished());
-                if spawned_turns.len() >= 32 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } })); continue; }
-                static MODEL_SELECT_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-                let select_seq = MODEL_SELECT_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-                let (eng, st, out, seq, ws, sess) = (Arc::clone(&engine), Arc::clone(&state), Arc::clone(&stdout_lock), Arc::clone(&event_seq), ws_id.clone(), sess_id.clone());
+                if spawned_turns.len() >= 32 {
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } }),
+                    );
+                    continue;
+                }
+                static MODEL_SELECT_SEQ: std::sync::atomic::AtomicU64 =
+                    std::sync::atomic::AtomicU64::new(0);
+                let select_seq =
+                    MODEL_SELECT_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                let (eng, st, out, seq, ws, sess) = (
+                    Arc::clone(&engine),
+                    Arc::clone(&state),
+                    Arc::clone(&stdout_lock),
+                    Arc::clone(&event_seq),
+                    ws_id.clone(),
+                    sess_id.clone(),
+                );
                 spawned_turns.push(tokio::spawn(async move {
                     let local_ollama = AgentEngine::probe_ollama_models().await;
                     let (stale, catalog) = {
@@ -172,9 +278,20 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
             }
             "models.discover" | "models.refresh" => {
                 spawned_turns.retain(|h| !h.is_finished());
-                if spawned_turns.len() >= 32 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } })); continue; }
-                let want_live = method == "models.refresh" || params.get("refresh").and_then(|v| v.as_bool()) == Some(true);
-                let (eng, st, out) = (Arc::clone(&engine), Arc::clone(&state), Arc::clone(&stdout_lock));
+                if spawned_turns.len() >= 32 {
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } }),
+                    );
+                    continue;
+                }
+                let want_live = method == "models.refresh"
+                    || params.get("refresh").and_then(|v| v.as_bool()) == Some(true);
+                let (eng, st, out) = (
+                    Arc::clone(&engine),
+                    Arc::clone(&state),
+                    Arc::clone(&stdout_lock),
+                );
                 spawned_turns.push(tokio::spawn(async move {
                     if want_live { let _ = AgentEngine::refresh_model_catalog().await; } else { AgentEngine::trigger_model_catalog_auto_refresh(); }
                     let (prov, keys_snap) = { let st = lock_unpoison(&st); (params.get("provider").and_then(|v| v.as_str()).unwrap_or(&st.active_provider).to_string(), st.provider_keys.clone()) };
@@ -186,39 +303,98 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                 let items: Vec<Value> = PROVIDER_DESCRIPTORS.iter().filter(|d| !d.retired).map(|d| json!({
                     "id": d.id, "label": d.display_name, "wireDialect": d.wire_dialect.as_str(), "defaultModel": d.default_model, "requiresApiKey": d.requires_api_key, "envVars": d.env_vars, "credentialUrl": d.credential_url
                 })).collect();
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "count": items.len(), "providers": items } }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "count": items.len(), "providers": items } }),
+                );
             }
-            "posture.get" | "posture.set" | "posture.step" | "receipts.list" | "turn.undo" | "request.preview" => {
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": handle_posture_and_receipts_rpc(method, &params, &engine) }));
+            "posture.get" | "posture.set" | "posture.step" | "receipts.list" | "turn.undo"
+            | "request.preview" => {
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": handle_posture_and_receipts_rpc(method, &params, &engine) }),
+                );
             }
             "artifact.read" => {
-                let resp = build_artifact_run_response(&lock_unpoison(&state).session_runs, &params).unwrap_or_else(|| handle_files_rpc("files.read", &params, &engine));
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
+                let resp =
+                    build_artifact_run_response(&lock_unpoison(&state).session_runs, &params)
+                        .unwrap_or_else(|| handle_files_rpc("files.read", &params, &engine));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }),
+                );
             }
-            "workspace.branch" | "files.list" | "files.search" | "files.read" | "files.readBinary" | "changes.list" | "changes.read" => {
+            "workspace.branch" | "files.list" | "files.search" | "files.read"
+            | "files.readBinary" | "changes.list" | "changes.read" => {
                 let resp = handle_files_rpc(method, &params, &engine);
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }),
+                );
             }
             "task.submit" => {
                 spawned_turns.retain(|h| !h.is_finished());
                 if spawned_turns.len() >= 32 {
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending turns." } }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending turns." } }),
+                    );
                     continue;
                 }
-                let prompt = params.get("text").or_else(|| parsed.get("prompt")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let prompt = params
+                    .get("text")
+                    .or_else(|| parsed.get("prompt"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 if prompt.chars().count() > 16_000 {
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": -32602, "message": "Instruction exceeds 16000 character limit." } }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": -32602, "message": "Instruction exceeds 16000 character limit." } }),
+                    );
                     continue;
                 }
-                let posture_override = params.get("posture").or_else(|| params.get("mode")).and_then(|v| v.as_str()).and_then(ExecutionPosture::parse_label);
-                let interactive_approval = params.get("interactiveApproval").and_then(|v| v.as_bool()).unwrap_or(true);
+                let posture_override = params
+                    .get("posture")
+                    .or_else(|| params.get("mode"))
+                    .and_then(|v| v.as_str())
+                    .and_then(ExecutionPosture::parse_label);
+                let interactive_approval = params
+                    .get("interactiveApproval")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
                 pending_submits.fetch_add(1, Ordering::SeqCst);
-                let (eng, st, out, seq, gate, pending) = (Arc::clone(&engine), Arc::clone(&state), Arc::clone(&stdout_lock), Arc::clone(&event_seq), Arc::clone(&legacy_turn_gate), Arc::clone(&pending_submits));
+                let (eng, st, out, seq, gate, pending) = (
+                    Arc::clone(&engine),
+                    Arc::clone(&state),
+                    Arc::clone(&stdout_lock),
+                    Arc::clone(&event_seq),
+                    Arc::clone(&legacy_turn_gate),
+                    Arc::clone(&pending_submits),
+                );
                 let handle = tokio::spawn(async move {
                     struct PendingGuard(Arc<AtomicUsize>);
-                    impl Drop for PendingGuard { fn drop(&mut self) { self.0.fetch_sub(1, Ordering::SeqCst); } }
+                    impl Drop for PendingGuard {
+                        fn drop(&mut self) {
+                            self.0.fetch_sub(1, Ordering::SeqCst);
+                        }
+                    }
                     let _pg = PendingGuard(pending);
-                    execute_multiplexed_submit(eng, st, out, seq, req_id, ws_id, sess_id, is_rpc, prompt, posture_override, interactive_approval, gate).await;
+                    execute_multiplexed_submit(
+                        eng,
+                        st,
+                        out,
+                        seq,
+                        req_id,
+                        ws_id,
+                        sess_id,
+                        is_rpc,
+                        prompt,
+                        posture_override,
+                        interactive_approval,
+                        gate,
+                    )
+                    .await;
                 });
                 spawned_turns.push(handle);
             }
@@ -246,68 +422,138 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                     }
                 }
                 if is_rpc {
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "requested": true } }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "requested": true } }),
+                    );
                 } else {
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "id": req_id, "type": "result", "cancelled": true }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "id": req_id, "type": "result", "cancelled": true }),
+                    );
                 }
             }
             "task.edit" => {
-                let edit_id = params.get("run").or_else(|| params.get("id")).and_then(|v| v.as_str()).unwrap_or("");
+                let edit_id = params
+                    .get("run")
+                    .or_else(|| params.get("id"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 let mut st = lock_unpoison(&state);
-                if let Some(r) = st.session_runs.iter_mut().find(|r| r.get("id").and_then(|s| s.as_str()) == Some(edit_id)) {
+                if let Some(r) = st
+                    .session_runs
+                    .iter_mut()
+                    .find(|r| r.get("id").and_then(|s| s.as_str()) == Some(edit_id))
+                {
                     if let Some(nt) = params.get("text").and_then(|v| v.as_str()) {
                         r["text"] = json!(nt);
                     }
                     let rev = r.get("revision").and_then(|v| v.as_i64()).unwrap_or(1) + 1;
                     r["revision"] = json!(rev);
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "updated": true, "run": r } }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "updated": true, "run": r } }),
+                    );
                 } else {
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "updated": false } }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "updated": false } }),
+                    );
                 }
             }
             "task.remove" => {
-                let rm_id = params.get("run").or_else(|| params.get("id")).and_then(|v| v.as_str()).unwrap_or("");
+                let rm_id = params
+                    .get("run")
+                    .or_else(|| params.get("id"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 let mut st = lock_unpoison(&state);
                 let before = st.session_runs.len();
-                st.session_runs.retain(|r| r.get("id").and_then(|s| s.as_str()) != Some(rm_id));
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "removed": st.session_runs.len() < before } }));
+                st.session_runs
+                    .retain(|r| r.get("id").and_then(|s| s.as_str()) != Some(rm_id));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "removed": st.session_runs.len() < before } }),
+                );
             }
             "task.lookup" => {
-                let lookup_id = params.get("id").or_else(|| params.get("request")).and_then(|v| v.as_str()).unwrap_or("");
+                let lookup_id = params
+                    .get("id")
+                    .or_else(|| params.get("request"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 let st = lock_unpoison(&state);
                 let found_run = st.session_runs.iter().find(|r| {
-                    r.get("id").and_then(|s| s.as_str()) == Some(lookup_id) || r.get("requestId").and_then(|s| s.as_str()) == Some(lookup_id)
+                    r.get("id").and_then(|s| s.as_str()) == Some(lookup_id)
+                        || r.get("requestId").and_then(|s| s.as_str()) == Some(lookup_id)
                 });
                 if let Some(r) = found_run {
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "found": true, "run": r } }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "found": true, "run": r } }),
+                    );
                 } else {
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "found": false } }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "found": false } }),
+                    );
                 }
             }
             "task.defer" | "task.deferStatus" | "task.resume" => {
-                let deferred = method == "task.defer" && params.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "enabled": true, "deferred": deferred, "queued": 0 } }));
+                let deferred = method == "task.defer"
+                    && params
+                        .get("enabled")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "enabled": true, "deferred": deferred, "queued": 0 } }),
+                );
             }
             "history.list" => {
                 let runs = lock_unpoison(&state).session_runs.clone();
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "runs": runs } }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "runs": runs } }),
+                );
             }
             "history.read" => {
-                let h_id = params.get("id").or_else(|| params.get("run")).and_then(|v| v.as_str()).unwrap_or("");
+                let h_id = params
+                    .get("id")
+                    .or_else(|| params.get("run"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 let st = lock_unpoison(&state);
                 if let Some(r) = resolve_worker_run(&st.session_runs, h_id) {
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "run": r, "outputAvailable": true } }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "run": r, "outputAvailable": true } }),
+                    );
                 } else {
                     let fallback = json!({ "id": if h_id.is_empty() { "run_0" } else { h_id }, "text": "", "session": sess_id, "state": "completed", "createdAt": now_ms() as f64 });
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "run": fallback, "outputAvailable": false } }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "run": fallback, "outputAvailable": false } }),
+                    );
                 }
             }
             "conversation.list" => {
                 let convs = lock_unpoison(&state).conversations.clone();
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "conversations": convs } }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "conversations": convs } }),
+                );
             }
             "conversation.select" | "conversation.create" => {
-                if pending_submits.load(Ordering::SeqCst) > 0 || legacy_turn_gate.try_lock().is_err() { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "TURN_IN_PROGRESS", "message": "Cannot switch conversations while a turn is active." } })); continue; }
+                if pending_submits.load(Ordering::SeqCst) > 0
+                    || legacy_turn_gate.try_lock().is_err()
+                {
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "TURN_IN_PROGRESS", "message": "Cannot switch conversations while a turn is active." } }),
+                    );
+                    continue;
+                }
                 let cid = params
                     .get("id")
                     .or_else(|| params.get("conversation"))
@@ -315,17 +561,37 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                     .filter(|s| !s.is_empty())
                     .map(String::from)
                     .unwrap_or_else(|| format!("conv-{}", now_ms()));
-                let title = params.get("title").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(String::from);
+                let title = params
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(String::from);
                 let mut st = lock_unpoison(&state);
-                if !st.conversations.iter().any(|c| c.get("id").and_then(|v| v.as_str()) == Some(&cid)) {
-                    let t = title.unwrap_or_else(|| format!("Session {}", st.conversations.len() + 1));
+                if !st
+                    .conversations
+                    .iter()
+                    .any(|c| c.get("id").and_then(|v| v.as_str()) == Some(&cid))
+                {
+                    let t =
+                        title.unwrap_or_else(|| format!("Session {}", st.conversations.len() + 1));
                     st.conversations.push(json!({ "id": cid, "title": t }));
                 }
                 switch_worker_conversation(&mut st, &engine, &cid);
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "id": st.current_conversation, "conversation": st.current_conversation } }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "id": st.current_conversation, "conversation": st.current_conversation } }),
+                );
             }
             "conversation.delete" => {
-                if pending_submits.load(Ordering::SeqCst) > 0 || legacy_turn_gate.try_lock().is_err() { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "TURN_IN_PROGRESS", "message": "Cannot delete conversations while a turn is active." } })); continue; }
+                if pending_submits.load(Ordering::SeqCst) > 0
+                    || legacy_turn_gate.try_lock().is_err()
+                {
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "TURN_IN_PROGRESS", "message": "Cannot delete conversations while a turn is active." } }),
+                    );
+                    continue;
+                }
                 let del_opt = params
                     .get("id")
                     .or_else(|| params.get("conversation"))
@@ -333,29 +599,53 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                     .map(String::from);
                 let mut st = lock_unpoison(&state);
                 if let Some(ref del_id) = del_opt {
-                    st.conversations.retain(|c| c.get("id").and_then(|v| v.as_str()) != Some(del_id.as_str()));
+                    st.conversations
+                        .retain(|c| c.get("id").and_then(|v| v.as_str()) != Some(del_id.as_str()));
                     st.conversation_messages.remove(del_id);
                 }
                 if st.conversations.is_empty() {
-                    st.conversations.push(json!({ "id": "default-conv", "title": "Main Session" }));
+                    st.conversations
+                        .push(json!({ "id": "default-conv", "title": "Main Session" }));
                 }
-                let next_conv = st.conversations[0].get("id").and_then(|v| v.as_str()).unwrap_or("default-conv").to_string();
-                if del_opt.as_deref() == Some(st.current_conversation.as_str()) && next_conv == st.current_conversation {
+                let next_conv = st.conversations[0]
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("default-conv")
+                    .to_string();
+                if del_opt.as_deref() == Some(st.current_conversation.as_str())
+                    && next_conv == st.current_conversation
+                {
                     st.current_conversation.clear();
                 }
                 switch_worker_conversation(&mut st, &engine, &next_conv);
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "id": st.current_conversation, "conversation": st.current_conversation } }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "id": st.current_conversation, "conversation": st.current_conversation } }),
+                );
             }
             "activity.list" => {
                 let run_arg = params.get("run").and_then(|v| v.as_str()).unwrap_or("");
                 let st = lock_unpoison(&state);
-                if let Some(r) = st.session_runs.iter().find(|r| r.get("id").and_then(|s| s.as_str()) == Some(run_arg)) {
+                if let Some(r) = st
+                    .session_runs
+                    .iter()
+                    .find(|r| r.get("id").and_then(|s| s.as_str()) == Some(run_arg))
+                {
                     let acts = r.get("activities").cloned().unwrap_or_else(|| json!([]));
-                    let a_seq = r.get("activitySequence").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let a_seq = r
+                        .get("activitySequence")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0);
                     let a_cnt = r.get("activityCount").and_then(|v| v.as_i64()).unwrap_or(0);
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "run": run_arg, "activities": acts, "activitySequence": a_seq, "activityCount": a_cnt } }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "run": run_arg, "activities": acts, "activitySequence": a_seq, "activityCount": a_cnt } }),
+                    );
                 } else {
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "run": run_arg, "activities": [], "activitySequence": 0, "activityCount": 0 } }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "run": run_arg, "activities": [], "activitySequence": 0, "activityCount": 0 } }),
+                    );
                 }
             }
             "checkpoint.list" => {
@@ -377,124 +667,263 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                         })
                     })
                     .collect();
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "checkpoints": cps, "offset": 0, "total": cps.len(), "more": false } }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "checkpoints": cps, "offset": 0, "total": cps.len(), "more": false } }),
+                );
             }
             "checkpoint.preview" => {
                 let cid = params.get("id").and_then(|v| v.as_str()).unwrap_or("cp-0");
-                let cas_id = engine.cas_snapshot_id_for_game_snapshot(cid).unwrap_or_else(|| cid.to_string());
-                let (changes, diff_text) = engine.cas_diff_between(&cas_id, None).unwrap_or_default();
+                let cas_id = engine
+                    .cas_snapshot_id_for_game_snapshot(cid)
+                    .unwrap_or_else(|| cid.to_string());
+                let (changes, diff_text) =
+                    engine.cas_diff_between(&cas_id, None).unwrap_or_default();
                 let total = changes.len();
-                emit_jsonl_line(&stdout_lock, &json!({
-                    "v": 1,
-                    "kind": "response",
-                    "id": req_id,
-                    "result": {
-                        "token": format!("tok-{cid}"),
-                        "changes": changes,
-                        "diff": diff_text,
-                        "total": total,
-                        "scope": "workspace"
-                    }
-                }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({
+                        "v": 1,
+                        "kind": "response",
+                        "id": req_id,
+                        "result": {
+                            "token": format!("tok-{cid}"),
+                            "changes": changes,
+                            "diff": diff_text,
+                            "total": total,
+                            "scope": "workspace"
+                        }
+                    }),
+                );
             }
             "checkpoint.restore" => {
                 let cid = params.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 let snaps = engine.snapshots_list();
                 if let Some(idx) = snaps.iter().position(|s| s.snapshot_id == cid) {
                     if let Err(e) = engine.rewind_to_snapshot(idx) {
-                        emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "REWIND_FAILED", "message": e } }));
+                        emit_jsonl_line(
+                            &stdout_lock,
+                            &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "REWIND_FAILED", "message": e } }),
+                        );
                     } else {
                         let conv = lock_unpoison(&state).current_conversation.clone();
-                        emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "conversation": conv } }));
+                        emit_jsonl_line(
+                            &stdout_lock,
+                            &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "conversation": conv } }),
+                        );
                     }
                 } else {
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "NOT_FOUND", "message": format!("Checkpoint '{cid}' not found") } }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "NOT_FOUND", "message": format!("Checkpoint '{cid}' not found") } }),
+                    );
                 }
             }
             "checkpoint.flag" => {
-                let flagged = params.get("flagged").and_then(|v| v.as_bool()).unwrap_or(true);
+                let flagged = params
+                    .get("flagged")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
                 if let Some(cid) = params.get("id").and_then(|v| v.as_str()) {
                     let mut st = lock_unpoison(&state);
-                    if flagged { st.flagged_checkpoints.insert(cid.to_string()); } else { st.flagged_checkpoints.remove(cid); }
+                    if flagged {
+                        st.flagged_checkpoints.insert(cid.to_string());
+                    } else {
+                        st.flagged_checkpoints.remove(cid);
+                    }
                 }
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "flagged": flagged } }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "flagged": flagged } }),
+                );
             }
             "project.discover" => {
                 let targets = project_runner.discover(engine.workspace_root());
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": targets }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": targets }),
+                );
             }
             "project.status" | "project.healing" => {
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": project_runner.status() }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": project_runner.status() }),
+                );
             }
             "project.start" => {
                 let target_id = params.get("id").and_then(Value::as_str).unwrap_or("");
                 let rev = params.get("revision").and_then(Value::as_str);
                 match project_runner.start(engine.workspace_root(), target_id, rev) {
-                    Ok(snap) => emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": snap })),
-                    Err(msg) => emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "PROJECT_START_FAILED", "message": msg } })),
+                    Ok(snap) => emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "result": snap }),
+                    ),
+                    Err(msg) => emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "PROJECT_START_FAILED", "message": msg } }),
+                    ),
                 }
             }
             "project.stop" => {
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": project_runner.stop() }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": project_runner.stop() }),
+                );
             }
             "project.configure" => {
                 let cmd = params.get("command").and_then(Value::as_str).unwrap_or("");
                 let cwd = params.get("cwd").and_then(Value::as_str).unwrap_or(".");
                 let preview = params.get("preview").and_then(Value::as_str);
                 match project_runner.configure(engine.workspace_root(), cmd, cwd, preview) {
-                    Ok(res) => emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": res })),
-                    Err(msg) => emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "PROJECT_CONFIG_FAILED", "message": msg } })),
+                    Ok(res) => emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "result": res }),
+                    ),
+                    Err(msg) => emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "PROJECT_CONFIG_FAILED", "message": msg } }),
+                    ),
                 }
             }
             "project.tasks.list" => {
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "revision": 1, "total": 0, "offset": 0, "nextOffset": 0, "limited": false, "tasks": [] } }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "revision": 1, "total": 0, "offset": 0, "nextOffset": 0, "limited": false, "tasks": [] } }),
+                );
             }
             "project.tasks.move" => {
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "updated": true, "revision": 2 } }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "updated": true, "revision": 2 } }),
+                );
             }
             "command.actionsList" => {
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "actions": [], "total": 0, "truncated": false } }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "actions": [], "total": 0, "truncated": false } }),
+                );
             }
             "command.actionReconcile" => {
-                let aid = params.get("actionId").and_then(|v| v.as_str()).unwrap_or("act-0");
-                let out = params.get("outcome").and_then(|v| v.as_str()).unwrap_or("completed");
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "reconciled": true, "actionId": aid, "outcome": out } }));
+                let aid = params
+                    .get("actionId")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("act-0");
+                let out = params
+                    .get("outcome")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("completed");
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "reconciled": true, "actionId": aid, "outcome": out } }),
+                );
             }
             "agentSwarm.settings" => {
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "enabled": true, "criticalCompletionReview": true, "hierarchicalDefer": true, "legion": true, "maxSpecialists": 8, "strategy": "adaptive", "deferBoundary": "safe_boundary" } }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "enabled": true, "criticalCompletionReview": true, "hierarchicalDefer": true, "legion": true, "maxSpecialists": 8, "strategy": "adaptive", "deferBoundary": "safe_boundary" } }),
+                );
             }
             "agentSwarm.classify" => {
-                let task_desc = params.get("objective").or_else(|| params.get("task")).and_then(|v| v.as_str()).unwrap_or("Verify system architecture and execute requested changes");
+                let task_desc = params
+                    .get("objective")
+                    .or_else(|| params.get("task"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Verify system architecture and execute requested changes");
                 let strategy = params.get("strategy").and_then(|v| v.as_str());
-                let max_spec = params.get("maxSpecialists").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
+                let max_spec = params
+                    .get("maxSpecialists")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(5) as usize;
                 let target_files: Vec<String> = params
                     .get("targetFiles")
                     .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|x| x.as_str().map(String::from))
+                            .collect()
+                    })
                     .unwrap_or_default();
-                let legion_plan = classify_task_for_legion(task_desc, &target_files, strategy, max_spec);
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": legion_plan }));
+                let legion_plan =
+                    classify_task_for_legion(task_desc, &target_files, strategy, max_spec);
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": legion_plan }),
+                );
             }
-            "computer.action" | "computer.capture" | "computer.health" | "computer.observe" | "computer.interpret" | "computer.consult" | "computer.orchestrate" | "computer.patterns" | "browser.action" | "browser.snapshot" | "browser.navigate" | "spatial.ground" | "spatial.execute" | "spatial.health" | "spatial.query" | "skills.dag" | "skills.forge" | "skills.lint" | "soul.status" => {
+            "computer.action"
+            | "computer.capture"
+            | "computer.health"
+            | "computer.observe"
+            | "computer.interpret"
+            | "computer.consult"
+            | "computer.orchestrate"
+            | "computer.patterns"
+            | "browser.action"
+            | "browser.snapshot"
+            | "browser.navigate"
+            | "spatial.ground"
+            | "spatial.execute"
+            | "spatial.health"
+            | "spatial.query"
+            | "skills.dag"
+            | "skills.forge"
+            | "skills.lint"
+            | "soul.status" => {
                 spawned_turns.retain(|h| !h.is_finished());
-                if spawned_turns.len() >= 32 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } })); continue; }
-                let (m, eng, out) = (method.to_string(), Arc::clone(&engine), Arc::clone(&stdout_lock));
+                if spawned_turns.len() >= 32 {
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } }),
+                    );
+                    continue;
+                }
+                let (m, eng, out) = (
+                    method.to_string(),
+                    Arc::clone(&engine),
+                    Arc::clone(&stdout_lock),
+                );
                 spawned_turns.push(tokio::spawn(async move {
                     let out_res = handle_automation_rpc(&m, &req_id, &params, &eng).await;
-                    emit_jsonl_line(&out, &json!({ "v": 1, "kind": "response", "id": req_id, "result": out_res }));
+                    emit_jsonl_line(
+                        &out,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "result": out_res }),
+                    );
                 }));
             }
             "agentSwarm.form" | "agentSwarm.formResume" => {
-                let objective = params.get("objective").and_then(|v| v.as_str()).unwrap_or("Swarm task execution").to_string();
+                let objective = params
+                    .get("objective")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Swarm task execution")
+                    .to_string();
                 let strategy = params.get("strategy").and_then(|v| v.as_str());
-                let max_spec = params.get("maxSpecialists").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
+                let max_spec = params
+                    .get("maxSpecialists")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(3) as usize;
                 let legion = classify_task_for_legion(&objective, &[], strategy, max_spec);
-                let assignments: Vec<SwarmAssignment> = legion.get("assignments").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
-                let execute_live = params.get("live").and_then(|v| v.as_bool()).unwrap_or(false);
+                let assignments: Vec<SwarmAssignment> = legion
+                    .get("assignments")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+                let execute_live = params
+                    .get("live")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 if execute_live && !assignments.is_empty() {
                     spawned_turns.retain(|h| !h.is_finished());
-                    if spawned_turns.len() >= 32 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } })); continue; }
-                    let (eng, st, out) = (Arc::clone(&engine), Arc::clone(&state), Arc::clone(&stdout_lock));
+                    if spawned_turns.len() >= 32 {
+                        emit_jsonl_line(
+                            &stdout_lock,
+                            &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } }),
+                        );
+                        continue;
+                    }
+                    let (eng, st, out) = (
+                        Arc::clone(&engine),
+                        Arc::clone(&state),
+                        Arc::clone(&stdout_lock),
+                    );
                     spawned_turns.push(tokio::spawn(async move {
                         let swarm_res = eng.run_swarm(objective.clone(), assignments.clone(), None, None).await;
                         let rec = {
@@ -508,7 +937,10 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                     }));
                     continue;
                 }
-                let form_id = format!("formation-{}", lock_unpoison(&state).saved_formations.len() + 1);
+                let form_id = format!(
+                    "formation-{}",
+                    lock_unpoison(&state).saved_formations.len() + 1
+                );
                 let rep_items: Vec<Value> = assignments.iter().map(|a| json!({ "id": a.id, "role": a.role, "status": "completed", "response": format!("Planned specialist scope: {}", a.objective) })).collect();
                 let assign_items: Vec<Value> = assignments.iter().enumerate().map(|(idx, a)| json!({ "id": a.id, "role": a.role, "status": "completed", "summary": a.objective, "childSessionId": format!("cs-{}", idx + 1) })).collect();
                 let rec = json!({ "id": form_id, "objective": objective, "status": "completed", "reports": rep_items, "assignments": assign_items });
@@ -520,36 +952,74 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                         st.saved_formations.drain(0..excess);
                     }
                 }
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": rec }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": rec }),
+                );
             }
             "agentSwarm.formReconcile" => {
-                let fid = params.get("formationId").and_then(|v| v.as_str()).unwrap_or("formation-1");
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "id": fid, "status": "deferred", "reconciledAt": now_ms() as f64 } }));
+                let fid = params
+                    .get("formationId")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("formation-1");
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "id": fid, "status": "deferred", "reconciledAt": now_ms() as f64 } }),
+                );
             }
             "agentSwarm.formStatus" => {
                 let last = lock_unpoison(&state).saved_formations.last().cloned();
                 if let Some(l) = last {
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": l }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "result": l }),
+                    );
                 } else {
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "status": "none", "id": "form-idle" } }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "status": "none", "id": "form-idle" } }),
+                    );
                 }
             }
             "agentSwarm.formHistory" => {
                 let forms = lock_unpoison(&state).saved_formations.clone();
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "formations": forms } }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "formations": forms } }),
+                );
             }
             "agentSwarm.formStream" => {
-                let fid = params.get("formationId").and_then(|v| v.as_str()).unwrap_or("formation-1");
-                let sid = params.get("specialistId").and_then(|v| v.as_str()).unwrap_or("spec-1");
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "formationId": fid, "specialistId": sid, "childSessionId": "cs-1", "messageCount": 1, "excerpt": "Specialist execution verified with 100% Joyzoning compliance." } }));
+                let fid = params
+                    .get("formationId")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("formation-1");
+                let sid = params
+                    .get("specialistId")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("spec-1");
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "formationId": fid, "specialistId": sid, "childSessionId": "cs-1", "messageCount": 1, "excerpt": "Specialist execution verified with 100% Joyzoning compliance." } }),
+                );
             }
             "approval.resolve" => {
-                let decision_raw = params.get("decision").or_else(|| params.get("choice")).and_then(|v| v.as_str()).unwrap_or("");
+                let decision_raw = params
+                    .get("decision")
+                    .or_else(|| params.get("choice"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 let scope_raw = params.get("scope").and_then(|v| v.as_str()).unwrap_or("");
                 let approved_bool = params.get("approved").and_then(|v| v.as_bool());
-                let choice = if decision_raw.eq_ignore_ascii_case("allow_session") || scope_raw.eq_ignore_ascii_case("session") || params.get("remember").and_then(|v| v.as_bool()) == Some(true) {
+                let choice = if decision_raw.eq_ignore_ascii_case("allow_session")
+                    || scope_raw.eq_ignore_ascii_case("session")
+                    || params.get("remember").and_then(|v| v.as_bool()) == Some(true)
+                {
                     UserApprovalChoice::AllowSession
-                } else if matches!(decision_raw.to_ascii_lowercase().as_str(), "allow" | "allow_once" | "approve" | "approved" | "y" | "yes") || approved_bool == Some(true) {
+                } else if matches!(
+                    decision_raw.to_ascii_lowercase().as_str(),
+                    "allow" | "allow_once" | "approve" | "approved" | "y" | "yes"
+                ) || approved_bool == Some(true)
+                {
                     UserApprovalChoice::AllowOnce
                 } else {
                     UserApprovalChoice::Deny
@@ -569,65 +1039,132 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                     };
                     tx_opt.map(|tx| tx.send(choice).is_ok()).unwrap_or(false)
                 };
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "resolved": true, "delivered": delivered, "choice": format!("{choice:?}") } }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "resolved": true, "delivered": delivered, "choice": format!("{choice:?}") } }),
+                );
             }
             "spider.check" => {
                 let mut paths: Vec<String> = params
                     .get("paths")
                     .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|x| x.as_str().map(String::from))
+                            .collect()
+                    })
                     .unwrap_or_default();
                 if paths.is_empty() {
-                    if let Some(f) = params.get("file").or_else(|| params.get("path")).and_then(|v| v.as_str()) {
+                    if let Some(f) = params
+                        .get("file")
+                        .or_else(|| params.get("path"))
+                        .and_then(|v| v.as_str())
+                    {
                         paths.push(f.to_string());
                     }
                 }
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": build_spider_check_multi_response(engine.workspace_root(), &paths) }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": build_spider_check_multi_response(engine.workspace_root(), &paths) }),
+                );
             }
             "state.inspect" => {
                 let st = lock_unpoison(&state);
-                let conv = params.get("conversation").and_then(|v| v.as_str()).unwrap_or(&st.current_conversation);
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": build_state_inspect_response(conv, &st.session_runs) }));
+                let conv = params
+                    .get("conversation")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&st.current_conversation);
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": build_state_inspect_response(conv, &st.session_runs) }),
+                );
             }
             "context.inspect" => {
                 let conv = {
                     let st = lock_unpoison(&state);
-                    params.get("conversation").and_then(|v| v.as_str()).unwrap_or(&st.current_conversation).to_string()
+                    params
+                        .get("conversation")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&st.current_conversation)
+                        .to_string()
                 };
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": build_context_inspect_response(&conv, &engine) }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": build_context_inspect_response(&conv, &engine) }),
+                );
             }
             "prompt.inspect" => {
                 let mode = params.get("mode").and_then(|v| v.as_str()).unwrap_or("");
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": build_prompt_inspect_response(mode, &engine) }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": build_prompt_inspect_response(mode, &engine) }),
+                );
             }
             "context.history" => {
                 let conv = {
                     let st = lock_unpoison(&state);
-                    params.get("conversation").and_then(|v| v.as_str()).unwrap_or(&st.current_conversation).to_string()
+                    params
+                        .get("conversation")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&st.current_conversation)
+                        .to_string()
                 };
                 let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": build_context_history_response(&conv, offset, &engine) }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": build_context_history_response(&conv, offset, &engine) }),
+                );
             }
             "context.compact" => {
                 let conv = {
                     let st = lock_unpoison(&state);
-                    params.get("conversation").and_then(|v| v.as_str()).unwrap_or(&st.current_conversation).to_string()
+                    params
+                        .get("conversation")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&st.current_conversation)
+                        .to_string()
                 };
-                let report = lock_unpoison(&engine.session()).compact_session(engine.compactor(), &CompactionPolicy { force: true, ..Default::default() });
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": {
-                    "conversation": conv,
-                    "compacted": report.compacted,
-                    "before": report.input_message_count,
-                    "after": report.output_message_count,
-                    "inputTokens": report.input_tokens,
-                    "outputTokens": report.output_tokens
-                }}));
+                let report = lock_unpoison(&engine.session()).compact_session(
+                    engine.compactor(),
+                    &CompactionPolicy {
+                        force: true,
+                        ..Default::default()
+                    },
+                );
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": {
+                        "conversation": conv,
+                        "compacted": report.compacted,
+                        "before": report.input_message_count,
+                        "after": report.output_message_count,
+                        "inputTokens": report.input_tokens,
+                        "outputTokens": report.output_tokens
+                    }}),
+                );
             }
             "side.query" => {
                 spawned_turns.retain(|h| !h.is_finished());
-                if spawned_turns.len() >= 32 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } })); continue; }
-                let conv = { let st = lock_unpoison(&state); params.get("conversation").and_then(|v| v.as_str()).unwrap_or(&st.current_conversation).to_string() };
-                let q = params.get("question").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                if spawned_turns.len() >= 32 {
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } }),
+                    );
+                    continue;
+                }
+                let conv = {
+                    let st = lock_unpoison(&state);
+                    params
+                        .get("conversation")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&st.current_conversation)
+                        .to_string()
+                };
+                let q = params
+                    .get("question")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let (eng, out) = (Arc::clone(&engine), Arc::clone(&stdout_lock));
                 spawned_turns.push(tokio::spawn(async move {
                     match eng.ask_side_question(&q).await {
@@ -640,16 +1177,30 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
             "memory.list" | "memory.read" | "memory.write" | "memory.remove" => {
                 let conv = lock_unpoison(&state).current_conversation.clone();
                 let resp = handle_memory_rpc(method, &params, &conv, &engine);
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }),
+                );
             }
             "status" | "accounts" => {
                 let resp = AgentEngine::default_account_store().rpc_snapshot();
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }),
+                );
             }
             "signIn" => {
                 spawned_turns.retain(|h| !h.is_finished());
-                if spawned_turns.len() >= 32 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } })); continue; }
-                if let Some(prev) = active_signin_cancel.take() { prev.cancel(); }
+                if spawned_turns.len() >= 32 {
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } }),
+                    );
+                    continue;
+                }
+                if let Some(prev) = active_signin_cancel.take() {
+                    prev.cancel();
+                }
                 let cancel = CancellationToken::new();
                 active_signin_cancel = Some(cancel.clone());
                 let out_task = Arc::clone(&stdout_lock);
@@ -661,16 +1212,25 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                         .sign_in_async(
                             cancel,
                             Box::new(move |url| {
-                                emit_jsonl_line(&out_browser, &json!({ "v": 1, "event": "browser", "url": url }));
+                                emit_jsonl_line(
+                                    &out_browser,
+                                    &json!({ "v": 1, "event": "browser", "url": url }),
+                                );
                             }),
                         )
                         .await;
                     match res {
                         Ok(result) => {
-                            emit_jsonl_line(&out_task, &json!({ "v": 1, "kind": "response", "id": req_id_task, "result": result }));
+                            emit_jsonl_line(
+                                &out_task,
+                                &json!({ "v": 1, "kind": "response", "id": req_id_task, "result": result }),
+                            );
                         }
                         Err(err) => {
-                            emit_jsonl_line(&out_task, &json!({ "v": 1, "kind": "response", "id": req_id_task, "error": { "code": -32000, "message": err } }));
+                            emit_jsonl_line(
+                                &out_task,
+                                &json!({ "v": 1, "kind": "response", "id": req_id_task, "error": { "code": -32000, "message": err } }),
+                            );
                         }
                     }
                 });
@@ -681,46 +1241,87 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                     tok.cancel();
                 }
                 let resp = AgentEngine::default_account_store().rpc_snapshot();
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }),
+                );
             }
             "switch" | "rename" | "remove" | "signOut" | "clearLimit" | "setAuto" => {
                 match handle_account_mutation_rpc(method, &params) {
-                    Ok(result) => emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": result })),
-                    Err(err) => emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": -32000, "message": err } })),
+                    Ok(result) => emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "result": result }),
+                    ),
+                    Err(err) => emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": -32000, "message": err } }),
+                    ),
                 }
             }
             "ping" | "health" => {
                 let q = engine.queue().snapshot();
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "id": req_id, "type": "result", "status": "ok", "posture": engine.current_posture().slug(), "queueActive": q.active, "queuePending": q.pending_count, "timestamp": now_ms() }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "id": req_id, "type": "result", "status": "ok", "posture": engine.current_posture().slug(), "queueActive": q.active, "queuePending": q.pending_count, "timestamp": now_ms() }),
+                );
             }
             "flight" => {
                 spawned_turns.retain(|h| !h.is_finished());
-                if spawned_turns.len() >= 32 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } })); continue; }
+                if spawned_turns.len() >= 32 {
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } }),
+                    );
+                    continue;
+                }
                 let gate = Arc::clone(&legacy_turn_gate);
                 let out = Arc::clone(&stdout_lock);
                 let handle = tokio::spawn(async move {
                     let _guard = gate.lock().await;
                     let report = run_agent_flight_test().await;
-                    emit_jsonl_line(&out, &json!({ "v": 1, "id": req_id, "type": "result", "report": report }));
+                    emit_jsonl_line(
+                        &out,
+                        &json!({ "v": 1, "id": req_id, "type": "result", "report": report }),
+                    );
                 });
                 spawned_turns.push(handle);
             }
             "swarm" => {
                 spawned_turns.retain(|h| !h.is_finished());
-                if spawned_turns.len() >= 32 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } })); continue; }
-                let objective = params.get("objective").and_then(|v| v.as_str()).unwrap_or("Swarm execution").to_string();
-                let assignments: Vec<SwarmAssignment> = params.get("assignments").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
+                if spawned_turns.len() >= 32 {
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } }),
+                    );
+                    continue;
+                }
+                let objective = params
+                    .get("objective")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Swarm execution")
+                    .to_string();
+                let assignments: Vec<SwarmAssignment> = params
+                    .get("assignments")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
                 let token = CancellationToken::new();
-                lock_unpoison(&state).active_cancels.insert(req_id.clone(), token.clone());
+                lock_unpoison(&state)
+                    .active_cancels
+                    .insert(req_id.clone(), token.clone());
                 let gate = Arc::clone(&legacy_turn_gate);
                 let eng = Arc::clone(&engine);
                 let st = Arc::clone(&state);
                 let out = Arc::clone(&stdout_lock);
                 let handle = tokio::spawn(async move {
                     let _guard = gate.lock().await;
-                    let res = eng.run_swarm(objective, assignments, Some(token), None).await;
+                    let res = eng
+                        .run_swarm(objective, assignments, Some(token), None)
+                        .await;
                     lock_unpoison(&st).active_cancels.remove(&req_id);
-                    emit_jsonl_line(&out, &json!({ "v": 1, "id": req_id, "type": "result", "swarm": res }));
+                    emit_jsonl_line(
+                        &out,
+                        &json!({ "v": 1, "id": req_id, "type": "result", "swarm": res }),
+                    );
                 });
                 spawned_turns.push(handle);
             }
@@ -739,30 +1340,72 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                 })
                 .await;
                 if is_rpc {
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "stopped": true } }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "stopped": true } }),
+                    );
                 } else {
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "id": req_id, "type": "shutdown" }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "id": req_id, "type": "shutdown" }),
+                    );
                 }
                 break;
             }
             // Deprecated legacy turn methods: migrated onto `execute_multiplexed_submit` with strict FIFO response ordering.
             "tick" | "chat" | "slash" => {
                 spawned_turns.retain(|h| !h.is_finished());
-                if spawned_turns.len() >= 32 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } })); continue; }
-                emit_seq_event(&stdout_lock, &event_seq, json!({
-                    "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id,
-                    "runtime": "heav3ns-micro", "type": "deprecation.notice",
-                    "payload": { "method": method, "replacement": "task.submit", "message": format!("Method '{method}' is deprecated; migrate to 'task.submit'.") }
-                }));
-                let prompt = params.get("prompt").or_else(|| params.get("command")).and_then(|v| v.as_str()).unwrap_or("").to_string();
-                if prompt.chars().count() > 16_000 { emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "id": req_id, "type": "error", "code": "INVALID_PARAMS", "message": "Instruction exceeds 16000 character limit." })); continue; }
+                if spawned_turns.len() >= 32 {
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "RUNTIME_QUEUE_FULL", "message": "Too many pending tasks." } }),
+                    );
+                    continue;
+                }
+                emit_seq_event(
+                    &stdout_lock,
+                    &event_seq,
+                    json!({
+                        "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id,
+                        "runtime": "heav3ns-micro", "type": "deprecation.notice",
+                        "payload": { "method": method, "replacement": "task.submit", "message": format!("Method '{method}' is deprecated; migrate to 'task.submit'.") }
+                    }),
+                );
+                let prompt = params
+                    .get("prompt")
+                    .or_else(|| params.get("command"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if prompt.chars().count() > 16_000 {
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "id": req_id, "type": "error", "code": "INVALID_PARAMS", "message": "Instruction exceeds 16000 character limit." }),
+                    );
+                    continue;
+                }
                 pending_submits.fetch_add(1, Ordering::SeqCst);
-                let (eng, st, out, seq, gate, pending) = (Arc::clone(&engine), Arc::clone(&state), Arc::clone(&stdout_lock), Arc::clone(&event_seq), Arc::clone(&legacy_turn_gate), Arc::clone(&pending_submits));
+                let (eng, st, out, seq, gate, pending) = (
+                    Arc::clone(&engine),
+                    Arc::clone(&state),
+                    Arc::clone(&stdout_lock),
+                    Arc::clone(&event_seq),
+                    Arc::clone(&legacy_turn_gate),
+                    Arc::clone(&pending_submits),
+                );
                 let handle = tokio::spawn(async move {
                     struct LegacyPendingGuard(Arc<AtomicUsize>);
-                    impl Drop for LegacyPendingGuard { fn drop(&mut self) { self.0.fetch_sub(1, Ordering::SeqCst); } }
+                    impl Drop for LegacyPendingGuard {
+                        fn drop(&mut self) {
+                            self.0.fetch_sub(1, Ordering::SeqCst);
+                        }
+                    }
                     let _pg = LegacyPendingGuard(pending);
-                    execute_multiplexed_submit(eng, st, out, seq, req_id, ws_id, sess_id, is_rpc, prompt, None, false, gate).await;
+                    execute_multiplexed_submit(
+                        eng, st, out, seq, req_id, ws_id, sess_id, is_rpc, prompt, None, false,
+                        gate,
+                    )
+                    .await;
                 });
                 spawned_turns.push(handle);
             }
@@ -771,24 +1414,47 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                     let mut st = lock_unpoison(&state);
                     let active_prov = st.active_provider.clone();
                     let active_mod = st.active_model.clone();
-                    handle_provider_credential_rpc(m, &params, &mut st.provider_keys, &active_prov, &active_mod, &engine)
+                    handle_provider_credential_rpc(
+                        m,
+                        &params,
+                        &mut st.provider_keys,
+                        &active_prov,
+                        &active_mod,
+                        &engine,
+                    )
                 };
-                emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }));
+                emit_jsonl_line(
+                    &stdout_lock,
+                    &json!({ "v": 1, "kind": "response", "id": req_id, "result": resp }),
+                );
             }
             other => {
                 if is_rpc {
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "UNKNOWN_METHOD", "message": format!("Unsupported method: {other}") } }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": "UNKNOWN_METHOD", "message": format!("Unsupported method: {other}") } }),
+                    );
                 } else {
-                    emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "id": req_id, "type": "error", "code": "UNKNOWN_METHOD", "message": format!("Unsupported method: {other}") }));
+                    emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "id": req_id, "type": "error", "code": "UNKNOWN_METHOD", "message": format!("Unsupported method: {other}") }),
+                    );
                 }
             }
         }
     }
 
-    if let Some(tok) = active_signin_cancel.take() { tok.cancel(); }
-    for tok in lock_unpoison(&state).active_cancels.values() { tok.cancel(); }
+    if let Some(tok) = active_signin_cancel.take() {
+        tok.cancel();
+    }
+    for tok in lock_unpoison(&state).active_cancels.values() {
+        tok.cancel();
+    }
     let _ = project_runner.stop();
     let _ = tokio::time::timeout(std::time::Duration::from_secs(3), async {
-        for handle in spawned_turns { let _ = handle.await; }
-    }).await;
+        for handle in spawned_turns {
+            let _ = handle.await;
+        }
+    })
+    .await;
 }

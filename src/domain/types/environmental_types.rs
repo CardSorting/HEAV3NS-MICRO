@@ -66,7 +66,12 @@ pub struct BehavioralAffordance {
 }
 
 impl BehavioralAffordance {
-    pub fn new(target_id: impl Into<String>, affordance_type: impl Into<String>, expected_outcome: impl Into<String>, confidence: f32) -> Self {
+    pub fn new(
+        target_id: impl Into<String>,
+        affordance_type: impl Into<String>,
+        expected_outcome: impl Into<String>,
+        confidence: f32,
+    ) -> Self {
         Self {
             target_id: target_id.into(),
             affordance_type: affordance_type.into(),
@@ -97,7 +102,13 @@ pub struct EnvironmentalObservation {
 }
 
 impl EnvironmentalObservation {
-    pub fn new(window_id: impl Into<String>, app_name: impl Into<String>, title: impl Into<String>, frame_seq: u64, layout_epoch: u64) -> Self {
+    pub fn new(
+        window_id: impl Into<String>,
+        app_name: impl Into<String>,
+        title: impl Into<String>,
+        frame_seq: u64,
+        layout_epoch: u64,
+    ) -> Self {
         Self {
             window_id: window_id.into(),
             app_name: app_name.into(),
@@ -153,4 +164,3 @@ impl IBehavioralAffordance for BehavioralAffordance {
         self.confidence
     }
 }
-

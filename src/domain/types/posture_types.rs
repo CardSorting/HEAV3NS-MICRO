@@ -41,7 +41,10 @@ impl RepoConstitution {
             return Self {
                 version: 0,
                 rules: Vec::new(),
-                invalid_error: Some("Malformed constitution JSON (fail-closed: all writes require human approval)".to_string()),
+                invalid_error: Some(
+                    "Malformed constitution JSON (fail-closed: all writes require human approval)"
+                        .to_string(),
+                ),
             };
         };
         let raw_version = val.get("version").and_then(Value::as_u64).unwrap_or(1);
@@ -54,20 +57,50 @@ impl RepoConstitution {
         }
         let version = 1u32;
         let mut rules = Vec::new();
-        if let Some(arr) = val.get("rules").or_else(|| val.get("invariants")).and_then(Value::as_array) {
+        if let Some(arr) = val
+            .get("rules")
+            .or_else(|| val.get("invariants"))
+            .and_then(Value::as_array)
+        {
             for item in arr {
-                let id = item.get("id").and_then(Value::as_str).unwrap_or("rule").to_string();
-                let description = item.get("description").and_then(Value::as_str).unwrap_or("Protected path").to_string();
-                let action = item.get("action").and_then(Value::as_str).unwrap_or("ask").to_ascii_lowercase();
+                let id = item
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("rule")
+                    .to_string();
+                let description = item
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Protected path")
+                    .to_string();
+                let action = item
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .unwrap_or("ask")
+                    .to_ascii_lowercase();
                 let paths = item
                     .get("paths")
                     .and_then(Value::as_array)
-                    .map(|p| p.iter().filter_map(Value::as_str).map(String::from).collect())
+                    .map(|p| {
+                        p.iter()
+                            .filter_map(Value::as_str)
+                            .map(String::from)
+                            .collect()
+                    })
                     .unwrap_or_default();
-                rules.push(RepoConstitutionRule { id, description, paths, action });
+                rules.push(RepoConstitutionRule {
+                    id,
+                    description,
+                    paths,
+                    action,
+                });
             }
         }
-        Self { version, rules, invalid_error: None }
+        Self {
+            version,
+            rules,
+            invalid_error: None,
+        }
     }
 
     pub fn evaluate_path(&self, rel_path: &str) -> Option<(AuthorizationVerdict, String)> {
@@ -149,30 +182,75 @@ pub fn evaluate_tool_posture(
     // Pure read-only tools pass in every posture (including Plan!)
     let is_readonly_skill = canonical == "skill_forge"
         && matches!(
-            args.get("action").and_then(Value::as_str).unwrap_or("list_dag"),
+            args.get("action")
+                .and_then(Value::as_str)
+                .unwrap_or("list_dag"),
             "list_dag" | "soul_status" | "export" | "lint"
         );
     let is_readonly_gui = match canonical {
         "computer_use" => {
-            let action = args.get("action").and_then(Value::as_str).unwrap_or("capture").trim().to_ascii_lowercase();
-            let has_mutating_button = args.get("button").and_then(Value::as_str).is_some_and(|b| !b.trim().is_empty());
-            let has_multi_click = args.get("click_count").and_then(Value::as_u64).is_some_and(|c| c > 1);
-            !has_mutating_button && !has_multi_click && matches!(
-                action.as_str(),
-                "capture" | "capture_frame" | "screenshot" | "snapshot" | "list_windows" | "list_apps" | "list_elements" | "read_window_below" | "ax_query" | "clipboard_read" | "lease_status" | "search_dsl" | "query" | "audit_health" | "health" | "metrics"
-            )
+            let action = args
+                .get("action")
+                .and_then(Value::as_str)
+                .unwrap_or("capture")
+                .trim()
+                .to_ascii_lowercase();
+            let has_mutating_button = args
+                .get("button")
+                .and_then(Value::as_str)
+                .is_some_and(|b| !b.trim().is_empty());
+            let has_multi_click = args
+                .get("click_count")
+                .and_then(Value::as_u64)
+                .is_some_and(|c| c > 1);
+            !has_mutating_button
+                && !has_multi_click
+                && matches!(
+                    action.as_str(),
+                    "capture"
+                        | "capture_frame"
+                        | "screenshot"
+                        | "snapshot"
+                        | "list_windows"
+                        | "list_apps"
+                        | "list_elements"
+                        | "read_window_below"
+                        | "ax_query"
+                        | "clipboard_read"
+                        | "lease_status"
+                        | "search_dsl"
+                        | "query"
+                        | "audit_health"
+                        | "health"
+                        | "metrics"
+                )
         }
         "browser_use" => matches!(
-            args.get("action").and_then(Value::as_str).unwrap_or("snapshot"),
-            "snapshot" | "dom" | "console" | "network" | "cookies_get" | "storage_get" | "validate_url" | "query"
+            args.get("action")
+                .and_then(Value::as_str)
+                .unwrap_or("snapshot"),
+            "snapshot"
+                | "dom"
+                | "console"
+                | "network"
+                | "cookies_get"
+                | "storage_get"
+                | "validate_url"
+                | "query"
         ),
         "spatial_interact" => matches!(
-            args.get("action").and_then(Value::as_str).unwrap_or("inspect"),
+            args.get("action")
+                .and_then(Value::as_str)
+                .unwrap_or("inspect"),
             "observe" | "reconcile" | "ground" | "plan" | "inspect" | "query"
         ),
         _ => false,
     };
-    if (!is_mutating_spec && !matches!(canonical, "run_command" | "skill_forge" | "computer_use" | "browser_use" | "spatial_interact"))
+    if (!is_mutating_spec
+        && !matches!(
+            canonical,
+            "run_command" | "skill_forge" | "computer_use" | "browser_use" | "spatial_interact"
+        ))
         || is_readonly_skill
         || is_readonly_gui
     {
@@ -213,8 +291,13 @@ pub fn evaluate_tool_posture(
                         session_rule_key: "plan:block".to_string(),
                     };
                 }
-                let rule_key = format!("shell:high_risk:{}", cmd.split_whitespace().next().unwrap_or("cmd"));
-                if posture == ExecutionPosture::FullAccess || session_allowed_keys.iter().any(|k| k == &rule_key) {
+                let rule_key = format!(
+                    "shell:high_risk:{}",
+                    cmd.split_whitespace().next().unwrap_or("cmd")
+                );
+                if posture == ExecutionPosture::FullAccess
+                    || session_allowed_keys.iter().any(|k| k == &rule_key)
+                {
                     return PostureEvaluation {
                         verdict: AuthorizationVerdict::Allow,
                         layer: "authorized_high_risk".to_string(),
@@ -239,8 +322,10 @@ pub fn evaluate_tool_posture(
                     };
                 }
                 let rule_key = format!("shell:{summary}");
-                if matches!(posture, ExecutionPosture::AutoReview | ExecutionPosture::FullAccess)
-                    || session_allowed_keys.iter().any(|k| k == &rule_key)
+                if matches!(
+                    posture,
+                    ExecutionPosture::AutoReview | ExecutionPosture::FullAccess
+                ) || session_allowed_keys.iter().any(|k| k == &rule_key)
                 {
                     return PostureEvaluation {
                         verdict: AuthorizationVerdict::Allow,
@@ -252,7 +337,10 @@ pub fn evaluate_tool_posture(
                 return PostureEvaluation {
                     verdict: AuthorizationVerdict::AskUser,
                     layer: "posture_ask_shell".to_string(),
-                    reason: format!("Shell command ({summary}) requires approval in {} mode", posture.display_label()),
+                    reason: format!(
+                        "Shell command ({summary}) requires approval in {} mode",
+                        posture.display_label()
+                    ),
                     session_rule_key: rule_key,
                 };
             }
@@ -275,10 +363,20 @@ pub fn evaluate_tool_posture(
             if let Some((verdict, reason)) = law.evaluate_path(p) {
                 let rule_key = format!("repolaw:{canonical}:{}", normalize_rel_path(p));
                 if verdict == AuthorizationVerdict::Deny {
-                    return PostureEvaluation { verdict, layer: "repo_constitution".to_string(), reason, session_rule_key: rule_key };
+                    return PostureEvaluation {
+                        verdict,
+                        layer: "repo_constitution".to_string(),
+                        reason,
+                        session_rule_key: rule_key,
+                    };
                 }
                 if !session_allowed_keys.iter().any(|k| k == &rule_key) {
-                    return PostureEvaluation { verdict, layer: "repo_constitution".to_string(), reason, session_rule_key: rule_key };
+                    return PostureEvaluation {
+                        verdict,
+                        layer: "repo_constitution".to_string(),
+                        reason,
+                        session_rule_key: rule_key,
+                    };
                 }
             }
         }
@@ -288,7 +386,11 @@ pub fn evaluate_tool_posture(
     for p in &target_paths {
         let norm = normalize_rel_path(p).to_ascii_lowercase();
         if posture != ExecutionPosture::FullAccess
-            && (norm.contains(".git/hooks") || norm.ends_with(".git/config") || norm.contains("../") || norm.ends_with("/..") || norm == "..")
+            && (norm.contains(".git/hooks")
+                || norm.ends_with(".git/config")
+                || norm.contains("../")
+                || norm.ends_with("/..")
+                || norm == "..")
         {
             let rule_key = format!("protected_write:{canonical}:{norm}");
             if !session_allowed_keys.iter().any(|k| k == &rule_key) {
@@ -322,7 +424,9 @@ pub fn evaluate_tool_posture(
                 }
             }
         }
-        ExecutionPosture::AcceptEdits | ExecutionPosture::AutoReview | ExecutionPosture::FullAccess => PostureEvaluation {
+        ExecutionPosture::AcceptEdits
+        | ExecutionPosture::AutoReview
+        | ExecutionPosture::FullAccess => PostureEvaluation {
             verdict: AuthorizationVerdict::Allow,
             layer: "posture_allow".to_string(),
             reason: format!("Authorized under {}", posture.display_label()),
@@ -367,7 +471,9 @@ fn extract_all_paths(canonical: &str, args: &Value) -> Vec<String> {
     }
     if canonical == "run_command" {
         if let Some(cmd) = args.get("command").and_then(Value::as_str) {
-            for tok in cmd.split(|c: char| c.is_whitespace() || matches!(c, '=' | '<' | '>' | ';' | '|' | '(' | ')')) {
+            for tok in cmd.split(|c: char| {
+                c.is_whitespace() || matches!(c, '=' | '<' | '>' | ';' | '|' | '(' | ')')
+            }) {
                 let cleaned = tok.trim_matches(|c| c == '"' || c == '\'');
                 if !cleaned.is_empty() {
                     paths.push(cleaned.to_string());
@@ -376,14 +482,26 @@ fn extract_all_paths(canonical: &str, args: &Value) -> Vec<String> {
         }
     }
     if canonical == "apply_unified_diff" {
-        if let Some(diff) = args.get("diff").or_else(|| args.get("patch")).and_then(Value::as_str) {
+        if let Some(diff) = args
+            .get("diff")
+            .or_else(|| args.get("patch"))
+            .and_then(Value::as_str)
+        {
             for line in diff.lines() {
                 let candidate = if let Some(rest) = line.strip_prefix("+++ ") {
                     let p = rest.split('\t').next().unwrap_or(rest).trim();
-                    Some(p.strip_prefix("b/").or_else(|| p.strip_prefix("a/")).unwrap_or(p))
+                    Some(
+                        p.strip_prefix("b/")
+                            .or_else(|| p.strip_prefix("a/"))
+                            .unwrap_or(p),
+                    )
                 } else if let Some(rest) = line.strip_prefix("--- ") {
                     let p = rest.split('\t').next().unwrap_or(rest).trim();
-                    Some(p.strip_prefix("a/").or_else(|| p.strip_prefix("b/")).unwrap_or(p))
+                    Some(
+                        p.strip_prefix("a/")
+                            .or_else(|| p.strip_prefix("b/"))
+                            .unwrap_or(p),
+                    )
                 } else if let Some(rest) = line
                     .trim()
                     .strip_prefix("*** Update File:")

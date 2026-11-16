@@ -1,6 +1,10 @@
 // [LAYER: INFRASTRUCTURE]
-use crate::domain::interfaces::{IBehavioralKnowledgeStore, IBehavioralStore, MemoryPersistenceCallback};
-use crate::domain::types::learned_knowledge_types::{EnvironmentalReconciliationReport, LearnedInteractionPattern, LearnedWorkflowProcedure};
+use crate::domain::interfaces::{
+    IBehavioralKnowledgeStore, IBehavioralStore, MemoryPersistenceCallback,
+};
+use crate::domain::types::learned_knowledge_types::{
+    EnvironmentalReconciliationReport, LearnedInteractionPattern, LearnedWorkflowProcedure,
+};
 use crate::plumbing::hash_and_math::now_ms;
 use std::collections::BTreeMap;
 
@@ -47,13 +51,49 @@ impl BehavioralKnowledgeStore {
     /// Seeds industry-standard, battle-tested UI behavioral conventions.
     fn seed_standard_conventions(&mut self) {
         let conventions = vec![
-            ("search_bar", "*", "textbox[role=searchbox]", "text_input", "type"),
-            ("submit_btn", "*", "button[name=submit]", "submit_action", "click"),
-            ("close_modal", "*", "button[label=close]", "dismissable", "click"),
+            (
+                "search_bar",
+                "*",
+                "textbox[role=searchbox]",
+                "text_input",
+                "type",
+            ),
+            (
+                "submit_btn",
+                "*",
+                "button[name=submit]",
+                "submit_action",
+                "click",
+            ),
+            (
+                "close_modal",
+                "*",
+                "button[label=close]",
+                "dismissable",
+                "click",
+            ),
             ("nav_link", "*", "link", "navigational", "click"),
-            ("terminal_stdin", "Terminal", "textarea[label=Terminal Input]", "text_input", "type"),
-            ("flight_verify", "Heav3nsCode", "button[id=btn-run]", "submit_action", "click"),
-            ("swarm_engage", "Heav3nsCode", "button[id=btn-swarm]", "submit_action", "click"),
+            (
+                "terminal_stdin",
+                "Terminal",
+                "textarea[label=Terminal Input]",
+                "text_input",
+                "type",
+            ),
+            (
+                "flight_verify",
+                "Heav3nsCode",
+                "button[id=btn-run]",
+                "submit_action",
+                "click",
+            ),
+            (
+                "swarm_engage",
+                "Heav3nsCode",
+                "button[id=btn-swarm]",
+                "submit_action",
+                "click",
+            ),
         ];
 
         for (id, app, trigger, affordance, mod_act) in conventions {
@@ -74,13 +114,21 @@ impl BehavioralKnowledgeStore {
                 "proc_dismiss_modal_and_retry",
                 "*",
                 "dismiss blocking modal dialog",
-                vec!["key:Escape".into(), "verify:modal_closed".into(), "click:target".into()],
+                vec![
+                    "key:Escape".into(),
+                    "verify:modal_closed".into(),
+                    "click:target".into(),
+                ],
             ),
             (
                 "proc_search_and_submit",
                 "*",
                 "search query and submit",
-                vec!["click:search_bar".into(), "type:search_bar".into(), "key:Enter".into()],
+                vec![
+                    "click:search_bar".into(),
+                    "type:search_bar".into(),
+                    "key:Enter".into(),
+                ],
             ),
         ];
 
@@ -120,8 +168,12 @@ impl BehavioralKnowledgeStore {
             if proc_goal.is_empty() {
                 continue;
             }
-            let sig_words: Vec<&str> = proc_goal.split_whitespace().filter(|w| w.len() > 3).collect();
-            let keyword_match = !sig_words.is_empty() && sig_words.iter().all(|w| lower_goal.contains(w));
+            let sig_words: Vec<&str> = proc_goal
+                .split_whitespace()
+                .filter(|w| w.len() > 3)
+                .collect();
+            let keyword_match =
+                !sig_words.is_empty() && sig_words.iter().all(|w| lower_goal.contains(w));
             if (proc.app == "*" || proc.app.eq_ignore_ascii_case(app))
                 && (lower_goal.contains(&proc_goal) || keyword_match)
             {
@@ -146,12 +198,19 @@ impl IBehavioralKnowledgeStore for BehavioralKnowledgeStore {
         let composite_key = format!("{app}::{pattern_id}");
         let existing_key = if self.patterns.contains_key(&composite_key) {
             Some(composite_key.clone())
-        } else if self.patterns.get(pattern_id).is_some_and(|p| p.app_pattern == "*" || p.app_pattern.eq_ignore_ascii_case(app)) {
+        } else if self
+            .patterns
+            .get(pattern_id)
+            .is_some_and(|p| p.app_pattern == "*" || p.app_pattern.eq_ignore_ascii_case(app))
+        {
             Some(pattern_id.to_string())
         } else {
             None
         };
-        if let Some(pat) = existing_key.as_deref().and_then(|k| self.patterns.get_mut(k)) {
+        if let Some(pat) = existing_key
+            .as_deref()
+            .and_then(|k| self.patterns.get_mut(k))
+        {
             if success {
                 pat.record_success(epoch, timestamp);
             } else {
@@ -159,7 +218,11 @@ impl IBehavioralKnowledgeStore for BehavioralKnowledgeStore {
             }
         } else {
             let lower_id = pattern_id.to_ascii_lowercase();
-            let aff = if lower_id.contains("input") || lower_id.contains("txt") || lower_id.contains("search") || lower_id.contains("editor") {
+            let aff = if lower_id.contains("input")
+                || lower_id.contains("txt")
+                || lower_id.contains("search")
+                || lower_id.contains("editor")
+            {
                 "text_input"
             } else {
                 "clickable"
@@ -186,7 +249,11 @@ impl IBehavioralKnowledgeStore for BehavioralKnowledgeStore {
 
         // Mirror high-confidence verified patterns to decoupled memory sink
         if let Some(ref sink) = self.memory_sink {
-            if let Some(pat) = self.patterns.get(&composite_key).or_else(|| self.patterns.get(pattern_id)) {
+            if let Some(pat) = self
+                .patterns
+                .get(&composite_key)
+                .or_else(|| self.patterns.get(pattern_id))
+            {
                 if pat.confidence >= 0.85 && pat.success_count >= 2 {
                     let key = format!("learned_ui_pattern:{app}:{pattern_id}");
                     let payload = serde_json::json!({
@@ -211,7 +278,11 @@ impl IBehavioralKnowledgeStore for BehavioralKnowledgeStore {
         }
         // Direct match by composite key or seeded ID
         let composite_key = format!("{app}::{trimmed}");
-        if let Some(pat) = self.patterns.get(&composite_key).or_else(|| self.patterns.get(trimmed)) {
+        if let Some(pat) = self
+            .patterns
+            .get(&composite_key)
+            .or_else(|| self.patterns.get(trimmed))
+        {
             if pat.app_pattern == "*" || pat.app_pattern.eq_ignore_ascii_case(app) {
                 return Some(pat.clone());
             }
@@ -229,17 +300,27 @@ impl IBehavioralKnowledgeStore for BehavioralKnowledgeStore {
         None
     }
 
-    fn reconcile_state(&self, recorded_epoch: u64, current_epoch: u64, hash_drift: bool) -> EnvironmentalReconciliationReport {
+    fn reconcile_state(
+        &self,
+        recorded_epoch: u64,
+        current_epoch: u64,
+        hash_drift: bool,
+    ) -> EnvironmentalReconciliationReport {
         if recorded_epoch == current_epoch && !hash_drift {
             return EnvironmentalReconciliationReport::synchronized(current_epoch);
         }
 
         let mut reasons = Vec::new();
         if recorded_epoch != current_epoch {
-            reasons.push(format!("Layout epoch shifted from {recorded_epoch} to {current_epoch}"));
+            reasons.push(format!(
+                "Layout epoch shifted from {recorded_epoch} to {current_epoch}"
+            ));
         }
         if hash_drift {
-            reasons.push("Visual display state hash divergence detected (external side effects occurred)".into());
+            reasons.push(
+                "Visual display state hash divergence detected (external side effects occurred)"
+                    .into(),
+            );
         }
 
         EnvironmentalReconciliationReport::diverged(

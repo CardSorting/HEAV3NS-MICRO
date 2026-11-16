@@ -37,7 +37,11 @@ pub fn halve_even_backslash_runs(s: &str) -> String {
                 chars.next();
                 count += 1;
             }
-            let target_count = if count >= 2 && count % 2 == 0 { count / 2 } else { count };
+            let target_count = if count >= 2 && count % 2 == 0 {
+                count / 2
+            } else {
+                count
+            };
             for _ in 0..target_count {
                 out.push('\\');
             }
@@ -72,7 +76,11 @@ pub fn maybe_correct_escape_drift(
                             .to_string(),
                     );
                 }
-                return Ok((old_qb, new_q, Some("quote_and_backslash_unescape".to_string())));
+                return Ok((
+                    old_qb,
+                    new_q,
+                    Some("quote_and_backslash_unescape".to_string()),
+                ));
             }
         }
         return Ok((old_q, new_q, Some("quote_unescape".to_string())));
@@ -88,7 +96,11 @@ pub fn maybe_correct_escape_drift(
                         .to_string(),
                 );
             }
-            return Ok((old_qb, new_q, Some("quote_and_backslash_unescape".to_string())));
+            return Ok((
+                old_qb,
+                new_q,
+                Some("quote_and_backslash_unescape".to_string()),
+            ));
         }
     }
 
@@ -101,7 +113,11 @@ pub fn maybe_correct_escape_drift(
                         .to_string(),
                 );
             }
-            return Ok((old_b, new_string.to_string(), Some("backslash_halving".to_string())));
+            return Ok((
+                old_b,
+                new_string.to_string(),
+                Some("backslash_halving".to_string()),
+            ));
         }
     }
 
@@ -128,10 +144,16 @@ pub fn heal_fuzzy_patch(file_content: &str, target_snippet: &str) -> Option<(Str
     }
     let file_lines: Vec<&str> = file_content.lines().collect();
     let raw_target_lines: Vec<&str> = target_snippet.lines().collect();
-    let sep = if file_content.contains("\r\n") { "\r\n" } else { "\n" };
+    let sep = if file_content.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
     if !raw_target_lines.is_empty() && file_lines.len() >= raw_target_lines.len() {
         for i in 0..=(file_lines.len() - raw_target_lines.len()) {
-            if (0..raw_target_lines.len()).all(|j| file_lines[i + j].trim() == raw_target_lines[j].trim()) {
+            if (0..raw_target_lines.len())
+                .all(|j| file_lines[i + j].trim() == raw_target_lines[j].trim())
+            {
                 let matched = file_lines[i..i + raw_target_lines.len()].join(sep);
                 if file_content.contains(&matched) {
                     return Some((matched, 0.90));
@@ -216,7 +238,11 @@ impl DeterministicPatchEngine {
             if let Some(t) = cur_type.take() {
                 if !cur_path.is_empty() {
                     let add_content = if t == "add" {
-                        Some(if add_lines.is_empty() { String::new() } else { std::mem::take(add_lines).join("\n") + "\n" })
+                        Some(if add_lines.is_empty() {
+                            String::new()
+                        } else {
+                            std::mem::take(add_lines).join("\n") + "\n"
+                        })
                     } else {
                         None
                     };
@@ -237,24 +263,55 @@ impl DeterministicPatchEngine {
             let trimmed = line.trim();
             if trimmed == "*** Begin Patch" || trimmed == "*** End Patch" {
                 if trimmed == "*** End Patch" {
-                    flush(&mut ops, &mut cur_type, &mut cur_path, &mut cur_hunks, &mut cur_hunk, &mut add_lines);
+                    flush(
+                        &mut ops,
+                        &mut cur_type,
+                        &mut cur_path,
+                        &mut cur_hunks,
+                        &mut cur_hunk,
+                        &mut add_lines,
+                    );
                 }
                 continue;
             }
-            if let Some(p) = trimmed.strip_prefix("*** Update File:").or_else(|| trimmed.strip_prefix("*** File:")) {
-                flush(&mut ops, &mut cur_type, &mut cur_path, &mut cur_hunks, &mut cur_hunk, &mut add_lines);
+            if let Some(p) = trimmed
+                .strip_prefix("*** Update File:")
+                .or_else(|| trimmed.strip_prefix("*** File:"))
+            {
+                flush(
+                    &mut ops,
+                    &mut cur_type,
+                    &mut cur_path,
+                    &mut cur_hunks,
+                    &mut cur_hunk,
+                    &mut add_lines,
+                );
                 cur_type = Some("update");
                 cur_path = p.trim().to_string();
                 continue;
             }
             if let Some(p) = trimmed.strip_prefix("*** Add File:") {
-                flush(&mut ops, &mut cur_type, &mut cur_path, &mut cur_hunks, &mut cur_hunk, &mut add_lines);
+                flush(
+                    &mut ops,
+                    &mut cur_type,
+                    &mut cur_path,
+                    &mut cur_hunks,
+                    &mut cur_hunk,
+                    &mut add_lines,
+                );
                 cur_type = Some("add");
                 cur_path = p.trim().to_string();
                 continue;
             }
             if let Some(p) = trimmed.strip_prefix("*** Delete File:") {
-                flush(&mut ops, &mut cur_type, &mut cur_path, &mut cur_hunks, &mut cur_hunk, &mut add_lines);
+                flush(
+                    &mut ops,
+                    &mut cur_type,
+                    &mut cur_path,
+                    &mut cur_hunks,
+                    &mut cur_hunk,
+                    &mut add_lines,
+                );
                 cur_type = Some("delete");
                 cur_path = p.trim().to_string();
                 continue;
@@ -282,7 +339,14 @@ impl DeterministicPatchEngine {
                 _ => {}
             }
         }
-        flush(&mut ops, &mut cur_type, &mut cur_path, &mut cur_hunks, &mut cur_hunk, &mut add_lines);
+        flush(
+            &mut ops,
+            &mut cur_type,
+            &mut cur_path,
+            &mut cur_hunks,
+            &mut cur_hunk,
+            &mut add_lines,
+        );
         ops
     }
 
@@ -303,7 +367,9 @@ impl DeterministicPatchEngine {
             if !cur_hunk.is_empty() {
                 cur_hunks.push(std::mem::take(cur_hunk));
             }
-            if !cur_file.is_empty() && (!cur_hunks.is_empty() || *cur_type == "delete" || *cur_type == "add") {
+            if !cur_file.is_empty()
+                && (!cur_hunks.is_empty() || *cur_type == "delete" || *cur_type == "add")
+            {
                 let add_content = if *cur_type == "add" {
                     let lines: Vec<String> = cur_hunks
                         .iter()
@@ -311,7 +377,11 @@ impl DeterministicPatchEngine {
                         .filter(|l| l.prefix == '+')
                         .map(|l| l.content.clone())
                         .collect();
-                    Some(if lines.is_empty() { String::new() } else { lines.join("\n") + "\n" })
+                    Some(if lines.is_empty() {
+                        String::new()
+                    } else {
+                        lines.join("\n") + "\n"
+                    })
                 } else {
                     None
                 };
@@ -330,17 +400,35 @@ impl DeterministicPatchEngine {
         for line in diff_text.lines() {
             if rem_old == 0 && rem_new == 0 {
                 if let Some(rest) = line.strip_prefix("--- ") {
-                    flush(&mut ops, &mut cur_file, &mut cur_type, &mut cur_hunks, &mut cur_hunk);
+                    flush(
+                        &mut ops,
+                        &mut cur_file,
+                        &mut cur_type,
+                        &mut cur_hunks,
+                        &mut cur_hunk,
+                    );
                     let p = rest.split('\t').next().unwrap_or(rest).trim();
                     is_old_null = p == "/dev/null";
-                    old_file = p.strip_prefix("a/").or_else(|| p.strip_prefix("b/")).unwrap_or(p).to_string();
+                    old_file = p
+                        .strip_prefix("a/")
+                        .or_else(|| p.strip_prefix("b/"))
+                        .unwrap_or(p)
+                        .to_string();
                     continue;
                 }
                 if let Some(rest) = line.strip_prefix("+++ ") {
                     let p = rest.split('\t').next().unwrap_or(rest).trim();
                     let is_new_null = p == "/dev/null";
-                    let new_file = p.strip_prefix("b/").or_else(|| p.strip_prefix("a/")).unwrap_or(p).to_string();
-                    cur_file = if is_new_null { old_file.clone() } else { new_file };
+                    let new_file = p
+                        .strip_prefix("b/")
+                        .or_else(|| p.strip_prefix("a/"))
+                        .unwrap_or(p)
+                        .to_string();
+                    cur_file = if is_new_null {
+                        old_file.clone()
+                    } else {
+                        new_file
+                    };
                     cur_type = if is_old_null {
                         "add"
                     } else if is_new_null {
@@ -356,17 +444,34 @@ impl DeterministicPatchEngine {
                     cur_hunks.push(std::mem::take(&mut cur_hunk));
                 }
                 let header = rest.split("@@").next().unwrap_or("");
-                rem_old = header.split_whitespace().find_map(|t| t.strip_prefix('-')).and_then(|s| s.split(',').nth(1)).and_then(|n| n.parse().ok()).unwrap_or(1);
-                rem_new = header.split_whitespace().find_map(|t| t.strip_prefix('+')).and_then(|s| s.split(',').nth(1)).and_then(|n| n.parse().ok()).unwrap_or(1);
+                rem_old = header
+                    .split_whitespace()
+                    .find_map(|t| t.strip_prefix('-'))
+                    .and_then(|s| s.split(',').nth(1))
+                    .and_then(|n| n.parse().ok())
+                    .unwrap_or(1);
+                rem_new = header
+                    .split_whitespace()
+                    .find_map(|t| t.strip_prefix('+'))
+                    .and_then(|s| s.split(',').nth(1))
+                    .and_then(|n| n.parse().ok())
+                    .unwrap_or(1);
                 continue;
             }
             if !cur_file.is_empty() {
                 if let Some(first) = line.chars().next() {
                     if matches!(first, ' ' | '-' | '+') {
                         match first {
-                            ' ' => { rem_old = rem_old.saturating_sub(1); rem_new = rem_new.saturating_sub(1); }
-                            '-' => { rem_old = rem_old.saturating_sub(1); }
-                            '+' => { rem_new = rem_new.saturating_sub(1); }
+                            ' ' => {
+                                rem_old = rem_old.saturating_sub(1);
+                                rem_new = rem_new.saturating_sub(1);
+                            }
+                            '-' => {
+                                rem_old = rem_old.saturating_sub(1);
+                            }
+                            '+' => {
+                                rem_new = rem_new.saturating_sub(1);
+                            }
                             _ => {}
                         }
                         cur_hunk.push(PatchHunkLine {
@@ -377,27 +482,51 @@ impl DeterministicPatchEngine {
                 }
             }
         }
-        flush(&mut ops, &mut cur_file, &mut cur_type, &mut cur_hunks, &mut cur_hunk);
+        flush(
+            &mut ops,
+            &mut cur_file,
+            &mut cur_type,
+            &mut cur_hunks,
+            &mut cur_hunk,
+        );
         ops
     }
 
     pub fn apply_hunks(original: &str, hunks: &[Vec<PatchHunkLine>]) -> Result<String, String> {
         let mut current = original.to_string();
         for (idx, hunk) in hunks.iter().enumerate() {
-            let target_lines: Vec<&str> = hunk.iter().filter(|l| l.prefix != '+').map(|l| l.content.as_str()).collect();
-            let replacement_lines: Vec<&str> =
-                hunk.iter().filter(|l| l.prefix != '-').map(|l| l.content.as_str()).collect();
+            let target_lines: Vec<&str> = hunk
+                .iter()
+                .filter(|l| l.prefix != '+')
+                .map(|l| l.content.as_str())
+                .collect();
+            let replacement_lines: Vec<&str> = hunk
+                .iter()
+                .filter(|l| l.prefix != '-')
+                .map(|l| l.content.as_str())
+                .collect();
             let target_block = target_lines.join("\n");
             if target_lines.is_empty() {
-                let replacement_block = replacement_lines.join(if current.contains("\r\n") { "\r\n" } else { "\n" });
+                let replacement_block = replacement_lines.join(if current.contains("\r\n") {
+                    "\r\n"
+                } else {
+                    "\n"
+                });
                 if current.is_empty() {
                     current.push_str(&replacement_block);
                     continue;
                 }
-                return Err(format!("Hunk #{} contains pure additions without context anchors", idx + 1));
+                return Err(format!(
+                    "Hunk #{} contains pure additions without context anchors",
+                    idx + 1
+                ));
             }
             if let Some((matched, _)) = heal_fuzzy_patch(&current, &target_block) {
-                let rep_sep = if matched.contains("\r\n") { "\r\n" } else { "\n" };
+                let rep_sep = if matched.contains("\r\n") {
+                    "\r\n"
+                } else {
+                    "\n"
+                };
                 let replacement_block = replacement_lines.join(rep_sep);
                 current = current.replacen(&matched, &replacement_block, 1);
             } else {

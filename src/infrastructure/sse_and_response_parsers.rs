@@ -1,24 +1,34 @@
 // [LAYER: INFRASTRUCTURE]
 use crate::domain::types::messages::{ToolCall, ToolCallFunction};
-use crate::domain::types::tick_result::{finalize_provider_response, is_retryable_http_status, ProviderError, ProviderResponse, ProviderTokenUsage};
-use crate::plumbing::json_repair::{accumulate_streaming_tool_name, compute_streaming_arguments_delta};
+use crate::domain::types::tick_result::{
+    finalize_provider_response, is_retryable_http_status, ProviderError, ProviderResponse,
+    ProviderTokenUsage,
+};
+use crate::plumbing::json_repair::{
+    accumulate_streaming_tool_name, compute_streaming_arguments_delta,
+};
 use crate::plumbing::schema_and_sse::MAX_SSE_EVENT_DATA_BYTES;
 use serde::de::IgnoredAny;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-pub(crate) fn classify_stream_or_response_error(chunk: &Value, ev_type: &str, raw_body: &str) -> Option<ProviderError> {
-    let err_obj = chunk
-        .get("error")
-        .filter(|v| !v.is_null())
-        .or_else(|| chunk.get("response").and_then(|r| r.get("error")).filter(|v| !v.is_null()));
+pub(crate) fn classify_stream_or_response_error(
+    chunk: &Value,
+    ev_type: &str,
+    raw_body: &str,
+) -> Option<ProviderError> {
+    let err_obj = chunk.get("error").filter(|v| !v.is_null()).or_else(|| {
+        chunk
+            .get("response")
+            .and_then(|r| r.get("error"))
+            .filter(|v| !v.is_null())
+    });
 
     let is_explicit_error_event = ev_type == "error"
         || ev_type == "response.failed"
         || chunk.get("status").and_then(Value::as_str) == Some("failed");
-    let is_top_level_error_chunk = err_obj.is_some()
-        && chunk.get("choices").is_none()
-        && chunk.get("candidates").is_none();
+    let is_top_level_error_chunk =
+        err_obj.is_some() && chunk.get("choices").is_none() && chunk.get("candidates").is_none();
 
     if !is_explicit_error_event && !is_top_level_error_chunk {
         return None;
@@ -26,7 +36,10 @@ pub(crate) fn classify_stream_or_response_error(chunk: &Value, ev_type: &str, ra
 
     let explicit_status = err_obj
         .and_then(|e| e.get("status").or_else(|| e.get("code")))
-        .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse::<u64>().ok())))
+        .and_then(|v| {
+            v.as_u64()
+                .or_else(|| v.as_str().and_then(|s| s.parse::<u64>().ok()))
+        })
         .filter(|s| (400..=599).contains(s))
         .map(|s| s as u16);
 
@@ -43,14 +56,17 @@ pub(crate) fn classify_stream_or_response_error(chunk: &Value, ev_type: &str, ra
     let status = explicit_status.unwrap_or_else(|| {
         if code_or_type.contains("overloaded") {
             529
-        } else if code_or_type.contains("rate_limit") || code_or_type.contains("too_many_requests") {
+        } else if code_or_type.contains("rate_limit") || code_or_type.contains("too_many_requests")
+        {
             429
         } else if code_or_type.contains("insufficient_quota")
             || code_or_type.contains("billing")
             || code_or_type.contains("credit_balance")
         {
             402
-        } else if code_or_type.contains("authentication") || code_or_type.contains("invalid_api_key") {
+        } else if code_or_type.contains("authentication")
+            || code_or_type.contains("invalid_api_key")
+        {
             401
         } else if code_or_type.contains("permission") || code_or_type.contains("forbidden") {
             403
@@ -70,7 +86,10 @@ pub(crate) fn classify_stream_or_response_error(chunk: &Value, ev_type: &str, ra
 }
 
 /// Parses a non-streaming OpenAI `/v1/responses` JSON payload.
-pub(crate) fn parse_responses_json(body: &Value, provider_label: &str) -> Result<ProviderResponse, ProviderError> {
+pub(crate) fn parse_responses_json(
+    body: &Value,
+    provider_label: &str,
+) -> Result<ProviderResponse, ProviderError> {
     let root = body.get("response").unwrap_or(body);
     if let Some(err) = classify_stream_or_response_error(root, "", &body.to_string()) {
         return Err(err);
@@ -84,7 +103,11 @@ pub(crate) fn parse_responses_json(body: &Value, provider_label: &str) -> Result
                 Some("message") => {
                     if let Some(content_arr) = item.get("content").and_then(Value::as_array) {
                         for part in content_arr {
-                            if let Some(t) = part.get("text").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+                            if let Some(t) = part
+                                .get("text")
+                                .and_then(Value::as_str)
+                                .filter(|s| !s.is_empty())
+                            {
                                 text_parts.push(t.to_string());
                             }
                         }
@@ -97,7 +120,12 @@ pub(crate) fn parse_responses_json(body: &Value, provider_label: &str) -> Result
                         .and_then(Value::as_str)
                         .map(String::from)
                         .unwrap_or_else(|| format!("call_{}", idx + 1));
-                    let name = item.get("name").and_then(Value::as_str).unwrap_or("").trim().to_string();
+                    let name = item
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
                     let arguments = match item.get("arguments") {
                         Some(Value::String(s)) => s.clone(),
                         Some(other) if !other.is_null() => other.to_string(),
@@ -117,24 +145,39 @@ pub(crate) fn parse_responses_json(body: &Value, provider_label: &str) -> Result
         }
     }
     if text_parts.is_empty() {
-        if let Some(ot) = root.get("output_text").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+        if let Some(ot) = root
+            .get("output_text")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+        {
             text_parts.push(ot.to_string());
         }
     }
 
-    let mut resp = finalize_provider_response(Some(text_parts.join("")), tool_calls, provider_label);
+    let mut resp =
+        finalize_provider_response(Some(text_parts.join("")), tool_calls, provider_label);
     resp.usage = extract_responses_usage(root);
     Ok(resp)
 }
 
 pub(crate) fn extract_responses_usage(root: &Value) -> Option<ProviderTokenUsage> {
     let u = root.get("usage")?;
-    let prompt_tokens = u.get("input_tokens").or_else(|| u.get("prompt_tokens")).and_then(Value::as_u64)? as usize;
-    let completion_tokens = u.get("output_tokens").or_else(|| u.get("completion_tokens")).and_then(Value::as_u64).unwrap_or(0) as usize;
+    let prompt_tokens = u
+        .get("input_tokens")
+        .or_else(|| u.get("prompt_tokens"))
+        .and_then(Value::as_u64)? as usize;
+    let completion_tokens = u
+        .get("output_tokens")
+        .or_else(|| u.get("completion_tokens"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
     let cached_prompt_tokens = u
         .get("input_tokens_details")
         .and_then(|d| d.get("cached_tokens"))
-        .or_else(|| u.get("prompt_tokens_details").and_then(|d| d.get("cached_tokens")))
+        .or_else(|| {
+            u.get("prompt_tokens_details")
+                .and_then(|d| d.get("cached_tokens"))
+        })
         .and_then(Value::as_u64)
         .unwrap_or(0) as usize;
     Some(ProviderTokenUsage {
@@ -317,7 +360,11 @@ impl IncrementalSseAggregator {
         self.ingest_frame(event.as_deref(), &raw_data)
     }
 
-    fn ingest_frame(&mut self, frame_event: Option<&str>, raw_data: &str) -> Result<(), ProviderError> {
+    fn ingest_frame(
+        &mut self,
+        frame_event: Option<&str>,
+        raw_data: &str,
+    ) -> Result<(), ProviderError> {
         if self.completed_override.is_some() {
             return Ok(());
         }
@@ -335,16 +382,27 @@ impl IncrementalSseAggregator {
         }
 
         // 1. Anthropic Messages SSE
-        if matches!(ev_type, "message_start" | "content_block_start" | "content_block_delta" | "message_delta") {
+        if matches!(
+            ev_type,
+            "message_start" | "content_block_start" | "content_block_delta" | "message_delta"
+        ) {
             match ev_type {
                 "message_start" => {
                     if let Some(u) = chunk.get("message").and_then(|m| m.get("usage")) {
-                        let uncached = u.get("input_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
-                        let cr = u.get("cache_read_input_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
-                        let cc = u.get("cache_creation_input_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
+                        let uncached =
+                            u.get("input_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
+                        let cr = u
+                            .get("cache_read_input_tokens")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(0) as usize;
+                        let cc = u
+                            .get("cache_creation_input_tokens")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(0) as usize;
                         self.anthropic_in_tokens = uncached + cr + cc;
                         self.anthropic_cache_read = cr;
-                        self.anthropic_out_tokens = u.get("output_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
+                        self.anthropic_out_tokens =
+                            u.get("output_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
                         self.saw_anthropic_usage = true;
                     }
                 }
@@ -353,10 +411,23 @@ impl IncrementalSseAggregator {
                     if let Some(cb) = chunk.get("content_block") {
                         match cb.get("type").and_then(Value::as_str) {
                             Some("tool_use") => {
-                                let id = cb.get("id").and_then(Value::as_str).unwrap_or("").to_string();
-                                let name = cb.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+                                let id = cb
+                                    .get("id")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("")
+                                    .to_string();
+                                let name = cb
+                                    .get("name")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("")
+                                    .to_string();
                                 let entry = self.tool_map.entry(idx).or_insert_with(|| {
-                                    (format!("toolu_{}", idx + 1), String::new(), String::new(), None)
+                                    (
+                                        format!("toolu_{}", idx + 1),
+                                        String::new(),
+                                        String::new(),
+                                        None,
+                                    )
                                 });
                                 if !id.is_empty() {
                                     entry.0 = id;
@@ -384,9 +455,15 @@ impl IncrementalSseAggregator {
                                 }
                             }
                             Some("input_json_delta") => {
-                                if let Some(pj) = delta.get("partial_json").and_then(Value::as_str) {
+                                if let Some(pj) = delta.get("partial_json").and_then(Value::as_str)
+                                {
                                     let entry = self.tool_map.entry(idx).or_insert_with(|| {
-                                        (format!("toolu_{}", idx + 1), String::new(), String::new(), None)
+                                        (
+                                            format!("toolu_{}", idx + 1),
+                                            String::new(),
+                                            String::new(),
+                                            None,
+                                        )
                                     });
                                     entry.2.push_str(pj);
                                 }
@@ -417,16 +494,33 @@ impl IncrementalSseAggregator {
                     }
                 }
                 "response.output_item.added" | "response.output_item.done" => {
-                    let idx = chunk.get("output_index").and_then(Value::as_u64).unwrap_or(0) as usize;
+                    let idx = chunk
+                        .get("output_index")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0) as usize;
                     if let Some(item) = chunk.get("item") {
                         if item.get("type").and_then(Value::as_str) == Some("function_call") {
-                            let call_id = item.get("call_id").or_else(|| item.get("id")).and_then(Value::as_str).unwrap_or("").to_string();
+                            let call_id = item
+                                .get("call_id")
+                                .or_else(|| item.get("id"))
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .to_string();
                             if let Some(item_id) = item.get("id").and_then(Value::as_str) {
                                 self.item_id_to_index.insert(item_id.to_string(), idx);
                             }
-                            let name = item.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+                            let name = item
+                                .get("name")
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .to_string();
                             let entry = self.tool_map.entry(idx).or_insert_with(|| {
-                                (format!("call_{}", idx + 1), String::new(), String::new(), None)
+                                (
+                                    format!("call_{}", idx + 1),
+                                    String::new(),
+                                    String::new(),
+                                    None,
+                                )
                             });
                             if !call_id.is_empty() {
                                 entry.0 = call_id;
@@ -436,7 +530,9 @@ impl IncrementalSseAggregator {
                             }
                             match item.get("arguments") {
                                 Some(Value::String(s)) if !s.is_empty() => entry.2 = s.clone(),
-                                Some(other) if !other.is_string() && !other.is_null() => entry.2 = other.to_string(),
+                                Some(other) if !other.is_string() && !other.is_null() => {
+                                    entry.2 = other.to_string()
+                                }
                                 _ => {}
                             }
                         }
@@ -447,11 +543,21 @@ impl IncrementalSseAggregator {
                         .get("output_index")
                         .and_then(Value::as_u64)
                         .map(|v| v as usize)
-                        .or_else(|| chunk.get("item_id").and_then(Value::as_str).and_then(|id| self.item_id_to_index.get(id).copied()))
+                        .or_else(|| {
+                            chunk
+                                .get("item_id")
+                                .and_then(Value::as_str)
+                                .and_then(|id| self.item_id_to_index.get(id).copied())
+                        })
                         .unwrap_or(0);
                     if let Some(d) = chunk.get("delta").and_then(Value::as_str) {
                         let entry = self.tool_map.entry(idx).or_insert_with(|| {
-                            (format!("call_{}", idx + 1), String::new(), String::new(), None)
+                            (
+                                format!("call_{}", idx + 1),
+                                String::new(),
+                                String::new(),
+                                None,
+                            )
                         });
                         entry.2.push_str(d);
                     }
@@ -461,11 +567,25 @@ impl IncrementalSseAggregator {
                         .get("output_index")
                         .and_then(Value::as_u64)
                         .map(|v| v as usize)
-                        .or_else(|| chunk.get("item_id").and_then(Value::as_str).and_then(|id| self.item_id_to_index.get(id).copied()))
+                        .or_else(|| {
+                            chunk
+                                .get("item_id")
+                                .and_then(Value::as_str)
+                                .and_then(|id| self.item_id_to_index.get(id).copied())
+                        })
                         .unwrap_or(0);
-                    if let Some(args) = chunk.get("arguments").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+                    if let Some(args) = chunk
+                        .get("arguments")
+                        .and_then(Value::as_str)
+                        .filter(|s| !s.is_empty())
+                    {
                         let entry = self.tool_map.entry(idx).or_insert_with(|| {
-                            (format!("call_{}", idx + 1), String::new(), String::new(), None)
+                            (
+                                format!("call_{}", idx + 1),
+                                String::new(),
+                                String::new(),
+                                None,
+                            )
                         });
                         if entry.2.is_empty() {
                             entry.2 = args.to_string();
@@ -478,15 +598,27 @@ impl IncrementalSseAggregator {
                             self.latest_usage = Some(u);
                         }
                         if self.text_acc.is_empty() && self.tool_map.is_empty() {
-                            self.completed_override = Some(parse_responses_json(resp_obj, &self.provider_label)?);
+                            self.completed_override =
+                                Some(parse_responses_json(resp_obj, &self.provider_label)?);
                             return Ok(());
                         }
                         if self.tool_map.is_empty() {
                             if let Some(output) = resp_obj.get("output").and_then(Value::as_array) {
                                 for (idx, item) in output.iter().enumerate() {
-                                    if item.get("type").and_then(Value::as_str) == Some("function_call") {
-                                        let cid = item.get("call_id").or_else(|| item.get("id")).and_then(Value::as_str).unwrap_or("").to_string();
-                                        let name = item.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+                                    if item.get("type").and_then(Value::as_str)
+                                        == Some("function_call")
+                                    {
+                                        let cid = item
+                                            .get("call_id")
+                                            .or_else(|| item.get("id"))
+                                            .and_then(Value::as_str)
+                                            .unwrap_or("")
+                                            .to_string();
+                                        let name = item
+                                            .get("name")
+                                            .and_then(Value::as_str)
+                                            .unwrap_or("")
+                                            .to_string();
                                         let args = match item.get("arguments") {
                                             Some(Value::String(s)) => s.clone(),
                                             Some(other) if !other.is_null() => other.to_string(),
@@ -496,7 +628,11 @@ impl IncrementalSseAggregator {
                                             self.tool_map.insert(
                                                 idx,
                                                 (
-                                                    if cid.is_empty() { format!("call_{}", idx + 1) } else { cid },
+                                                    if cid.is_empty() {
+                                                        format!("call_{}", idx + 1)
+                                                    } else {
+                                                        cid
+                                                    },
                                                     name,
                                                     args,
                                                     None,
@@ -515,37 +651,74 @@ impl IncrementalSseAggregator {
         }
 
         // 3. Google Gemini SSE (`candidates[0]`)
-        if let Some(cand) = chunk.get("candidates").and_then(Value::as_array).and_then(|a| a.first()) {
+        if let Some(cand) = chunk
+            .get("candidates")
+            .and_then(Value::as_array)
+            .and_then(|a| a.first())
+        {
             if let Some(parts) = cand.pointer("/content/parts").and_then(Value::as_array) {
                 for part in parts {
                     let is_thought = part.get("thought").and_then(Value::as_bool) == Some(true);
                     if let Some(t) = part.get("text").and_then(Value::as_str) {
-                        if is_thought { self.thought_fallback.push_str(t); } else { self.text_acc.push_str(t); }
+                        if is_thought {
+                            self.thought_fallback.push_str(t);
+                        } else {
+                            self.text_acc.push_str(t);
+                        }
                     }
                     if let Some(fc) = part.get("functionCall") {
-                        let name = fc.get("name").and_then(Value::as_str).unwrap_or("").to_string();
-                        let args = fc.get("args").map(|v| v.to_string()).unwrap_or_else(|| "{}".to_string());
-                        let sig = part.get("thoughtSignature").or_else(|| part.get("thought_signature"))
-                            .or_else(|| fc.get("thoughtSignature")).or_else(|| fc.get("thought_signature"))
-                            .and_then(Value::as_str).filter(|s| !s.is_empty()).map(String::from);
+                        let name = fc
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string();
+                        let args = fc
+                            .get("args")
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "{}".to_string());
+                        let sig = part
+                            .get("thoughtSignature")
+                            .or_else(|| part.get("thought_signature"))
+                            .or_else(|| fc.get("thoughtSignature"))
+                            .or_else(|| fc.get("thought_signature"))
+                            .and_then(Value::as_str)
+                            .filter(|s| !s.is_empty())
+                            .map(String::from);
                         if !name.is_empty() {
                             let next_idx = self.tool_map.len();
-                            self.tool_map.insert(next_idx, (format!("gemini_call_{}", next_idx + 1), name, args, sig));
+                            self.tool_map.insert(
+                                next_idx,
+                                (format!("gemini_call_{}", next_idx + 1), name, args, sig),
+                            );
                         }
                     }
                 }
             }
             if let Some(um) = chunk.get("usageMetadata") {
                 self.latest_usage = Some(ProviderTokenUsage {
-                    prompt_tokens: um.get("promptTokenCount").and_then(Value::as_u64).unwrap_or(0) as usize,
-                    completion_tokens: um.get("candidatesTokenCount").and_then(Value::as_u64).unwrap_or(0) as usize,
-                    cached_prompt_tokens: um.get("cachedContentTokenCount").and_then(Value::as_u64).unwrap_or(0) as usize,
+                    prompt_tokens: um
+                        .get("promptTokenCount")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0) as usize,
+                    completion_tokens: um
+                        .get("candidatesTokenCount")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0) as usize,
+                    cached_prompt_tokens: um
+                        .get("cachedContentTokenCount")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0) as usize,
                     is_exact: true,
                 });
             }
             if let Some(reason) = cand.get("finishReason").and_then(Value::as_str) {
                 if !matches!(reason, "STOP" | "MAX_TOKENS") {
-                    return Err(ProviderError::HttpStatus { status: 200, body: format!("Gemini candidate blocked: finishReason = {reason}"), retryable: false, retry_after_ms: None });
+                    return Err(ProviderError::HttpStatus {
+                        status: 200,
+                        body: format!("Gemini candidate blocked: finishReason = {reason}"),
+                        retryable: false,
+                        retry_after_ms: None,
+                    });
                 }
             }
             return Ok(());
@@ -555,19 +728,38 @@ impl IncrementalSseAggregator {
         if let Some(u) = (self.extract_openai_usage_fn)(&chunk) {
             self.latest_usage = Some(u);
         }
-        if let Some(choice) = chunk.get("choices").and_then(|c| c.as_array()).and_then(|a| a.first()) {
-            let delta = choice.get("delta").or_else(|| choice.get("message")).unwrap_or(choice);
+        if let Some(choice) = chunk
+            .get("choices")
+            .and_then(|c| c.as_array())
+            .and_then(|a| a.first())
+        {
+            let delta = choice
+                .get("delta")
+                .or_else(|| choice.get("message"))
+                .unwrap_or(choice);
             if let Some(txt) = delta.get("content").and_then(|v| v.as_str()) {
                 self.text_acc.push_str(txt);
             }
             if let Some(tcs) = delta.get("tool_calls").and_then(|v| v.as_array()) {
                 for (i, tc) in tcs.iter().enumerate() {
-                    let idx = tc.get("index").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(i);
-                    let entry = self
-                        .tool_map
-                        .entry(idx)
-                        .or_insert_with(|| (format!("call_{}", idx + 1), String::new(), String::new(), None));
-                    if let Some(id) = tc.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                    let idx = tc
+                        .get("index")
+                        .and_then(|v| v.as_u64())
+                        .map(|v| v as usize)
+                        .unwrap_or(i);
+                    let entry = self.tool_map.entry(idx).or_insert_with(|| {
+                        (
+                            format!("call_{}", idx + 1),
+                            String::new(),
+                            String::new(),
+                            None,
+                        )
+                    });
+                    if let Some(id) = tc
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                    {
                         entry.0 = id.to_string();
                     }
                     if let Some(sig) = tc
@@ -584,11 +776,13 @@ impl IncrementalSseAggregator {
                         }
                         match func.get("arguments") {
                             Some(Value::String(arg_chunk)) => {
-                                let (_, next_acc) = compute_streaming_arguments_delta(&entry.2, arg_chunk);
+                                let (_, next_acc) =
+                                    compute_streaming_arguments_delta(&entry.2, arg_chunk);
                                 entry.2 = next_acc;
                             }
                             Some(other) if !other.is_string() && !other.is_null() => {
-                                let (_, next_acc) = compute_streaming_arguments_delta(&entry.2, &other.to_string());
+                                let (_, next_acc) =
+                                    compute_streaming_arguments_delta(&entry.2, &other.to_string());
                                 entry.2 = next_acc;
                             }
                             _ => {}
@@ -629,7 +823,11 @@ impl IncrementalSseAggregator {
                 r#type: "function".to_string(),
                 function: ToolCallFunction {
                     name,
-                    arguments: if args.is_empty() { "{}".to_string() } else { args },
+                    arguments: if args.is_empty() {
+                        "{}".to_string()
+                    } else {
+                        args
+                    },
                 },
                 thought_signature,
             })
@@ -639,7 +837,8 @@ impl IncrementalSseAggregator {
             self.text_acc = self.thought_fallback;
         }
 
-        let mut resp = finalize_provider_response(Some(self.text_acc), tool_calls, &self.provider_label);
+        let mut resp =
+            finalize_provider_response(Some(self.text_acc), tool_calls, &self.provider_label);
         resp.usage = self.latest_usage;
         Ok(resp)
     }
@@ -652,7 +851,8 @@ pub(crate) fn parse_multidialect_sse_stream(
     provider_label: &str,
     extract_openai_usage_fn: fn(&Value) -> Option<ProviderTokenUsage>,
 ) -> Result<ProviderResponse, ProviderError> {
-    let mut agg = IncrementalSseAggregator::new(provider_label, extract_openai_usage_fn, usize::MAX);
+    let mut agg =
+        IncrementalSseAggregator::new(provider_label, extract_openai_usage_fn, usize::MAX);
     agg.push_bytes(raw_sse.as_bytes())?;
     agg.finish()
 }

@@ -164,7 +164,10 @@ pub fn compute_streaming_arguments_delta(accumulated: &str, incoming: &str) -> (
         return (incoming.to_string(), incoming.to_string());
     }
     if incoming.starts_with(accumulated) && incoming.len() > accumulated.len() {
-        return (incoming[accumulated.len()..].to_string(), incoming.to_string());
+        return (
+            incoming[accumulated.len()..].to_string(),
+            incoming.to_string(),
+        );
     }
     if accumulated.len() >= 2 && accumulated.trim_end().ends_with('}') {
         let (ex_roots, ex_rem) = extract_json_roots(accumulated);
@@ -179,7 +182,10 @@ pub fn compute_streaming_arguments_delta(accumulated: &str, incoming: &str) -> (
 }
 
 /// Validates and self-heals completed streaming tool call arguments (`ADR-0014`).
-pub fn normalize_completed_tool_call_arguments(raw: &str, provider_label: &str) -> Result<String, String> {
+pub fn normalize_completed_tool_call_arguments(
+    raw: &str,
+    provider_label: &str,
+) -> Result<String, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Ok("{}".to_string());
@@ -188,7 +194,9 @@ pub fn normalize_completed_tool_call_arguments(raw: &str, provider_label: &str) 
         if parsed.is_object() {
             return Ok(trimmed.to_string());
         }
-        return Err(format!("{provider_label} returned non-object tool arguments"));
+        return Err(format!(
+            "{provider_label} returned non-object tool arguments"
+        ));
     }
     let (roots, rem) = extract_json_roots(trimmed);
     if roots.len() > 1 && rem.trim().is_empty() {

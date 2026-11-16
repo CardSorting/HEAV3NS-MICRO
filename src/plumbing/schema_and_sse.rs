@@ -54,7 +54,17 @@ pub fn parse_sse_events(raw_sse: &str) -> Vec<SseEventFrame> {
     for raw_line in raw_sse.split('\n') {
         let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
         if line.is_empty() {
-            flush(&mut frames, &mut current_event, &mut data_buf, &mut has_data, &mut overflowed, &mut json_candidate_failed, &mut json_depth, &mut in_str, &mut escaped);
+            flush(
+                &mut frames,
+                &mut current_event,
+                &mut data_buf,
+                &mut has_data,
+                &mut overflowed,
+                &mut json_candidate_failed,
+                &mut json_depth,
+                &mut in_str,
+                &mut escaped,
+            );
             continue;
         }
         if line.starts_with(':') {
@@ -67,13 +77,33 @@ pub fn parse_sse_events(raw_sse: &str) -> Vec<SseEventFrame> {
         match field {
             "event" => {
                 if has_data || overflowed {
-                    flush(&mut frames, &mut current_event, &mut data_buf, &mut has_data, &mut overflowed, &mut json_candidate_failed, &mut json_depth, &mut in_str, &mut escaped);
+                    flush(
+                        &mut frames,
+                        &mut current_event,
+                        &mut data_buf,
+                        &mut has_data,
+                        &mut overflowed,
+                        &mut json_candidate_failed,
+                        &mut json_depth,
+                        &mut in_str,
+                        &mut escaped,
+                    );
                 }
                 current_event = Some(raw_val.trim().to_string());
             }
             "data" => {
                 if raw_val.trim() == "[DONE]" {
-                    flush(&mut frames, &mut current_event, &mut data_buf, &mut has_data, &mut overflowed, &mut json_candidate_failed, &mut json_depth, &mut in_str, &mut escaped);
+                    flush(
+                        &mut frames,
+                        &mut current_event,
+                        &mut data_buf,
+                        &mut has_data,
+                        &mut overflowed,
+                        &mut json_candidate_failed,
+                        &mut json_depth,
+                        &mut in_str,
+                        &mut escaped,
+                    );
                     continue;
                 }
                 let trimmed_buf = data_buf.trim();
@@ -85,7 +115,17 @@ pub fn parse_sse_events(raw_sse: &str) -> Vec<SseEventFrame> {
                     && (trimmed_buf.ends_with('}') || trimmed_buf.ends_with(']'))
                 {
                     if serde_json::from_str::<IgnoredAny>(trimmed_buf).is_ok() {
-                        flush(&mut frames, &mut current_event, &mut data_buf, &mut has_data, &mut overflowed, &mut json_candidate_failed, &mut json_depth, &mut in_str, &mut escaped);
+                        flush(
+                            &mut frames,
+                            &mut current_event,
+                            &mut data_buf,
+                            &mut has_data,
+                            &mut overflowed,
+                            &mut json_candidate_failed,
+                            &mut json_depth,
+                            &mut in_str,
+                            &mut escaped,
+                        );
                     } else {
                         json_candidate_failed = true;
                     }
@@ -126,7 +166,17 @@ pub fn parse_sse_events(raw_sse: &str) -> Vec<SseEventFrame> {
             _ => {}
         }
     }
-    flush(&mut frames, &mut current_event, &mut data_buf, &mut has_data, &mut overflowed, &mut json_candidate_failed, &mut json_depth, &mut in_str, &mut escaped);
+    flush(
+        &mut frames,
+        &mut current_event,
+        &mut data_buf,
+        &mut has_data,
+        &mut overflowed,
+        &mut json_candidate_failed,
+        &mut json_depth,
+        &mut in_str,
+        &mut escaped,
+    );
     frames
 }
 
@@ -141,8 +191,14 @@ pub fn redact_endpoint_for_display(endpoint: &str) -> String {
         return "(invalid-endpoint)".to_string();
     };
     let authority_and_path = rest.split(['?', '#']).next().unwrap_or(rest);
-    let authority = authority_and_path.split('/').next().unwrap_or(authority_and_path);
-    let host_port = authority.rsplit_once('@').map(|(_, hp)| hp).unwrap_or(authority);
+    let authority = authority_and_path
+        .split('/')
+        .next()
+        .unwrap_or(authority_and_path);
+    let host_port = authority
+        .rsplit_once('@')
+        .map(|(_, hp)| hp)
+        .unwrap_or(authority);
     if host_port.is_empty() {
         return format!("{scheme}://(invalid-host)");
     }
@@ -181,18 +237,24 @@ pub fn sanitize_tool_schema(schema: &mut Value) {
     }
 
     for union_key in ["anyOf", "oneOf"] {
-        let collapsed = map.get(union_key).and_then(Value::as_array).and_then(|variants| {
-            if variants.len() == 1 {
-                return variants.first().and_then(Value::as_object).cloned();
-            }
-            if variants.len() == 2 {
-                let non_null: Vec<&Value> = variants.iter().filter(|v| !is_null_type_schema(v)).collect();
-                if non_null.len() == 1 {
-                    return non_null[0].as_object().cloned();
+        let collapsed = map
+            .get(union_key)
+            .and_then(Value::as_array)
+            .and_then(|variants| {
+                if variants.len() == 1 {
+                    return variants.first().and_then(Value::as_object).cloned();
                 }
-            }
-            None
-        });
+                if variants.len() == 2 {
+                    let non_null: Vec<&Value> = variants
+                        .iter()
+                        .filter(|v| !is_null_type_schema(v))
+                        .collect();
+                    if non_null.len() == 1 {
+                        return non_null[0].as_object().cloned();
+                    }
+                }
+                None
+            });
         if let Some(replacement) = collapsed {
             map.remove(union_key);
             for (k, v) in replacement {
@@ -223,7 +285,8 @@ pub fn sanitize_tool_schema(schema: &mut Value) {
             .to_ascii_lowercase();
         let inferred_items = if desc.contains('{') || desc.contains("object") {
             serde_json::json!({ "type": "object", "properties": {} })
-        } else if desc.contains("[x, y]") || desc.contains("coordinate") || desc.contains("number") {
+        } else if desc.contains("[x, y]") || desc.contains("coordinate") || desc.contains("number")
+        {
             serde_json::json!({ "type": "number" })
         } else {
             serde_json::json!({ "type": "string" })
@@ -248,7 +311,11 @@ pub fn sanitize_tool_schema(schema: &mut Value) {
         .map(|p| p.keys().cloned().collect::<Vec<String>>())
     {
         if let Some(Value::Array(req)) = map.get_mut("required") {
-            req.retain(|entry| entry.as_str().is_some_and(|k| prop_keys.iter().any(|pk| pk == k)));
+            req.retain(|entry| {
+                entry
+                    .as_str()
+                    .is_some_and(|k| prop_keys.iter().any(|pk| pk == k))
+            });
         }
     }
 }
@@ -284,24 +351,39 @@ pub fn sanitize_tool_schema_for_responses(schema: &mut Value) {
             let branch_req: Vec<String> = bmap
                 .get("required")
                 .and_then(Value::as_array)
-                .map(|arr| arr.iter().filter_map(Value::as_str).map(String::from).collect())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Value::as_str)
+                        .map(String::from)
+                        .collect()
+                })
                 .unwrap_or_default();
             common_required = Some(match common_required {
                 None => branch_req,
                 Some(mut prev) if root_union == "allOf" => {
                     for k in branch_req {
-                        if !prev.contains(&k) { prev.push(k); }
+                        if !prev.contains(&k) {
+                            prev.push(k);
+                        }
                     }
                     prev
                 }
-                Some(prev) => prev.into_iter().filter(|k| branch_req.contains(k)).collect(),
+                Some(prev) => prev
+                    .into_iter()
+                    .filter(|k| branch_req.contains(k))
+                    .collect(),
             });
         }
 
         let existing_required: Vec<String> = map
             .get("required")
             .and_then(Value::as_array)
-            .map(|arr| arr.iter().filter_map(Value::as_str).map(String::from).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect()
+            })
             .unwrap_or_default();
         map.insert("type".to_string(), Value::String("object".to_string()));
         map.insert("properties".to_string(), Value::Object(merged_props));
@@ -338,7 +420,13 @@ pub fn sanitize_tool_schema_for_responses(schema: &mut Value) {
     if let Some(Value::Array(req)) = map.get("required").cloned() {
         let valid: Vec<Value> = req
             .into_iter()
-            .filter(|v| v.as_str().is_some_and(|k| map.get("properties").and_then(Value::as_object).is_some_and(|p| p.contains_key(k))))
+            .filter(|v| {
+                v.as_str().is_some_and(|k| {
+                    map.get("properties")
+                        .and_then(Value::as_object)
+                        .is_some_and(|p| p.contains_key(k))
+                })
+            })
             .collect();
         if valid.is_empty() {
             map.remove("required");

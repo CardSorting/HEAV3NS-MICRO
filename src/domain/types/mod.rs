@@ -18,20 +18,64 @@ pub mod tool_schedule;
 pub mod tool_types;
 pub mod vfs_types;
 
-pub use crate::domain::types::account_types::{ChatGptAccountCredentials, ChatGptAccountStoreData, ChatGptAccountSummary};
-pub use crate::domain::types::computer_use_types::{IUiElement, IVirtualWindow, UiElement, VirtualWindow};
-pub use crate::domain::types::environmental_types::{BehavioralAffordance, EnvironmentalObservation, EnvironmentalRegion, IBehavioralAffordance, IEnvironmentalObservation, RegionKind};
-pub use crate::domain::types::learned_knowledge_types::{EnvironmentalReconciliationReport, ILearnedPattern, IReconciliationReport, LearnedInteractionPattern, LearnedWorkflowProcedure};
-pub use crate::domain::types::messages::{estimate_messages_tokens, extract_text_tool_calls, Role, SessionMessage, ToolCall, ToolCallFunction};
-pub use crate::domain::types::model_catalog::{IModelCatalog, IModelTierRecommender, ModelCatalogEntry, ModelPricingCatalog};
-pub use crate::domain::types::posture_types::{evaluate_tool_posture, AuthorizationVerdict, ExecutionPosture, PostureEvaluation, RepoConstitution, RepoConstitutionRule, UserApprovalChoice};
-pub use crate::domain::types::progress::{EngineProgressEvent, EngineProgressMetadata, EngineProgressPhase, EngineProgressStatus, ToolExecutionRecord};
-pub use crate::domain::types::provider_registry::{canonicalize_provider_id, infer_wire_dialect_from_endpoint, is_retired_provider, lookup_provider_descriptor, opencode_go_model_id, resolve_effective_wire_override, resolve_model_aware_wire_and_model, resolve_provider_route, retired_provider_remediation, suggest_provider_slug, IProviderRouteResolver, ProviderBillingClass, ProviderChain, ProviderDescriptor, ReasoningEffortLevel, ResolvedProviderRoute, WireDialect, LEGACY_ANTIGRAVITY_TOMBSTONE_MESSAGE, PROVIDER_DESCRIPTORS};
-pub use crate::domain::types::runtime::{AgentConfig, ApprovalGateCallback, CancellationToken, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel};
+pub use crate::domain::types::account_types::{
+    ChatGptAccountCredentials, ChatGptAccountStoreData, ChatGptAccountSummary,
+};
+pub use crate::domain::types::computer_use_types::{
+    IUiElement, IVirtualWindow, UiElement, VirtualWindow,
+};
+pub use crate::domain::types::environmental_types::{
+    BehavioralAffordance, EnvironmentalObservation, EnvironmentalRegion, IBehavioralAffordance,
+    IEnvironmentalObservation, RegionKind,
+};
+pub use crate::domain::types::learned_knowledge_types::{
+    EnvironmentalReconciliationReport, ILearnedPattern, IReconciliationReport,
+    LearnedInteractionPattern, LearnedWorkflowProcedure,
+};
+pub use crate::domain::types::messages::{
+    estimate_messages_tokens, extract_text_tool_calls, Role, SessionMessage, ToolCall,
+    ToolCallFunction,
+};
+pub use crate::domain::types::model_catalog::{
+    IModelCatalog, IModelTierRecommender, ModelCatalogEntry, ModelPricingCatalog,
+};
+pub use crate::domain::types::posture_types::{
+    evaluate_tool_posture, AuthorizationVerdict, ExecutionPosture, PostureEvaluation,
+    RepoConstitution, RepoConstitutionRule, UserApprovalChoice,
+};
+pub use crate::domain::types::progress::{
+    EngineProgressEvent, EngineProgressMetadata, EngineProgressPhase, EngineProgressStatus,
+    ToolExecutionRecord,
+};
+pub use crate::domain::types::provider_registry::{
+    canonicalize_provider_id, infer_wire_dialect_from_endpoint, is_retired_provider,
+    lookup_provider_descriptor, opencode_go_model_id, resolve_effective_wire_override,
+    resolve_model_aware_wire_and_model, resolve_provider_route, retired_provider_remediation,
+    suggest_provider_slug, IProviderRouteResolver, ProviderBillingClass, ProviderChain,
+    ProviderDescriptor, ReasoningEffortLevel, ResolvedProviderRoute, WireDialect,
+    LEGACY_ANTIGRAVITY_TOMBSTONE_MESSAGE, PROVIDER_DESCRIPTORS,
+};
+pub use crate::domain::types::runtime::{
+    AgentConfig, ApprovalGateCallback, CancellationToken, EngineTickInput, EngineTickOutcome,
+    ExecutionAuthorityLevel,
+};
 pub use crate::domain::types::skill_types::{GovernedOutput, SkillManifest, WorkspacePromptFacts};
-pub use crate::domain::types::spatial_types::{AssuranceVerdict, SpatialActionContract, SpatialError, SpatialScene, SpatialTarget, TargetProvenance};
-pub use crate::domain::types::swarm_intelligence_types::{ConsultationRiskLevel, ISpecialistInsight, ISwarmConsultationResponse, SpecialistInsight, SwarmConsultationRequest, SwarmConsultationResponse};
-pub use crate::domain::types::tick_result::{finalize_provider_response, is_retryable_http_status, EngineTickResult, ProviderError, ProviderRequest, ProviderResponse};
-pub use crate::domain::types::tool_schedule::{MutationTransaction, RollbackResult, ScheduledToolCall};
-pub use crate::domain::types::tool_types::{ParamSchema, ParamType, SchemaValidationResult, ToolSpec};
+pub use crate::domain::types::spatial_types::{
+    AssuranceVerdict, SpatialActionContract, SpatialError, SpatialScene, SpatialTarget,
+    TargetProvenance,
+};
+pub use crate::domain::types::swarm_intelligence_types::{
+    ConsultationRiskLevel, ISpecialistInsight, ISwarmConsultationResponse, SpecialistInsight,
+    SwarmConsultationRequest, SwarmConsultationResponse,
+};
+pub use crate::domain::types::tick_result::{
+    finalize_provider_response, is_retryable_http_status, EngineTickResult, ProviderError,
+    ProviderRequest, ProviderResponse,
+};
+pub use crate::domain::types::tool_schedule::{
+    MutationTransaction, RollbackResult, ScheduledToolCall,
+};
+pub use crate::domain::types::tool_types::{
+    ParamSchema, ParamType, SchemaValidationResult, ToolSpec,
+};
 pub use crate::domain::types::vfs_types::{VfsDiskBaseline, VfsFileOverlay};

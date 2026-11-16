@@ -8,10 +8,7 @@ pub type AffordanceClassification = Value;
 pub type FailureDiagnosis = Value;
 
 /// Calculates the structural, visual, and state difference between two snapshots of UI elements.
-pub fn compute_element_deltas(
-    before_elements: &[Value],
-    after_elements: &[Value],
-) -> Value {
+pub fn compute_element_deltas(before_elements: &[Value], after_elements: &[Value]) -> Value {
     let mut before_map: BTreeMap<String, &Value> = BTreeMap::new();
     for el in before_elements {
         if let Some(id) = el.get("id").and_then(|v| v.as_str()) {
@@ -39,7 +36,12 @@ pub fn compute_element_deltas(
                 let bounds_changed = before_el.get("bounds") != after_el.get("bounds");
                 let label_changed = before_el.get("label") != after_el.get("label");
                 let enabled_changed = before_el.get("enabled") != after_el.get("enabled");
-                if val_changed || focus_changed || bounds_changed || label_changed || enabled_changed {
+                if val_changed
+                    || focus_changed
+                    || bounds_changed
+                    || label_changed
+                    || enabled_changed
+                {
                     modified.push(json!({
                         "id": id,
                         "valueChanged": val_changed,
@@ -87,53 +89,106 @@ pub fn classify_element_affordance(
 
     // Check for disabled constraint
     if r.contains("disabled") || l.contains("(disabled)") || l.ends_with(" disabled") {
-        return ("disabled_control".into(), "Control is currently disabled and rejects input".into(), 0.98);
+        return (
+            "disabled_control".into(),
+            "Control is currently disabled and rejects input".into(),
+            0.98,
+        );
     }
 
     // Check for modal dismiss / close cues
-    if l == "close" || l == "cancel" || l == "dismiss" || l == "×" || l == "x" || l.contains("exit") {
-        return ("dismissable".into(), "Closes or dismisses the active modal dialog".into(), 0.95);
+    if l == "close" || l == "cancel" || l == "dismiss" || l == "×" || l == "x" || l.contains("exit")
+    {
+        return (
+            "dismissable".into(),
+            "Closes or dismisses the active modal dialog".into(),
+            0.95,
+        );
     }
 
     // Check for search / filter cues
     if r == "searchbox" || l.contains("search") || l.contains("find") || l.contains("filter") {
-        return ("search_input".into(), "Accepts search query and updates visible results".into(), 0.92);
+        return (
+            "search_input".into(),
+            "Accepts search query and updates visible results".into(),
+            0.92,
+        );
     }
 
     // Check for submission / primary CTA cues
-    if l == "submit" || l == "save" || l == "confirm" || l == "ok" || l == "apply" || l.starts_with("run") || l.contains("submit") || l.contains("save") || l.contains("verify") {
-        return ("submit_action".into(), "Commits form changes or executes command".into(), 0.90);
+    if l == "submit"
+        || l == "save"
+        || l == "confirm"
+        || l == "ok"
+        || l == "apply"
+        || l.starts_with("run")
+        || l.contains("submit")
+        || l.contains("save")
+        || l.contains("verify")
+    {
+        return (
+            "submit_action".into(),
+            "Commits form changes or executes command".into(),
+            0.90,
+        );
     }
 
     // Check for navigation cues
-    if r == "link" || l.contains("home") || l.contains("docs") || l.contains("nav") || l.starts_with("http") {
-        return ("navigational".into(), "Navigates to another view, document, or URL".into(), 0.88);
+    if r == "link"
+        || l.contains("home")
+        || l.contains("docs")
+        || l.contains("nav")
+        || l.starts_with("http")
+    {
+        return (
+            "navigational".into(),
+            "Navigates to another view, document, or URL".into(),
+            0.88,
+        );
     }
 
     // Check for input-capable textbox
-    if matches!(r.as_str(), "textbox" | "input" | "textarea" | "combobox" | "text") {
-        return ("text_input".into(), "Accepts keyboard keystrokes and text entry".into(), 0.95);
+    if matches!(
+        r.as_str(),
+        "textbox" | "input" | "textarea" | "combobox" | "text"
+    ) {
+        return (
+            "text_input".into(),
+            "Accepts keyboard keystrokes and text entry".into(),
+            0.95,
+        );
     }
 
     // Check for clickable controls
-    if matches!(r.as_str(), "button" | "checkbox" | "radio" | "tab" | "menuitem" | "switch" | "slider") {
-        return ("clickable".into(), "Toggles state or triggers command on click".into(), 0.85);
+    if matches!(
+        r.as_str(),
+        "button" | "checkbox" | "radio" | "tab" | "menuitem" | "switch" | "slider"
+    ) {
+        return (
+            "clickable".into(),
+            "Toggles state or triggers command on click".into(),
+            0.85,
+        );
     }
 
     // Geometry heuristic: very wide or tall scrollable containers
     if bounds[2] > 600 && bounds[3] > 400 {
-        return ("scrollable_container".into(), "Scrollable content viewport".into(), 0.70);
+        return (
+            "scrollable_container".into(),
+            "Scrollable content viewport".into(),
+            0.70,
+        );
     }
 
-    ("generic_interactive".into(), "Inspect or click to evaluate outcome".into(), 0.50)
+    (
+        "generic_interactive".into(),
+        "Inspect or click to evaluate outcome".into(),
+        0.50,
+    )
 }
 
 /// Identifies whether any active window or element represents an unhandled modal or alert dialog.
-pub fn detect_modal_or_dialog(
-    titles: &[&str],
-    roles: &[&str],
-    labels: &[&str],
-) -> Option<String> {
+pub fn detect_modal_or_dialog(titles: &[&str], roles: &[&str], labels: &[&str]) -> Option<String> {
     for (idx, role) in roles.iter().enumerate() {
         let r = role.to_ascii_lowercase();
         if r == "dialog" || r == "alertdialog" || r == "modal" {
@@ -143,7 +198,12 @@ pub fn detect_modal_or_dialog(
     }
     for title in titles {
         let t = title.to_ascii_lowercase();
-        if t.contains("dialog") || t.contains("alert") || t.contains("confirm") || t.contains("modal") || t.contains("permission") {
+        if t.contains("dialog")
+            || t.contains("alert")
+            || t.contains("confirm")
+            || t.contains("modal")
+            || t.contains("permission")
+        {
             return Some((*title).to_string());
         }
     }
@@ -222,13 +282,15 @@ pub fn calibrate_confidence_score(
         let historical_ratio = success_count as f32 / total as f32;
         score = (score * 0.6) + (historical_ratio * 0.4);
     }
-    if score.is_nan() { 0.05 } else { score.clamp(0.05, 1.0) }
+    if score.is_nan() {
+        0.05
+    } else {
+        score.clamp(0.05, 1.0)
+    }
 }
 
 /// Extracts structural relationships (parent, siblings, children, label-for) between elements.
-pub fn analyze_spider_structural_relationships(
-    elements: &[Value],
-) -> Vec<Value> {
+pub fn analyze_spider_structural_relationships(elements: &[Value]) -> Vec<Value> {
     let mut relationships = Vec::new();
     let mut id_set = BTreeSet::new();
     for el in elements {
@@ -244,10 +306,18 @@ pub fn analyze_spider_structural_relationships(
         let bounds = el.get("bounds").and_then(|v| v.as_array());
 
         // Check if an input field is adjacent to a label, icon, or submit button
-        if matches!(role, "textbox" | "input" | "textarea" | "combobox" | "searchbox") {
+        if matches!(
+            role,
+            "textbox" | "input" | "textarea" | "combobox" | "searchbox"
+        ) {
             let b_coords = bounds.and_then(|b| {
                 if b.len() == 4 {
-                    Some((b[0].as_i64().unwrap_or(0), b[1].as_i64().unwrap_or(0), b[2].as_i64().unwrap_or(0), b[3].as_i64().unwrap_or(0)))
+                    Some((
+                        b[0].as_i64().unwrap_or(0),
+                        b[1].as_i64().unwrap_or(0),
+                        b[2].as_i64().unwrap_or(0),
+                        b[3].as_i64().unwrap_or(0),
+                    ))
                 } else {
                     None
                 }
@@ -256,7 +326,9 @@ pub fn analyze_spider_structural_relationships(
                 let other_id = other.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 let other_role = other.get("role").and_then(|v| v.as_str()).unwrap_or("");
                 let other_label = other.get("label").and_then(|v| v.as_str()).unwrap_or("");
-                if other_id != id && (other_role == "button" || other_role == "label" || other_role == "text") {
+                if other_id != id
+                    && (other_role == "button" || other_role == "label" || other_role == "text")
+                {
                     let text = format!("{other_label} {label}").to_lowercase();
                     if text.contains("search") || text.contains("find") {
                         relationships.push(json!({
@@ -267,7 +339,12 @@ pub fn analyze_spider_structural_relationships(
                         }));
                     } else if other_role == "button" {
                         let btn_l = other_label.trim().to_ascii_lowercase();
-                        if btn_l == "submit" || btn_l == "save" || btn_l == "confirm" || btn_l == "ok" || btn_l.starts_with("run") {
+                        if btn_l == "submit"
+                            || btn_l == "save"
+                            || btn_l == "confirm"
+                            || btn_l == "ok"
+                            || btn_l.starts_with("run")
+                        {
                             relationships.push(json!({
                                 "sourceId": id,
                                 "targetId": other_id,
@@ -275,14 +352,27 @@ pub fn analyze_spider_structural_relationships(
                                 "semantic": format!("Input '{}' submits via primary control '{}'", id, other_id)
                             }));
                         }
-                    } else if (other_role == "label" || other_role == "text") && !other_label.trim().is_empty() {
-                        if let (Some((ix, iy, _iw, ih)), Some(ob)) = (b_coords, other.get("bounds").and_then(|v| v.as_array())) {
+                    } else if (other_role == "label" || other_role == "text")
+                        && !other_label.trim().is_empty()
+                    {
+                        if let (Some((ix, iy, _iw, ih)), Some(ob)) =
+                            (b_coords, other.get("bounds").and_then(|v| v.as_array()))
+                        {
                             if ob.len() == 4 {
-                                let (lx, ly, lw, lh) = (ob[0].as_i64().unwrap_or(0), ob[1].as_i64().unwrap_or(0), ob[2].as_i64().unwrap_or(0), ob[3].as_i64().unwrap_or(0));
+                                let (lx, ly, lw, lh) = (
+                                    ob[0].as_i64().unwrap_or(0),
+                                    ob[1].as_i64().unwrap_or(0),
+                                    ob[2].as_i64().unwrap_or(0),
+                                    ob[3].as_i64().unwrap_or(0),
+                                );
                                 let l_right = lx.saturating_add(lw);
                                 let l_bottom = ly.saturating_add(lh);
-                                let left_adjacent = l_right <= ix.saturating_add(24) && ix.saturating_sub(l_right) <= 160 && ly.saturating_sub(iy).saturating_abs() <= ih.max(lh);
-                                let top_adjacent = l_bottom <= iy.saturating_add(12) && iy.saturating_sub(l_bottom) <= 56 && lx.saturating_sub(ix).saturating_abs() <= 80;
+                                let left_adjacent = l_right <= ix.saturating_add(24)
+                                    && ix.saturating_sub(l_right) <= 160
+                                    && ly.saturating_sub(iy).saturating_abs() <= ih.max(lh);
+                                let top_adjacent = l_bottom <= iy.saturating_add(12)
+                                    && iy.saturating_sub(l_bottom) <= 56
+                                    && lx.saturating_sub(ix).saturating_abs() <= 80;
                                 if left_adjacent || top_adjacent {
                                     relationships.push(json!({
                                         "sourceId": other_id,
@@ -301,15 +391,29 @@ pub fn analyze_spider_structural_relationships(
         // Geometric containment and modal dismiss relation
         if let Some(b) = bounds {
             if b.len() == 4 {
-                let (x, y, w, h) = (b[0].as_i64().unwrap_or(0), b[1].as_i64().unwrap_or(0), b[2].as_i64().unwrap_or(0), b[3].as_i64().unwrap_or(0));
+                let (x, y, w, h) = (
+                    b[0].as_i64().unwrap_or(0),
+                    b[1].as_i64().unwrap_or(0),
+                    b[2].as_i64().unwrap_or(0),
+                    b[3].as_i64().unwrap_or(0),
+                );
                 let is_modal_container = matches!(role, "dialog" | "alertdialog" | "modal");
                 for other in elements {
                     let oid = other.get("id").and_then(|v| v.as_str()).unwrap_or("");
                     if oid != id {
                         if let Some(ob) = other.get("bounds").and_then(|v| v.as_array()) {
                             if ob.len() == 4 {
-                                let (ox, oy, ow, oh) = (ob[0].as_i64().unwrap_or(0), ob[1].as_i64().unwrap_or(0), ob[2].as_i64().unwrap_or(0), ob[3].as_i64().unwrap_or(0));
-                                if ox >= x && oy >= y && ox.saturating_add(ow) <= x.saturating_add(w) && oy.saturating_add(oh) <= y.saturating_add(h) {
+                                let (ox, oy, ow, oh) = (
+                                    ob[0].as_i64().unwrap_or(0),
+                                    ob[1].as_i64().unwrap_or(0),
+                                    ob[2].as_i64().unwrap_or(0),
+                                    ob[3].as_i64().unwrap_or(0),
+                                );
+                                if ox >= x
+                                    && oy >= y
+                                    && ox.saturating_add(ow) <= x.saturating_add(w)
+                                    && oy.saturating_add(oh) <= y.saturating_add(h)
+                                {
                                     relationships.push(json!({
                                         "sourceId": id,
                                         "targetId": oid,
@@ -317,8 +421,18 @@ pub fn analyze_spider_structural_relationships(
                                         "semantic": format!("Container '{}' spatially contains child '{}'", id, oid)
                                     }));
                                     if is_modal_container {
-                                        let ol = other.get("label").and_then(|v| v.as_str()).unwrap_or("").trim().to_ascii_lowercase();
-                                        if ol == "close" || ol == "cancel" || ol == "dismiss" || ol == "×" || ol == "x" {
+                                        let ol = other
+                                            .get("label")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("")
+                                            .trim()
+                                            .to_ascii_lowercase();
+                                        if ol == "close"
+                                            || ol == "cancel"
+                                            || ol == "dismiss"
+                                            || ol == "×"
+                                            || ol == "x"
+                                        {
                                             relationships.push(json!({
                                                 "sourceId": oid,
                                                 "targetId": id,

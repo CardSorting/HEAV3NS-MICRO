@@ -43,7 +43,10 @@ impl IUiElement for UiElement {
 
 impl UiElement {
     pub fn center_point(&self) -> [i32; 2] {
-        [self.bounds[0] + self.bounds[2] / 2, self.bounds[1] + self.bounds[3] / 2]
+        [
+            self.bounds[0] + self.bounds[2] / 2,
+            self.bounds[1] + self.bounds[3] / 2,
+        ]
     }
 
     pub fn hit_tests_point(&self, pt: [i32; 2]) -> bool {
@@ -53,12 +56,19 @@ impl UiElement {
             && pt[1] <= self.bounds[1] + self.bounds[3]
     }
 
-    pub fn matches_selector(&self, target_elem: Option<&str>, som_id: Option<u32>, click_xy: Option<[i32; 2]>) -> bool {
+    pub fn matches_selector(
+        &self,
+        target_elem: Option<&str>,
+        som_id: Option<u32>,
+        click_xy: Option<[i32; 2]>,
+    ) -> bool {
         let by_id = target_elem
             .map(|tid| self.id == tid || self.label.eq_ignore_ascii_case(tid))
             .unwrap_or(false);
         let by_som = som_id.map(|sid| self.som_id == sid).unwrap_or(false);
-        let by_xy = target_elem.is_none() && som_id.is_none() && click_xy.map(|pt| self.hit_tests_point(pt)).unwrap_or(false);
+        let by_xy = target_elem.is_none()
+            && som_id.is_none()
+            && click_xy.map(|pt| self.hit_tests_point(pt)).unwrap_or(false);
         by_id || by_som || by_xy
     }
 
@@ -140,23 +150,52 @@ impl IVirtualWindow for VirtualWindow {
 impl VirtualWindow {
     pub fn is_modal_window(&self) -> bool {
         let tl = self.title.to_ascii_lowercase();
-        tl.contains("dialog") || tl.contains("alert") || tl.contains("confirm") || tl.contains("modal")
+        tl.contains("dialog")
+            || tl.contains("alert")
+            || tl.contains("confirm")
+            || tl.contains("modal")
     }
 
     pub fn query_window_elements(&self, frame_seq: u64, args: &Value) -> Vec<Value> {
         let role_filter = args.get("role").and_then(|v| v.as_str());
-        let label_filter = args.get("label_contains").or_else(|| args.get("text")).and_then(|v| v.as_str()).map(|s| s.to_ascii_lowercase());
-        let value_filter = args.get("value_contains").and_then(|v| v.as_str()).map(|s| s.to_ascii_lowercase());
-        let elem_id_filter = args.get("element_id").or_else(|| args.get("id")).and_then(|v| v.as_str());
-        let focused_only = args.get("focused_only").and_then(|v| v.as_bool()).unwrap_or(false);
-        let enabled_only = args.get("enabled_only").and_then(|v| v.as_bool()).unwrap_or(false);
+        let label_filter = args
+            .get("label_contains")
+            .or_else(|| args.get("text"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_ascii_lowercase());
+        let value_filter = args
+            .get("value_contains")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_ascii_lowercase());
+        let elem_id_filter = args
+            .get("element_id")
+            .or_else(|| args.get("id"))
+            .and_then(|v| v.as_str());
+        let focused_only = args
+            .get("focused_only")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let enabled_only = args
+            .get("enabled_only")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         self.elements
             .iter()
             .filter(|e| {
-                role_filter.map(|r| e.role.eq_ignore_ascii_case(r)).unwrap_or(true)
-                    && elem_id_filter.map(|eid| e.id == eid || e.label.eq_ignore_ascii_case(eid)).unwrap_or(true)
-                    && label_filter.as_ref().map(|l| e.label.to_ascii_lowercase().contains(l)).unwrap_or(true)
-                    && value_filter.as_ref().map(|vl| e.value.to_ascii_lowercase().contains(vl)).unwrap_or(true)
+                role_filter
+                    .map(|r| e.role.eq_ignore_ascii_case(r))
+                    .unwrap_or(true)
+                    && elem_id_filter
+                        .map(|eid| e.id == eid || e.label.eq_ignore_ascii_case(eid))
+                        .unwrap_or(true)
+                    && label_filter
+                        .as_ref()
+                        .map(|l| e.label.to_ascii_lowercase().contains(l))
+                        .unwrap_or(true)
+                    && value_filter
+                        .as_ref()
+                        .map(|vl| e.value.to_ascii_lowercase().contains(vl))
+                        .unwrap_or(true)
                     && (!focused_only || e.focused)
                     && (!enabled_only || e.enabled)
             })
@@ -164,7 +203,12 @@ impl VirtualWindow {
             .collect()
     }
 
-    pub fn apply_window_key(&mut self, k_norm: &str, clipboard: &mut String, cursor: &mut [i32; 2]) -> bool {
+    pub fn apply_window_key(
+        &mut self,
+        k_norm: &str,
+        clipboard: &mut String,
+        cursor: &mut [i32; 2],
+    ) -> bool {
         match k_norm {
             "cmd+c" | "ctrl+c" => {
                 if let Some(el) = self.elements.iter().find(|e| e.focused) {
@@ -211,15 +255,26 @@ impl VirtualWindow {
                 if let Some(el) = self.elements.iter_mut().find(|e| e.focused && e.enabled) {
                     let r_low = el.role.to_ascii_lowercase();
                     if matches!(r_low.as_str(), "checkbox" | "switch" | "toggle") {
-                        el.value = if el.value == "true" || el.value == "checked" { "false".into() } else { "true".into() };
-                    } else if matches!(r_low.as_str(), "textbox" | "input" | "searchbox" | "textarea") {
+                        el.value = if el.value == "true" || el.value == "checked" {
+                            "false".into()
+                        } else {
+                            "true".into()
+                        };
+                    } else if matches!(
+                        r_low.as_str(),
+                        "textbox" | "input" | "searchbox" | "textarea"
+                    ) {
                         el.value.push(' ');
                     }
                 }
                 true
             }
             "return" | "enter" => {
-                if let Some(el) = self.elements.iter().find(|e| e.focused && (e.role == "button" || e.role == "link")) {
+                if let Some(el) = self
+                    .elements
+                    .iter()
+                    .find(|e| e.focused && (e.role == "button" || e.role == "link"))
+                {
                     *cursor = el.center_point();
                 }
                 true

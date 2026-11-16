@@ -52,10 +52,15 @@ impl DeterministicSecretRedactor {
         let norm = path.replace('\\', "/");
         let mut segments: Vec<String> = Vec::new();
         for raw in norm.split('/') {
-            if raw.is_empty() || raw == "." { continue; }
+            if raw.is_empty() || raw == "." {
+                continue;
+            }
             if raw == ".." {
-                if segments.last().is_some_and(|s| s != "..") { segments.pop(); }
-                else { segments.push("..".to_string()); }
+                if segments.last().is_some_and(|s| s != "..") {
+                    segments.pop();
+                } else {
+                    segments.push("..".to_string());
+                }
             } else {
                 segments.push(raw.to_ascii_lowercase());
             }
@@ -83,7 +88,10 @@ impl DeterministicSecretRedactor {
                 return Some("macOS Keychain store (~/Library/Keychains)");
             }
         }
-        if matches!(file_name, ".anthropic_oauth.json" | "bws_cache.enc.json" | "id_rsa" | "id_ed25519" | "id_ecdsa") {
+        if matches!(
+            file_name,
+            ".anthropic_oauth.json" | "bws_cache.enc.json" | "id_rsa" | "id_ed25519" | "id_ecdsa"
+        ) {
             return Some("Private authentication key material");
         }
 
@@ -94,7 +102,10 @@ impl DeterministicSecretRedactor {
         // ModelContext-level secrets (blocked in model read/search/diff tools)
         if file_name == ".env"
             || (file_name.starts_with(".env.") && !ALLOWED_DOTENV_TEMPLATES.contains(&file_name))
-            || segments.iter().any(|s| s == ".env" || (s.starts_with(".env.") && !ALLOWED_DOTENV_TEMPLATES.contains(&s.as_str())))
+            || segments.iter().any(|s| {
+                s == ".env"
+                    || (s.starts_with(".env.") && !ALLOWED_DOTENV_TEMPLATES.contains(&s.as_str()))
+            })
         {
             return Some("Environment secret file (.env)");
         }
@@ -174,9 +185,8 @@ impl DeterministicSecretRedactor {
         static URL_AUTH_RE: OnceLock<Regex> = OnceLock::new();
         static KV_SECRET_RE: OnceLock<Regex> = OnceLock::new();
 
-        let bearer_re = BEARER_RE.get_or_init(|| {
-            Regex::new(r"(?i)(\bBearer\s+)[A-Za-z0-9._~+/=-]{16,}").unwrap()
-        });
+        let bearer_re = BEARER_RE
+            .get_or_init(|| Regex::new(r"(?i)(\bBearer\s+)[A-Za-z0-9._~+/=-]{16,}").unwrap());
         let url_auth_re = URL_AUTH_RE.get_or_init(|| {
             Regex::new(r"((?:https?|postgres(?:ql)?|rediss?|mongodb(?:\+srv)?|amqps?|ftps?|mysql)://[^/\s:@]+:)([^@\s/]{4,})(@)").unwrap()
         });
@@ -187,17 +197,25 @@ impl DeterministicSecretRedactor {
         let mut out = text.to_string();
         for &(label, ref re) in rules {
             if re.is_match(&out) {
-                out = re.replace_all(&out, format!("[REDACTED:{label}]")).into_owned();
+                out = re
+                    .replace_all(&out, format!("[REDACTED:{label}]"))
+                    .into_owned();
             }
         }
         if bearer_re.is_match(&out) {
-            out = bearer_re.replace_all(&out, "${1}[REDACTED:bearer_token]").into_owned();
+            out = bearer_re
+                .replace_all(&out, "${1}[REDACTED:bearer_token]")
+                .into_owned();
         }
         if url_auth_re.is_match(&out) {
-            out = url_auth_re.replace_all(&out, "${1}[REDACTED:url_auth]${3}").into_owned();
+            out = url_auth_re
+                .replace_all(&out, "${1}[REDACTED:url_auth]${3}")
+                .into_owned();
         }
         if kv_re.is_match(&out) {
-            out = kv_re.replace_all(&out, "${1}[REDACTED:secret_value]${3}").into_owned();
+            out = kv_re
+                .replace_all(&out, "${1}[REDACTED:secret_value]${3}")
+                .into_owned();
         }
         out
     }
@@ -215,7 +233,11 @@ pub struct SafetyPolicy;
 impl SafetyPolicy {
     pub fn check_command(cmd: &str) -> Result<(), String> {
         Self::check_invisible_unicode(cmd)?;
-        let lower: String = cmd.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+        let lower: String = cmd
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
         let forbidden = [
             "rm -rf /",
             "rm -rf /*",
@@ -231,22 +253,43 @@ impl SafetyPolicy {
         ];
         for pat in forbidden {
             if lower.contains(pat) {
-                return Err(format!("Safety policy blocked destructive command pattern: '{pat}'"));
+                return Err(format!(
+                    "Safety policy blocked destructive command pattern: '{pat}'"
+                ));
             }
         }
-        let tokens: Vec<String> = cmd.split_whitespace().map(|t| t.trim_matches(|c| c == '"' || c == '\'').to_string()).collect();
+        let tokens: Vec<String> = cmd
+            .split_whitespace()
+            .map(|t| t.trim_matches(|c| c == '"' || c == '\'').to_string())
+            .collect();
         if tokens.first().map(|s| s.as_str()) == Some("rm") {
-            let rec = tokens.iter().any(|t| t == "--recursive" || (t.starts_with('-') && !t.starts_with("--") && (t.contains('r') || t.contains('R'))));
-            let force = tokens.iter().any(|t| t == "--force" || (t.starts_with('-') && !t.starts_with("--") && t.contains('f')));
-            let root = tokens.iter().skip(1).any(|t| matches!(t.as_str(), "/" | "/*" | "~"));
+            let rec = tokens.iter().any(|t| {
+                t == "--recursive"
+                    || (t.starts_with('-')
+                        && !t.starts_with("--")
+                        && (t.contains('r') || t.contains('R')))
+            });
+            let force = tokens.iter().any(|t| {
+                t == "--force" || (t.starts_with('-') && !t.starts_with("--") && t.contains('f'))
+            });
+            let root = tokens
+                .iter()
+                .skip(1)
+                .any(|t| matches!(t.as_str(), "/" | "/*" | "~"));
             if rec && force && root {
-                return Err("Safety policy blocked destructive recursive rm targeting root/home".to_string());
+                return Err(
+                    "Safety policy blocked destructive recursive rm targeting root/home"
+                        .to_string(),
+                );
             }
         }
         if tokens.first().map(|s| s.as_str()) == Some("chmod") {
             let rec = tokens.iter().any(|t| t == "-R" || t == "--recursive");
             let open_777 = tokens.iter().any(|t| t == "777" || t == "0777");
-            let root = tokens.iter().skip(1).any(|t| matches!(t.as_str(), "/" | "/*"));
+            let root = tokens
+                .iter()
+                .skip(1)
+                .any(|t| matches!(t.as_str(), "/" | "/*"));
             if rec && open_777 && root {
                 return Err("Safety policy blocked recursive chmod 777 on root".to_string());
             }
@@ -286,12 +329,21 @@ impl SafetyPolicy {
         canonical_target: Option<&Path>,
         scope: CredentialDenyScope,
     ) -> Result<(), String> {
-        if let Some(label) = DeterministicSecretRedactor::classify_sensitive_path(&path.to_string_lossy(), scope) {
-            return Err(format!("Safety policy blocked access to protected credential store: {label}"));
+        if let Some(label) =
+            DeterministicSecretRedactor::classify_sensitive_path(&path.to_string_lossy(), scope)
+        {
+            return Err(format!(
+                "Safety policy blocked access to protected credential store: {label}"
+            ));
         }
         if let Some(canon) = canonical_target {
-            if let Some(label) = DeterministicSecretRedactor::classify_sensitive_path(&canon.to_string_lossy(), scope) {
-                return Err(format!("Safety policy blocked access to protected credential store: {label}"));
+            if let Some(label) = DeterministicSecretRedactor::classify_sensitive_path(
+                &canon.to_string_lossy(),
+                scope,
+            ) {
+                return Err(format!(
+                    "Safety policy blocked access to protected credential store: {label}"
+                ));
             }
         }
         Ok(())
@@ -303,7 +355,11 @@ impl SafetyPolicy {
 
     /// Detects writes to protected agent instruction files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `SOUL.md`, `.cursorrules`).
     pub fn check_protected_instruction_write(path: &Path) -> Option<String> {
-        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_ascii_lowercase();
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
         if PROTECTED_INSTRUCTION_FILES.contains(&file_name.as_str()) {
             return Some(format!(
                 "[Instruction-Guard Advisory] Modifying governance file '{}'. Ensure changes preserve architectural sovereignty.",
@@ -319,7 +375,8 @@ impl SafetyPolicy {
         let mut findings = Vec::new();
         for ch in content.chars() {
             let code = ch as u32;
-            if matches!(code, 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064 | 0x2066..=0x2069 | 0xFEFF) {
+            if matches!(code, 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064 | 0x2066..=0x2069 | 0xFEFF)
+            {
                 findings.push(format!("invisible unicode character U+{code:04X}"));
                 break;
             }
@@ -405,7 +462,8 @@ impl SafetyPolicy {
             return None;
         }
         static BG_PREFIX_RE: OnceLock<Regex> = OnceLock::new();
-        let bg_re = BG_PREFIX_RE.get_or_init(|| Regex::new(r"(?:^|[;&|]\s*)(?:nohup|disown|setsid)\b").unwrap());
+        let bg_re = BG_PREFIX_RE
+            .get_or_init(|| Regex::new(r"(?:^|[;&|]\s*)(?:nohup|disown|setsid)\b").unwrap());
         if bg_re.is_match(trimmed) {
             return Some(
                 "[Terminal-Guard Advisory] Shell-level backgrounding (`nohup`/`disown`/`setsid`) detected in foreground execution. Child processes may be reaped when the command exits."
@@ -469,7 +527,9 @@ impl SafetyPolicy {
                         i = j + 1;
                         continue;
                     } else if final_byte == b't' && params == "18" {
-                        replies.extend_from_slice(format!("\x1b[8;{};{}t", rows.max(1), cols.max(1)).as_bytes());
+                        replies.extend_from_slice(
+                            format!("\x1b[8;{};{}t", rows.max(1), cols.max(1)).as_bytes(),
+                        );
                         i = j + 1;
                         continue;
                     }

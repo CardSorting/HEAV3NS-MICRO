@@ -74,7 +74,13 @@ impl SpatialPoint {
     }
 
     pub fn to_i32(&self) -> [i32; 2] {
-        let clamp = |v: f64| if v.is_finite() { v.round().clamp(i32::MIN as f64, i32::MAX as f64) as i32 } else { 0 };
+        let clamp = |v: f64| {
+            if v.is_finite() {
+                v.round().clamp(i32::MIN as f64, i32::MAX as f64) as i32
+            } else {
+                0
+            }
+        };
         [clamp(self.x), clamp(self.y)]
     }
 
@@ -97,11 +103,21 @@ pub struct SpatialRect {
 
 impl SpatialRect {
     pub const fn new(x: f64, y: f64, width: f64, height: f64) -> Self {
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
     pub const fn zero() -> Self {
-        Self { x: 0.0, y: 0.0, width: 0.0, height: 0.0 }
+        Self {
+            x: 0.0,
+            y: 0.0,
+            width: 0.0,
+            height: 0.0,
+        }
     }
 
     pub fn from_i32_slice(b: [i32; 4]) -> Self {
@@ -132,11 +148,19 @@ impl SpatialRect {
     }
 
     pub fn area(&self) -> f64 {
-        if !self.width.is_finite() || !self.height.is_finite() || self.width <= 0.0 || self.height <= 0.0 {
+        if !self.width.is_finite()
+            || !self.height.is_finite()
+            || self.width <= 0.0
+            || self.height <= 0.0
+        {
             0.0
         } else {
             let a = self.width * self.height;
-            if a.is_finite() { a } else { 0.0 }
+            if a.is_finite() {
+                a
+            } else {
+                0.0
+            }
         }
     }
 
@@ -166,7 +190,11 @@ impl SpatialRect {
     /// Computes a safe interactive point inside the rectangle by insetting margins.
     /// `inset_ratio` is clamped to [0.0, 0.45] to guarantee the safe point stays well within bounds.
     pub fn safe_center(&self, inset_ratio: f64) -> SpatialPoint {
-        let ratio = if inset_ratio.is_finite() { inset_ratio.clamp(0.0, 0.45) } else { 0.0 };
+        let ratio = if inset_ratio.is_finite() {
+            inset_ratio.clamp(0.0, 0.45)
+        } else {
+            0.0
+        };
         let inset_w = self.width * ratio;
         let inset_h = self.height * ratio;
         let safe_rect = SpatialRect {
@@ -334,12 +362,20 @@ impl ViewportTransform {
     }
 
     pub fn with_dpr(mut self, dpr: f64) -> Self {
-        self.dpr = if !dpr.is_finite() || dpr <= 0.0 { 1.0 } else { dpr };
+        self.dpr = if !dpr.is_finite() || dpr <= 0.0 {
+            1.0
+        } else {
+            dpr
+        };
         self
     }
 
     pub fn with_scale(mut self, scale: f64) -> Self {
-        self.scale = if !scale.is_finite() || scale <= 0.0 { 1.0 } else { scale };
+        self.scale = if !scale.is_finite() || scale <= 0.0 {
+            1.0
+        } else {
+            scale
+        };
         self
     }
 
@@ -363,7 +399,12 @@ impl ViewportTransform {
     }
 
     /// Transforms a viewport-space rect to global screen space given the window offset.
-    pub fn viewport_to_screen_rect(&self, vp_rect: &SpatialRect, win_x: f64, win_y: f64) -> SpatialRect {
+    pub fn viewport_to_screen_rect(
+        &self,
+        vp_rect: &SpatialRect,
+        win_x: f64,
+        win_y: f64,
+    ) -> SpatialRect {
         SpatialRect {
             x: (vp_rect.x + win_x) * self.dpr,
             y: (vp_rect.y + win_y) * self.dpr,
@@ -373,10 +414,18 @@ impl ViewportTransform {
     }
 
     /// Transforms screen coordinate point back to viewport coordinates.
-    pub fn screen_to_viewport_point(&self, screen_pt: &SpatialPoint, win_x: f64, win_y: f64) -> SpatialPoint {
+    pub fn screen_to_viewport_point(
+        &self,
+        screen_pt: &SpatialPoint,
+        win_x: f64,
+        win_y: f64,
+    ) -> SpatialPoint {
         let base_x = (screen_pt.x / self.dpr) - win_x;
         let base_y = (screen_pt.y / self.dpr) - win_y;
-        SpatialPoint { x: base_x, y: base_y }
+        SpatialPoint {
+            x: base_x,
+            y: base_y,
+        }
     }
 
     /// Checks if a document-space rect is visible in the current viewport.
@@ -392,7 +441,10 @@ impl ViewportTransform {
         if vp_rect.area() <= 0.0 {
             return 0.0;
         }
-        vp.intersection(&vp_rect).map(|i| i.area() / vp_rect.area()).unwrap_or(0.0).clamp(0.0, 1.0)
+        vp.intersection(&vp_rect)
+            .map(|i| i.area() / vp_rect.area())
+            .unwrap_or(0.0)
+            .clamp(0.0, 1.0)
     }
 
     /// Computes the scroll adjustment (delta_x, delta_y) needed to center the element in the viewport.
@@ -400,19 +452,30 @@ impl ViewportTransform {
         let target_center = doc_rect.center();
         let desired_scroll_x = target_center.x - (self.viewport_width / 2.0);
         let desired_scroll_y = target_center.y - (self.viewport_height / 2.0);
-        (desired_scroll_x - self.scroll_x, desired_scroll_y - self.scroll_y)
+        (
+            desired_scroll_x - self.scroll_x,
+            desired_scroll_y - self.scroll_y,
+        )
     }
 }
 
 /// Universal coordinate space normalizer supporting px, normalized float (0.0..1.0),
 /// normalized 1000 ([0..1000]), and percentage ("50%").
-pub fn normalize_coordinate_value(val: Option<&Value>, dimension: f64, default_val: f64, is_norm_1000: bool) -> f64 {
+pub fn normalize_coordinate_value(
+    val: Option<&Value>,
+    dimension: f64,
+    default_val: f64,
+    is_norm_1000: bool,
+) -> f64 {
     let parsed: Option<f64> = match val {
         Some(Value::Number(n)) => n.as_f64(),
         Some(Value::String(s)) => {
             let trimmed = s.trim();
             if let Some(pct) = trimmed.strip_suffix('%') {
-                pct.trim().parse::<f64>().ok().map(|p| (p / 100.0) * dimension)
+                pct.trim()
+                    .parse::<f64>()
+                    .ok()
+                    .map(|p| (p / 100.0) * dimension)
             } else if let Some(px) = trimmed.strip_suffix("px") {
                 px.trim().parse::<f64>().ok()
             } else {
@@ -446,10 +509,16 @@ pub fn validate_trajectory(
     sample_steps: usize,
 ) -> Result<(), String> {
     if !bounds.contains_point(from) {
-        return Err(format!("Trajectory start point ({:.1}, {:.1}) is out of bounds", from.x, from.y));
+        return Err(format!(
+            "Trajectory start point ({:.1}, {:.1}) is out of bounds",
+            from.x, from.y
+        ));
     }
     if !bounds.contains_point(to) {
-        return Err(format!("Trajectory end point ({:.1}, {:.1}) is out of bounds", to.x, to.y));
+        return Err(format!(
+            "Trajectory end point ({:.1}, {:.1}) is out of bounds",
+            to.x, to.y
+        ));
     }
 
     let steps = sample_steps.clamp(2, 64);
@@ -474,7 +543,10 @@ pub fn validate_trajectory(
 /// Computes the exact 2D union area of a collection of bounding rectangles
 /// using a coordinate-compression 1D interval decomposition (scanline) algorithm.
 pub fn calculate_rectangles_union_area(rects: &[SpatialRect]) -> f64 {
-    let valid_rects: Vec<&SpatialRect> = rects.iter().filter(|r| r.is_valid() && r.area() > 0.0).collect();
+    let valid_rects: Vec<&SpatialRect> = rects
+        .iter()
+        .filter(|r| r.is_valid() && r.area() > 0.0)
+        .collect();
     if valid_rects.is_empty() {
         return 0.0;
     }
@@ -482,7 +554,10 @@ pub fn calculate_rectangles_union_area(rects: &[SpatialRect]) -> f64 {
         return valid_rects[0].area();
     }
     if valid_rects.len() == 2 {
-        let inter_area = valid_rects[0].intersection(valid_rects[1]).map(|i| i.area()).unwrap_or(0.0);
+        let inter_area = valid_rects[0]
+            .intersection(valid_rects[1])
+            .map(|i| i.area())
+            .unwrap_or(0.0);
         return (valid_rects[0].area() + valid_rects[1].area() - inter_area).max(0.0);
     }
 

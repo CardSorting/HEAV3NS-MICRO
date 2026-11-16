@@ -16,17 +16,56 @@ pub mod turn_receipt;
 pub mod types;
 
 pub use crate::domain::arena::{ArenaAllocator, SlabBufferSnapshot, DEFAULT_ARENA_CAPACITY_BYTES};
-pub use crate::domain::compaction::{CompactionPolicy, CompactionReport, ContextBudgetInfo, CONTEXT_CHECKPOINT_PREFIX};
+pub use crate::domain::compaction::{
+    CompactionPolicy, CompactionReport, ContextBudgetInfo, CONTEXT_CHECKPOINT_PREFIX,
+};
 pub use crate::domain::computer_use::{UiElement, VirtualDisplayState, VirtualWindow};
-pub use crate::domain::interfaces::{BoxFuture, DeferralPredicate, IExecutionAssuranceGate, ILlmProvider, IModelPricingRegistry, ISessionPersistence, ISpatialGroundingGate, ISpatialMediator, IToolExecutor, IWorkspacePromptProbe, IWorkspaceSnapshotCas, LlmProvider, ProgressCallback};
-pub use crate::domain::memory::{GameStateSnapshot, MemoryEntry, MemoryStore, MEMORY_ENVELOPE_PREFIX};
-pub use crate::domain::prefix_and_manifest::{format_append_only_context_update, PrefixFingerprint, PrefixPinStatus, PrefixStabilityTracker, RequestManifest};
-pub use crate::domain::pricing_and_taxonomy::{compute_retry_delay_ms, resolve_compatible_fallback_model, resolve_compatible_fallback_model_with_catalog, select_auto_routed_model, select_auto_routed_model_with_catalog, AutoRouteDecision, BillingMetering, ErrorCategory, ErrorEnvelope, ProviderTokenUsage, CREDENTIAL_REJECTED_UNSENT_CODE};
-pub use crate::domain::prompt_spec::{format_bounded_handoff_item, ModelPromptFamily, PromptProfile, SwarmSpecialistContext, SystemPromptSpec, WorkspacePromptFacts};
+pub use crate::domain::interfaces::{
+    BoxFuture, DeferralPredicate, IExecutionAssuranceGate, ILlmProvider, IModelPricingRegistry,
+    ISessionPersistence, ISpatialGroundingGate, ISpatialMediator, IToolExecutor,
+    IWorkspacePromptProbe, IWorkspaceSnapshotCas, LlmProvider, ProgressCallback,
+};
+pub use crate::domain::memory::{
+    GameStateSnapshot, MemoryEntry, MemoryStore, MEMORY_ENVELOPE_PREFIX,
+};
+pub use crate::domain::prefix_and_manifest::{
+    format_append_only_context_update, PrefixFingerprint, PrefixPinStatus, PrefixStabilityTracker,
+    RequestManifest,
+};
+pub use crate::domain::pricing_and_taxonomy::{
+    compute_retry_delay_ms, resolve_compatible_fallback_model,
+    resolve_compatible_fallback_model_with_catalog, select_auto_routed_model,
+    select_auto_routed_model_with_catalog, AutoRouteDecision, BillingMetering, ErrorCategory,
+    ErrorEnvelope, ProviderTokenUsage, CREDENTIAL_REJECTED_UNSENT_CODE,
+};
+pub use crate::domain::prompt_spec::{
+    format_bounded_handoff_item, ModelPromptFamily, PromptProfile, SwarmSpecialistContext,
+    SystemPromptSpec, WorkspacePromptFacts,
+};
 pub use crate::domain::skill_tree::{SkillNode, SkillTreeCatalog, SoulProfile};
-pub use crate::domain::spatial_action::{GroundedSpatialTarget, SpatialExecutionReceipt, SpatialGroundingResult};
-pub use crate::domain::spatial_mediator::{SpatialActionMediator, SpatialActionPlan, SpatialInteractionAudit};
-pub use crate::domain::swarm::{classify_task_for_legion, SwarmAssignment, SwarmFormationResult, SwarmItemReport};
+pub use crate::domain::spatial_action::{
+    GroundedSpatialTarget, SpatialExecutionReceipt, SpatialGroundingResult,
+};
+pub use crate::domain::spatial_mediator::{
+    SpatialActionMediator, SpatialActionPlan, SpatialInteractionAudit,
+};
+pub use crate::domain::swarm::{
+    classify_task_for_legion, SwarmAssignment, SwarmFormationResult, SwarmItemReport,
+};
 pub use crate::domain::tool_parser::ToolCallArgParser;
 pub use crate::domain::turn_receipt::{CommandRunReceipt, FileChangeReceipt, TurnReceipt};
-pub use crate::domain::types::{canonicalize_provider_id, estimate_messages_tokens, evaluate_tool_posture, extract_text_tool_calls, finalize_provider_response, infer_wire_dialect_from_endpoint, is_retryable_http_status, lookup_provider_descriptor, resolve_provider_route, AgentConfig, ApprovalGateCallback, AuthorizationVerdict, CancellationToken, EngineProgressEvent, EngineProgressMetadata, EngineProgressPhase, EngineProgressStatus, EngineTickInput, EngineTickOutcome, EngineTickResult, ExecutionAuthorityLevel, ExecutionPosture, GovernedOutput, IModelCatalog, IModelTierRecommender, IProviderRouteResolver, ModelCatalogEntry, ModelPricingCatalog, MutationTransaction, ParamSchema, ParamType, PostureEvaluation, ProviderBillingClass, ProviderChain, ProviderDescriptor, ProviderError, ProviderRequest, ProviderResponse, ReasoningEffortLevel, RepoConstitution, RepoConstitutionRule, ResolvedProviderRoute, Role, RollbackResult, ScheduledToolCall, SchemaValidationResult, SessionMessage, SkillManifest, ToolCall, ToolCallFunction, ToolExecutionRecord, ToolSpec, UserApprovalChoice, VfsDiskBaseline, VfsFileOverlay, WireDialect, PROVIDER_DESCRIPTORS};
+pub use crate::domain::types::{
+    canonicalize_provider_id, estimate_messages_tokens, evaluate_tool_posture,
+    extract_text_tool_calls, finalize_provider_response, infer_wire_dialect_from_endpoint,
+    is_retryable_http_status, lookup_provider_descriptor, resolve_provider_route, AgentConfig,
+    ApprovalGateCallback, AuthorizationVerdict, CancellationToken, EngineProgressEvent,
+    EngineProgressMetadata, EngineProgressPhase, EngineProgressStatus, EngineTickInput,
+    EngineTickOutcome, EngineTickResult, ExecutionAuthorityLevel, ExecutionPosture, GovernedOutput,
+    IModelCatalog, IModelTierRecommender, IProviderRouteResolver, ModelCatalogEntry,
+    ModelPricingCatalog, MutationTransaction, ParamSchema, ParamType, PostureEvaluation,
+    ProviderBillingClass, ProviderChain, ProviderDescriptor, ProviderError, ProviderRequest,
+    ProviderResponse, ReasoningEffortLevel, RepoConstitution, RepoConstitutionRule,
+    ResolvedProviderRoute, Role, RollbackResult, ScheduledToolCall, SchemaValidationResult,
+    SessionMessage, SkillManifest, ToolCall, ToolCallFunction, ToolExecutionRecord, ToolSpec,
+    UserApprovalChoice, VfsDiskBaseline, VfsFileOverlay, WireDialect, PROVIDER_DESCRIPTORS,
+};

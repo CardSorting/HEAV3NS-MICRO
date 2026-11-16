@@ -1,5 +1,7 @@
 // [LAYER: PLUMBING]
-use crate::plumbing::secret_redactor::{CredentialDenyScope, DeterministicSecretRedactor, SafetyPolicy};
+use crate::plumbing::secret_redactor::{
+    CredentialDenyScope, DeterministicSecretRedactor, SafetyPolicy,
+};
 use crate::plumbing::shell_guard::split_top_level_statements;
 use std::path::Path;
 
@@ -65,7 +67,11 @@ pub fn build_macos_seatbelt_invocation(
     for (idx, sub) in READONLY_CARVEOUT_SUBDIRS.iter().enumerate() {
         let key = format!("RO_CARVEOUT_{idx}");
         let joined = canon_ws.join(sub);
-        let full = joined.canonicalize().unwrap_or(joined).to_string_lossy().to_string();
+        let full = joined
+            .canonicalize()
+            .unwrap_or(joined)
+            .to_string_lossy()
+            .to_string();
         params.push((key.clone(), full));
         ro_carveouts.push(key);
     }
@@ -95,7 +101,9 @@ pub fn build_macos_seatbelt_invocation(
             sbpl.push_str(&format!("(deny file-write* (subpath (param \"{key}\")))\n"));
         }
         if !allow_network {
-            sbpl.push_str("(deny network-outbound)\n(allow network-outbound (local ip \"localhost:*\"))\n");
+            sbpl.push_str(
+                "(deny network-outbound)\n(allow network-outbound (local ip \"localhost:*\"))\n",
+            );
         }
     } else {
         sbpl.push_str("(deny network-outbound)\n");
@@ -129,7 +137,11 @@ pub fn build_macos_seatbelt_invocation(
         for (idx, rel) in denied_rel.iter().enumerate() {
             let key = format!("DENY_CRED_{idx}");
             let target = canon_home.join(rel);
-            let target_str = target.canonicalize().unwrap_or(target).to_string_lossy().to_string();
+            let target_str = target
+                .canonicalize()
+                .unwrap_or(target)
+                .to_string_lossy()
+                .to_string();
             params.push((key.clone(), target_str));
             sbpl.push_str(&format!(
                 "(deny file-read* (subpath (param \"{key}\")))\n\
@@ -154,7 +166,8 @@ pub fn inspect_command_security(cmd: &str) -> CommandSecurityVerdict {
 fn inspect_command_security_depth(cmd: &str, depth: usize) -> CommandSecurityVerdict {
     if depth > 16 {
         return CommandSecurityVerdict::Deny {
-            reason: "Subshell nesting depth exceeds 16-level inspection ceiling (fail-closed)".to_string(),
+            reason: "Subshell nesting depth exceeds 16-level inspection ceiling (fail-closed)"
+                .to_string(),
         };
     }
     if cmd.len() > 65_536 {
@@ -196,7 +209,11 @@ fn inspect_command_security_depth(cmd: &str, depth: usize) -> CommandSecurityVer
             if matches!(bin.as_str(), "sh" | "bash" | "zsh" | "dash" | "ksh") {
                 let mut saw_c_flag = false;
                 for idx in 0..args.len() {
-                    if args[idx] == "-c" || (args[idx].starts_with('-') && !args[idx].starts_with("--") && args[idx].contains('c')) {
+                    if args[idx] == "-c"
+                        || (args[idx].starts_with('-')
+                            && !args[idx].starts_with("--")
+                            && args[idx].contains('c'))
+                    {
                         let mut cmd_arg = None;
                         let mut scan = idx + 1;
                         while scan < args.len() {
@@ -213,7 +230,8 @@ fn inspect_command_security_depth(cmd: &str, depth: usize) -> CommandSecurityVer
                         if let Some(sub_cmd) = cmd_arg {
                             saw_c_flag = true;
                             match inspect_command_security_depth(sub_cmd, depth + 1) {
-                                d @ (CommandSecurityVerdict::Deny { .. } | CommandSecurityVerdict::RequireApproval { .. }) => {
+                                d @ (CommandSecurityVerdict::Deny { .. }
+                                | CommandSecurityVerdict::RequireApproval { .. }) => {
                                     return d;
                                 }
                                 CommandSecurityVerdict::WorkspaceMutating { summary } => {
@@ -237,7 +255,10 @@ fn inspect_command_security_depth(cmd: &str, depth: usize) -> CommandSecurityVer
             }
 
             // Codewhale curl / wget credential & file upload guard
-            if matches!(bin.as_str(), "curl" | "wget" | "scp" | "rsync" | "nc" | "ncat") {
+            if matches!(
+                bin.as_str(),
+                "curl" | "wget" | "scp" | "rsync" | "nc" | "ncat"
+            ) {
                 if let Some(verdict) = check_network_upload_exfiltration(&bin, args, stmt) {
                     return verdict;
                 }
@@ -254,14 +275,25 @@ fn inspect_command_security_depth(cmd: &str, depth: usize) -> CommandSecurityVer
                     let clean = a.trim_matches(|c| c == '"' || c == '\'');
                     let mut norm = String::with_capacity(clean.len());
                     for ch in clean.chars() {
-                        if ch == '/' && norm.ends_with('/') { continue; }
+                        if ch == '/' && norm.ends_with('/') {
+                            continue;
+                        }
                         norm.push(ch);
                     }
                     let norm = norm.strip_suffix("/.").unwrap_or(&norm);
-                    let norm = if norm.len() > 1 { norm.trim_end_matches('/') } else { norm };
-                    if matches!(norm, "/" | "/*" | "~" | "~/*" | "$HOME" | "$HOME/*" | "${HOME}" | "${HOME}/*") {
+                    let norm = if norm.len() > 1 {
+                        norm.trim_end_matches('/')
+                    } else {
+                        norm
+                    };
+                    if matches!(
+                        norm,
+                        "/" | "/*" | "~" | "~/*" | "$HOME" | "$HOME/*" | "${HOME}" | "${HOME}/*"
+                    ) {
                         return CommandSecurityVerdict::Deny {
-                            reason: format!("Safety policy refused destructive `rm` target '{clean}'"),
+                            reason: format!(
+                                "Safety policy refused destructive `rm` target '{clean}'"
+                            ),
                         };
                     }
                 }
@@ -272,10 +304,15 @@ fn inspect_command_security_depth(cmd: &str, depth: usize) -> CommandSecurityVer
                 let sub = first_git_subcommand(args);
                 if matches!(sub.as_deref(), Some("push" | "reset" | "clean")) {
                     let is_hard_or_push = sub.as_deref() == Some("push")
-                        || args.iter().any(|a| a == "--hard" || a.starts_with("-f") || a == "--force");
+                        || args
+                            .iter()
+                            .any(|a| a == "--hard" || a.starts_with("-f") || a == "--force");
                     if is_hard_or_push {
                         return CommandSecurityVerdict::RequireApproval {
-                            reason: format!("High-impact git operation (`git {}`)", sub.unwrap_or_default()),
+                            reason: format!(
+                                "High-impact git operation (`git {}`)",
+                                sub.unwrap_or_default()
+                            ),
                         };
                     }
                 }
@@ -303,7 +340,11 @@ fn inspect_command_security_depth(cmd: &str, depth: usize) -> CommandSecurityVer
     }
 }
 
-fn check_network_upload_exfiltration(bin: &str, args: &[String], full_stmt: &str) -> Option<CommandSecurityVerdict> {
+fn check_network_upload_exfiltration(
+    bin: &str,
+    args: &[String],
+    full_stmt: &str,
+) -> Option<CommandSecurityVerdict> {
     if matches!(bin, "scp" | "nc" | "ncat") {
         return Some(CommandSecurityVerdict::RequireApproval {
             reason: format!("Outbound transfer tool `{bin}` requires explicit human approval"),
@@ -320,23 +361,38 @@ fn check_network_upload_exfiltration(bin: &str, args: &[String], full_stmt: &str
         let is_curl_upload = bin == "curl"
             && (matches!(
                 arg.as_str(),
-                "-d" | "-F" | "-T" | "--data" | "--data-raw" | "--data-binary" | "--data-urlencode"
-                    | "--form" | "--form-string" | "--json" | "--upload-file"
-            ) || (arg.starts_with('-') && !arg.starts_with("--") && arg.chars().skip(1).any(|c| matches!(c, 'd' | 'F' | 'T')))
+                "-d" | "-F"
+                    | "-T"
+                    | "--data"
+                    | "--data-raw"
+                    | "--data-binary"
+                    | "--data-urlencode"
+                    | "--form"
+                    | "--form-string"
+                    | "--json"
+                    | "--upload-file"
+            ) || (arg.starts_with('-')
+                && !arg.starts_with("--")
+                && arg.chars().skip(1).any(|c| matches!(c, 'd' | 'F' | 'T')))
                 || arg.starts_with("--data")
                 || arg.starts_with("--form")
                 || arg.starts_with("--json=")
                 || arg.starts_with("--upload-file="));
 
         let is_wget_upload = bin == "wget"
-            && (matches!(arg.as_str(), "--post-data" | "--post-file" | "--body-data" | "--body-file")
-                || arg.starts_with("--post-data=")
+            && (matches!(
+                arg.as_str(),
+                "--post-data" | "--post-file" | "--body-data" | "--body-file"
+            ) || arg.starts_with("--post-data=")
                 || arg.starts_with("--post-file=")
                 || arg.starts_with("--body-data=")
                 || arg.starts_with("--body-file="));
 
         let is_header_file = (arg == "-H" || arg == "--header")
-            && args.get(i + 1).map(|v| v.contains('@') || v.contains('$')).unwrap_or(false);
+            && args
+                .get(i + 1)
+                .map(|v| v.contains('@') || v.contains('$'))
+                .unwrap_or(false);
 
         if is_curl_upload || is_wget_upload || is_header_file {
             upload_flag = Some(arg.clone());
@@ -352,17 +408,25 @@ fn check_network_upload_exfiltration(bin: &str, args: &[String], full_stmt: &str
                 val.push_str(next_val);
                 i += 1;
             }
-            let stripped_path = val.trim_start_matches('@').trim_start_matches('<').split(';').next().unwrap_or("");
+            let stripped_path = val
+                .trim_start_matches('@')
+                .trim_start_matches('<')
+                .split(';')
+                .next()
+                .unwrap_or("");
             let clean_path = if let Some((_, rhs)) = stripped_path.split_once('=') {
                 rhs.trim_start_matches('@')
             } else {
                 stripped_path
             };
-            if let Some(label) =
-                DeterministicSecretRedactor::classify_sensitive_path(clean_path, CredentialDenyScope::ModelContext)
-            {
+            if let Some(label) = DeterministicSecretRedactor::classify_sensitive_path(
+                clean_path,
+                CredentialDenyScope::ModelContext,
+            ) {
                 return Some(CommandSecurityVerdict::Deny {
-                    reason: format!("Blocked `{bin}` upload targeting protected credential store: {label}"),
+                    reason: format!(
+                        "Blocked `{bin}` upload targeting protected credential store: {label}"
+                    ),
                 });
             }
             upload_value = val;
@@ -382,11 +446,14 @@ fn check_network_upload_exfiltration(bin: &str, args: &[String], full_stmt: &str
         } else {
             stripped_path
         };
-        if let Some(label) =
-            DeterministicSecretRedactor::classify_sensitive_path(clean_path, CredentialDenyScope::ModelContext)
-        {
+        if let Some(label) = DeterministicSecretRedactor::classify_sensitive_path(
+            clean_path,
+            CredentialDenyScope::ModelContext,
+        ) {
             return Some(CommandSecurityVerdict::Deny {
-                reason: format!("Blocked `{bin}` upload targeting protected credential store: {label}"),
+                reason: format!(
+                    "Blocked `{bin}` upload targeting protected credential store: {label}"
+                ),
             });
         }
     }
@@ -396,7 +463,13 @@ fn check_network_upload_exfiltration(bin: &str, args: &[String], full_stmt: &str
             || full_stmt.contains("env ")
             || full_stmt.split_whitespace().any(|tok| {
                 let t = tok.trim_matches(|c| matches!(c, '"' | '\'' | ';' | '|' | '&' | '<' | '>'));
-                t == ".env" || t.ends_with("/.env") || DeterministicSecretRedactor::classify_sensitive_path(t, CredentialDenyScope::ModelContext).is_some()
+                t == ".env"
+                    || t.ends_with("/.env")
+                    || DeterministicSecretRedactor::classify_sensitive_path(
+                        t,
+                        CredentialDenyScope::ModelContext,
+                    )
+                    .is_some()
             }))
     {
         return Some(CommandSecurityVerdict::Deny {
@@ -417,9 +490,15 @@ fn has_unquoted_bg_ampersand(s: &str) -> bool {
     while i < b.len() {
         let c = b[i];
         if quote == b'\'' {
-            if c == b'\'' { quote = 0; }
+            if c == b'\'' {
+                quote = 0;
+            }
         } else if quote == b'"' {
-            if c == b'\\' && i + 1 < b.len() { i += 1; } else if c == b'"' { quote = 0; }
+            if c == b'\\' && i + 1 < b.len() {
+                i += 1;
+            } else if c == b'"' {
+                quote = 0;
+            }
         } else if c == b'\'' || c == b'"' {
             quote = c;
         } else if c == b'\\' && i + 1 < b.len() {
@@ -443,10 +522,14 @@ fn has_leading_env_override(tokens: &[String]) -> bool {
         }
         let base = t.rsplit('/').next().unwrap_or(t).to_ascii_lowercase();
         if base == "env" {
-            return tokens.iter().any(|a| a.contains('=') && !a.starts_with('-'));
+            return tokens
+                .iter()
+                .any(|a| a.contains('=') && !a.starts_with('-'));
         }
-        if !matches!(base.as_str(), "sudo" | "doas" | "nohup" | "time" | "exec" | "builtin" | "nice" | "command")
-            && !t.starts_with('-')
+        if !matches!(
+            base.as_str(),
+            "sudo" | "doas" | "nohup" | "time" | "exec" | "builtin" | "nice" | "command"
+        ) && !t.starts_with('-')
         {
             break;
         }
@@ -468,13 +551,20 @@ fn is_stage_pure_readonly(bin: &str, args: &[String], raw_stage: &str) -> bool {
     if PURE_READONLY_COMMANDS.contains(&bin) {
         return true;
     }
-    if matches!(bin, "grep" | "head" | "tail" | "cat" | "uniq" | "cut" | "tr") {
+    if matches!(
+        bin,
+        "grep" | "head" | "tail" | "cat" | "uniq" | "cut" | "tr"
+    ) {
         return true;
     }
     if bin == "sort" {
         return !args.iter().any(|a| {
-            a == "-o" || a == "--output" || a.starts_with("--output=")
-                || (a.starts_with('-') && !a.starts_with("--") && a.chars().skip(1).any(|c| c == 'o'))
+            a == "-o"
+                || a == "--output"
+                || a.starts_with("--output=")
+                || (a.starts_with('-')
+                    && !a.starts_with("--")
+                    && a.chars().skip(1).any(|c| c == 'o'))
         });
     }
     if matches!(bin, "rg" | "ripgrep") {
@@ -484,7 +574,15 @@ fn is_stage_pure_readonly(bin: &str, args: &[String], raw_stage: &str) -> bool {
         return !args.iter().any(|a| {
             matches!(
                 a.as_str(),
-                "-delete" | "-exec" | "-execdir" | "-ok" | "-okdir" | "-fprint" | "-fprintf" | "-fls" | "-fprint0"
+                "-delete"
+                    | "-exec"
+                    | "-execdir"
+                    | "-ok"
+                    | "-okdir"
+                    | "-fprint"
+                    | "-fprintf"
+                    | "-fls"
+                    | "-fprint0"
             )
         });
     }
@@ -492,7 +590,13 @@ fn is_stage_pure_readonly(bin: &str, args: &[String], raw_stage: &str) -> bool {
         let mut i = 0usize;
         while i < args.len() {
             let a = args[i].as_str();
-            if a == "-c" || a.starts_with("-c") || a == "--config-env" || a.starts_with("--config-env=") || a == "--exec-path" || a.starts_with("--exec-path=") {
+            if a == "-c"
+                || a.starts_with("-c")
+                || a == "--config-env"
+                || a.starts_with("--config-env=")
+                || a == "--exec-path"
+                || a.starts_with("--exec-path=")
+            {
                 return false;
             }
             if matches!(a, "-C" | "--git-dir" | "--work-tree" | "--namespace") {
@@ -509,7 +613,18 @@ fn is_stage_pure_readonly(bin: &str, args: &[String], raw_stage: &str) -> bool {
             Some("branch") => !args.iter().any(|a| {
                 matches!(
                     a.as_str(),
-                    "-d" | "-D" | "-m" | "-M" | "--delete" | "--move" | "-c" | "-C" | "--copy" | "-f" | "--force" | "--set-upstream-to" | "--unset-upstream"
+                    "-d" | "-D"
+                        | "-m"
+                        | "-M"
+                        | "--delete"
+                        | "--move"
+                        | "-c"
+                        | "-C"
+                        | "--copy"
+                        | "-f"
+                        | "--force"
+                        | "--set-upstream-to"
+                        | "--unset-upstream"
                 )
             }),
             _ => false,
@@ -522,7 +637,10 @@ fn first_git_subcommand(args: &[String]) -> Option<String> {
     let mut i = 0usize;
     while i < args.len() {
         let a = &args[i];
-        if matches!(a.as_str(), "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace") {
+        if matches!(
+            a.as_str(),
+            "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace"
+        ) {
             i += 2;
         } else if a.starts_with('-') {
             i += 1;
@@ -539,8 +657,15 @@ fn strip_command_wrappers(tokens: &[String]) -> (Option<String>, &[String]) {
         i += 1;
     }
     while i < tokens.len() {
-        let base = tokens[i].rsplit('/').next().unwrap_or(&tokens[i]).to_ascii_lowercase();
-        if matches!(base.as_str(), "sudo" | "doas" | "nohup" | "time" | "exec" | "builtin" | "nice") {
+        let base = tokens[i]
+            .rsplit('/')
+            .next()
+            .unwrap_or(&tokens[i])
+            .to_ascii_lowercase();
+        if matches!(
+            base.as_str(),
+            "sudo" | "doas" | "nohup" | "time" | "exec" | "builtin" | "nice"
+        ) {
             i += 1;
             while i < tokens.len() && tokens[i].starts_with('-') {
                 if matches!(tokens[i].as_str(), "-u" | "-g" | "-C" | "-p" | "-n") {

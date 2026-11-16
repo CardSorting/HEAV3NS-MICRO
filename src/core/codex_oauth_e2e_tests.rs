@@ -86,7 +86,9 @@ async fn test_http_provider_codex_oauth_401_refresh_and_sse_response() {
                 );
                 let _ = stream.write_all(resp.as_bytes()).await;
             } else {
-                assert!(req.to_ascii_lowercase().contains("chatgpt-account-id: acct_live"));
+                assert!(req
+                    .to_ascii_lowercase()
+                    .contains("chatgpt-account-id: acct_live"));
                 let sse = "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"OAuth E2E OK\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":4}}}\n\n";
                 let resp = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{sse}",
@@ -98,8 +100,14 @@ async fn test_http_provider_codex_oauth_401_refresh_and_sse_response() {
     });
 
     std::env::set_var("HEAV3NS_ACCOUNTS_PATH", &acct_path);
-    std::env::set_var("HEAV3NS_OPENAI_TOKEN_URL", format!("http://127.0.0.1:{port}/oauth/token"));
-    std::env::set_var("HEAV3NS_CODEX_BASE_URL", format!("http://127.0.0.1:{port}/backend-api/codex"));
+    std::env::set_var(
+        "HEAV3NS_OPENAI_TOKEN_URL",
+        format!("http://127.0.0.1:{port}/oauth/token"),
+    );
+    std::env::set_var(
+        "HEAV3NS_CODEX_BASE_URL",
+        format!("http://127.0.0.1:{port}/backend-api/codex"),
+    );
 
     let provider = HttpProvider::new("openai-codex", "https://api.openai.com/v1", None, 5_000);
     let req = ProviderRequest {

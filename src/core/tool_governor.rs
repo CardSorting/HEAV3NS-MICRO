@@ -57,7 +57,13 @@ impl FileReadTracker {
     ) -> Result<(), String> {
         let is_file_edit = matches!(
             canonical_tool,
-            "write_file" | "replace_file_content" | "multi_replace_file_content" | "edit_file_anchored" | "move_file" | "apply_unified_diff" | "delete_file"
+            "write_file"
+                | "replace_file_content"
+                | "multi_replace_file_content"
+                | "edit_file_anchored"
+                | "move_file"
+                | "apply_unified_diff"
+                | "delete_file"
         );
         if !is_file_edit {
             return Ok(());
@@ -83,7 +89,10 @@ impl FileReadTracker {
             return Ok(());
         }
         if !disk_bytes.is_empty()
-            && matches!(posture, ExecutionPosture::Ask | ExecutionPosture::AcceptEdits)
+            && matches!(
+                posture,
+                ExecutionPosture::Ask | ExecutionPosture::AcceptEdits
+            )
         {
             return Err(format!(
                 "Read-before-write guard: existing file '{}' ({} bytes) has not been read in this session. Call view_file first before modifying it.",
@@ -100,8 +109,12 @@ impl FileReadTracker {
 
     pub fn is_disk_fresh(&self, path: &Path) -> bool {
         let key = normalize_tracker_key(path);
-        let Some(stamp) = self.stamps.get(&key) else { return false };
-        let Ok(disk_bytes) = fs::read(&key) else { return false };
+        let Some(stamp) = self.stamps.get(&key) else {
+            return false;
+        };
+        let Ok(disk_bytes) = fs::read(&key) else {
+            return false;
+        };
         fnv1a_32(&disk_bytes) == stamp.fnv1a_hash && disk_bytes.len() as u64 == stamp.byte_len
     }
 }
@@ -255,7 +268,9 @@ impl ToolOutputGovernor {
         }
 
         let head_count = (self.max_lines / 2).max(20).min(lines.len());
-        let tail_count = (self.max_lines / 4).max(10).min(lines.len().saturating_sub(head_count));
+        let tail_count = (self.max_lines / 4)
+            .max(10)
+            .min(lines.len().saturating_sub(head_count));
         let notice = format!("... [output truncated; call retrieve_spill_content with spillId '{spill_id}' to inspect more] ...");
         let mut preview = Vec::with_capacity(head_count + tail_count + 1);
         preview.extend_from_slice(&lines[..head_count]);
@@ -267,7 +282,11 @@ impl ToolOutputGovernor {
         if joined.len() > self.max_chars {
             let keep = self.max_chars.saturating_sub(notice.len() + 1);
             let prefix = safe_utf8_prefix(&joined, keep);
-            joined = if prefix.is_empty() { safe_utf8_prefix(&notice, self.max_chars).to_string() } else { format!("{prefix}\n{notice}") };
+            joined = if prefix.is_empty() {
+                safe_utf8_prefix(&notice, self.max_chars).to_string()
+            } else {
+                format!("{prefix}\n{notice}")
+            };
         }
         GovernedOutput {
             output_text: joined,
@@ -276,7 +295,12 @@ impl ToolOutputGovernor {
         }
     }
 
-    pub fn retrieve_spill(&self, spill_id: &str, start_line: usize, end_line: Option<usize>) -> Option<Value> {
+    pub fn retrieve_spill(
+        &self,
+        spill_id: &str,
+        start_line: usize,
+        end_line: Option<usize>,
+    ) -> Option<Value> {
         let lines = self.spills.get(spill_id)?;
         let total = lines.len();
         let start = start_line.max(1);
@@ -338,7 +362,11 @@ impl ToolLoopBreaker {
             self.recent_fingerprints.pop_front();
         }
         self.recent_fingerprints.push_back(fp.clone());
-        let identical = self.recent_fingerprints.iter().filter(|&x| x == &fp).count();
+        let identical = self
+            .recent_fingerprints
+            .iter()
+            .filter(|&x| x == &fp)
+            .count();
         let consecutive_tail = self
             .recent_fingerprints
             .iter()

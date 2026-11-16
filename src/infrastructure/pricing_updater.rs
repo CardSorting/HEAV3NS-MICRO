@@ -31,7 +31,8 @@ impl ModelPricingRegistry {
             .map(|secs| secs.saturating_mul(1_000))
             .unwrap_or(DEFAULT_CATALOG_TTL_MS);
 
-        let initial = load_cached_catalog(&cache_path).unwrap_or_else(ModelPricingCatalog::embedded_baseline);
+        let initial =
+            load_cached_catalog(&cache_path).unwrap_or_else(ModelPricingCatalog::embedded_baseline);
         Self {
             catalog: RwLock::new(initial),
             cache_path,
@@ -104,7 +105,10 @@ impl ModelPricingRegistry {
             .map_err(|e| format!("Failed fetching model catalog from {url}: {e}"))?;
 
         if !resp.status().is_success() {
-            return Err(format!("Model catalog endpoint {url} returned HTTP {}", resp.status().as_u16()));
+            return Err(format!(
+                "Model catalog endpoint {url} returned HTTP {}",
+                resp.status().as_u16()
+            ));
         }
 
         const MAX_CATALOG_BYTES: usize = 4 * 1024 * 1024;
@@ -168,7 +172,9 @@ fn load_cached_catalog(path: &Path) -> Option<ModelPricingCatalog> {
     const MAX_CACHED_CATALOG_BYTES: usize = 4 * 1024 * 1024;
     let file = fs::File::open(path).ok()?;
     let mut raw = String::new();
-    file.take(MAX_CACHED_CATALOG_BYTES as u64 + 1).read_to_string(&mut raw).ok()?;
+    file.take(MAX_CACHED_CATALOG_BYTES as u64 + 1)
+        .read_to_string(&mut raw)
+        .ok()?;
     if raw.len() > MAX_CACHED_CATALOG_BYTES {
         return None;
     }
@@ -201,7 +207,12 @@ fn persist_catalog_atomic(path: &Path, catalog: &ModelPricingCatalog) -> Result<
     let serialized = serde_json::to_string(catalog).map_err(|e| format!("Serialize error: {e}"))?;
     static PRICING_TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let seq = PRICING_TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let tmp_path = path.with_extension(format!("json.tmp.{}.{}.{}", std::process::id(), now_ms(), seq));
+    let tmp_path = path.with_extension(format!(
+        "json.tmp.{}.{}.{}",
+        std::process::id(),
+        now_ms(),
+        seq
+    ));
     fs::write(&tmp_path, serialized).map_err(|e| format!("Write temp catalog failed: {e}"))?;
     #[cfg(unix)]
     {

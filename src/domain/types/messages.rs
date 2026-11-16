@@ -45,7 +45,11 @@ pub struct ToolCall {
     #[serde(default = "default_tool_type")]
     pub r#type: String,
     pub function: ToolCallFunction,
-    #[serde(default, skip_serializing_if = "Option::is_none", rename = "thoughtSignature")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "thoughtSignature"
+    )]
     pub thought_signature: Option<String>,
 }
 
@@ -78,7 +82,11 @@ impl SessionMessage {
         }
     }
 
-    pub fn tool_result(call_id: impl Into<String>, name: impl Into<String>, content: impl Into<String>) -> Self {
+    pub fn tool_result(
+        call_id: impl Into<String>,
+        name: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
         Self {
             role: Role::Tool,
             content: content.into(),
@@ -100,7 +108,10 @@ pub fn estimate_messages_tokens(messages: &[SessionMessage]) -> usize {
                 .as_ref()
                 .map(|tcs| {
                     tcs.iter()
-                        .map(|tc| 8 + estimate_text_tokens(&tc.function.name) + estimate_text_tokens(&tc.function.arguments))
+                        .map(|tc| {
+                            8 + estimate_text_tokens(&tc.function.name)
+                                + estimate_text_tokens(&tc.function.arguments)
+                        })
                         .sum()
                 })
                 .unwrap_or(0);
@@ -119,7 +130,9 @@ pub fn extract_text_tool_calls(text: &str) -> Vec<ToolCall> {
     let mut idx = 0usize;
     while let Some(start) = rest.find("<tool_call>") {
         let after = &rest[start + 11..];
-        let Some(end) = after.find("</tool_call>") else { break };
+        let Some(end) = after.find("</tool_call>") else {
+            break;
+        };
         let body = after[..end].trim();
         rest = &after[end + 12..];
         if let Ok(val) = serde_json::from_str::<Value>(body) {

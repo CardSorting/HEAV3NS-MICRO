@@ -42,7 +42,14 @@ pub fn sha256_hex(input: &str) -> String {
 
 pub fn uuid_from_seed(seed: &str) -> String {
     let h = sha256_hex(seed);
-    format!("{}-{}-4{}-8{}-{}", &h[0..8], &h[8..12], &h[13..16], &h[17..20], &h[20..32])
+    format!(
+        "{}-{}-4{}-8{}-{}",
+        &h[0..8],
+        &h[8..12],
+        &h[13..16],
+        &h[17..20],
+        &h[20..32]
+    )
 }
 
 pub fn build_hello_response(ws_id: &str, sess_id: &str, workspace_root: &Path) -> Value {
@@ -174,7 +181,11 @@ pub fn build_spider_check_multi_response(workspace_root: &Path, requested: &[Str
 
     for (idx, safe_file) in clean_paths.iter().enumerate() {
         let content = validate_rpc_read_path(workspace_root, safe_file)
-            .filter(|p| fs::metadata(p).map(|m| m.len() <= 2 * 1024 * 1024).unwrap_or(false))
+            .filter(|p| {
+                fs::metadata(p)
+                    .map(|m| m.len() <= 2 * 1024 * 1024)
+                    .unwrap_or(false)
+            })
             .and_then(|p| fs::read_to_string(&p).ok())
             .unwrap_or_default();
         let hash_64 = sha256_hex(&content);
@@ -215,12 +226,27 @@ pub fn build_spider_check_multi_response(workspace_root: &Path, requested: &[Str
                 "column": 1
             }));
         }
-        rel_imports += content.lines().filter(|l| l.contains("use crate::") || l.contains("from './") || l.contains("from '../")).count();
-        ext_imports += content.lines().filter(|l| (l.trim_start().starts_with("use ") && !l.contains("use crate::")) || l.trim_start().starts_with("import ")).count();
+        rel_imports += content
+            .lines()
+            .filter(|l| {
+                l.contains("use crate::") || l.contains("from './") || l.contains("from '../")
+            })
+            .count();
+        ext_imports += content
+            .lines()
+            .filter(|l| {
+                (l.trim_start().starts_with("use ") && !l.contains("use crate::"))
+                    || l.trim_start().starts_with("import ")
+            })
+            .count();
     }
 
     let id_hash = sha256_hex(&seed_concat);
-    let outcome = if findings.is_empty() { "no-findings" } else { "findings" };
+    let outcome = if findings.is_empty() {
+        "no-findings"
+    } else {
+        "findings"
+    };
     json!({
         "version": 1,
         "id": format!("spider-{}", safe_utf8_prefix(&id_hash, 12)),
@@ -248,11 +274,21 @@ pub fn build_state_inspect_response(conversation: &str, session_runs: &[Value]) 
     for (idx, r) in session_runs.iter().rev().take(20).enumerate() {
         let raw_id = r.get("id").and_then(|v| v.as_str()).unwrap_or("run_0");
         let hex_id = sha256_hex(&format!("{raw_id}:{idx}"));
-        let raw_title = r.get("text").and_then(|v| v.as_str()).unwrap_or("Instruction");
+        let raw_title = r
+            .get("text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Instruction");
         let title: String = raw_title.chars().take(96).collect();
-        let state = r.get("state").and_then(|v| v.as_str()).unwrap_or("completed");
+        let state = r
+            .get("state")
+            .and_then(|v| v.as_str())
+            .unwrap_or("completed");
         let rev = r.get("revision").and_then(|v| v.as_i64()).unwrap_or(1);
-        let updated = r.get("finishedAt").or_else(|| r.get("createdAt")).and_then(|v| v.as_f64()).unwrap_or(now);
+        let updated = r
+            .get("finishedAt")
+            .or_else(|| r.get("createdAt"))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(now);
         runs_out.push(json!({
             "id": hex_id,
             "title": if title.is_empty() { "Instruction".to_string() } else { title },
@@ -285,7 +321,10 @@ pub fn build_context_inspect_response(conversation: &str, engine: &AgentEngine) 
     let (active_msgs, summaries) = {
         let sess = lock_unpoison(&engine.session());
         let msgs = sess.messages();
-        let sum_count = msgs.iter().filter(|m| SessionCompactor::is_checkpoint(m)).count();
+        let sum_count = msgs
+            .iter()
+            .filter(|m| SessionCompactor::is_checkpoint(m))
+            .count();
         (msgs.len(), sum_count)
     };
     let saved_memories = lock_unpoison(&engine.memory()).list_memories().len();
@@ -297,7 +336,12 @@ pub fn build_context_inspect_response(conversation: &str, engine: &AgentEngine) 
     let (billing_display, billing_kind) = if let Some(ref r) = last_receipt {
         (r.billing_display.clone(), r.billing_kind.clone())
     } else {
-        let b = BillingMetering::evaluate(&cfg.provider, &cfg.model_name, &cfg.api_endpoint, &Default::default());
+        let b = BillingMetering::evaluate(
+            &cfg.provider,
+            &cfg.model_name,
+            &cfg.api_endpoint,
+            &Default::default(),
+        );
         (b.format_honest(), b.kind_slug().to_string())
     };
     json!({
@@ -340,7 +384,11 @@ pub fn build_prompt_inspect_response(mode: &str, engine: &AgentEngine) -> Value 
     })
 }
 
-pub fn build_context_history_response(conversation: &str, offset: usize, engine: &AgentEngine) -> Value {
+pub fn build_context_history_response(
+    conversation: &str,
+    offset: usize,
+    engine: &AgentEngine,
+) -> Value {
     let now = now_ms() as f64;
     let full_text = {
         let sess = lock_unpoison(&engine.session());
@@ -375,7 +423,10 @@ pub fn build_context_history_response(conversation: &str, offset: usize, engine:
 
 fn format_memory_entry(entry: &MemoryEntry) -> Value {
     let id = sha256_hex(&entry.key);
-    let rev = sha256_hex(&format!("{}:{}:{}:{}", entry.key, entry.value, entry.category, entry.timestamp));
+    let rev = sha256_hex(&format!(
+        "{}:{}:{}:{}",
+        entry.key, entry.value, entry.category, entry.timestamp
+    ));
     let preview: String = entry.value.chars().take(120).collect();
     let val: String = entry.value.chars().take(8000).collect();
     let key: String = entry.key.chars().take(160).collect();
@@ -391,8 +442,17 @@ fn format_memory_entry(entry: &MemoryEntry) -> Value {
     })
 }
 
-pub fn handle_memory_rpc(method: &str, params: &Value, default_conv: &str, engine: &AgentEngine) -> Value {
-    let conv = params.get("conversation").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or(default_conv);
+pub fn handle_memory_rpc(
+    method: &str,
+    params: &Value,
+    default_conv: &str,
+    engine: &AgentEngine,
+) -> Value {
+    let conv = params
+        .get("conversation")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(default_conv);
     let mut mem = lock_unpoison(&engine.memory());
     match method {
         "memory.list" => {
@@ -400,7 +460,12 @@ pub fn handle_memory_rpc(method: &str, params: &Value, default_conv: &str, engin
             let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let matched = mem.search_memories(query);
             let total = matched.len();
-            let entries: Vec<Value> = matched.iter().skip(offset).take(50).map(format_memory_entry).collect();
+            let entries: Vec<Value> = matched
+                .iter()
+                .skip(offset)
+                .take(50)
+                .map(format_memory_entry)
+                .collect();
             let more = offset + entries.len() < total;
             json!({
                 "conversation": conv,
@@ -413,7 +478,10 @@ pub fn handle_memory_rpc(method: &str, params: &Value, default_conv: &str, engin
         }
         "memory.read" => {
             let target_id = params.get("id").and_then(|v| v.as_str()).unwrap_or("");
-            let found = mem.list_memories().into_iter().find(|e| sha256_hex(&e.key) == target_id || e.key == target_id);
+            let found = mem
+                .list_memories()
+                .into_iter()
+                .find(|e| sha256_hex(&e.key) == target_id || e.key == target_id);
             if let Some(entry) = found {
                 json!({ "found": true, "conversation": conv, "entry": format_memory_entry(&entry) })
             } else {
@@ -421,19 +489,37 @@ pub fn handle_memory_rpc(method: &str, params: &Value, default_conv: &str, engin
             }
         }
         "memory.write" => {
-            let key = params.get("key").and_then(|v| v.as_str()).unwrap_or("fact").trim().to_string();
-            let value = params.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let threats = crate::plumbing::secret_redactor::SafetyPolicy::scan_for_threats(&value, "all");
+            let key = params
+                .get("key")
+                .and_then(|v| v.as_str())
+                .unwrap_or("fact")
+                .trim()
+                .to_string();
+            let value = params
+                .get("value")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let threats =
+                crate::plumbing::secret_redactor::SafetyPolicy::scan_for_threats(&value, "all");
             if !threats.is_empty() {
                 return json!({ "saved": false, "conversation": conv, "error": format!("Blocked memory write containing security threats: {:?}", threats) });
             }
-            let category = params.get("category").and_then(|v| v.as_str()).unwrap_or("fact").to_string();
+            let category = params
+                .get("category")
+                .and_then(|v| v.as_str())
+                .unwrap_or("fact")
+                .to_string();
             let entry = mem.save_memory(key, value, category);
             json!({ "saved": true, "conversation": conv, "entry": format_memory_entry(&entry) })
         }
         "memory.remove" => {
             let target_id = params.get("id").and_then(|v| v.as_str()).unwrap_or("");
-            if let Some(existing) = mem.list_memories().into_iter().find(|e| sha256_hex(&e.key) == target_id || e.key == target_id) {
+            if let Some(existing) = mem
+                .list_memories()
+                .into_iter()
+                .find(|e| sha256_hex(&e.key) == target_id || e.key == target_id)
+            {
                 mem.remove_memory(&existing.key);
             }
             json!({ "saved": true, "conversation": conv })
@@ -463,8 +549,17 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
         }
         "files.list" => {
             let rel = params.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            let clean_rel = if rel == "." { "" } else { rel.trim_matches('/') };
-            let query = params.get("query").and_then(|v| v.as_str()).unwrap_or("").trim().to_lowercase();
+            let clean_rel = if rel == "." {
+                ""
+            } else {
+                rel.trim_matches('/')
+            };
+            let query = params
+                .get("query")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_lowercase();
             let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let candidate_dir = if clean_rel.is_empty() || clean_rel.contains("..") {
                 root.to_path_buf()
@@ -472,7 +567,11 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
                 root.join(clean_rel)
             };
             let target_dir = match (root.canonicalize(), candidate_dir.canonicalize()) {
-                (Ok(cr), Ok(ct)) if ct.starts_with(&cr) && SafetyPolicy::check_path(&ct).is_ok() => ct,
+                (Ok(cr), Ok(ct))
+                    if ct.starts_with(&cr) && SafetyPolicy::check_path(&ct).is_ok() =>
+                {
+                    ct
+                }
                 _ => return json!({ "entries": [], "total": 0, "offset": offset, "more": false }),
             };
             let mut all_entries = Vec::new();
@@ -481,11 +580,16 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
                 raw.sort_by(|a, b| {
                     let a_dir = a.file_type().map(|t| t.is_dir()).unwrap_or(false);
                     let b_dir = b.file_type().map(|t| t.is_dir()).unwrap_or(false);
-                    b_dir.cmp(&a_dir).then_with(|| a.file_name().cmp(&b.file_name()))
+                    b_dir
+                        .cmp(&a_dir)
+                        .then_with(|| a.file_name().cmp(&b.file_name()))
                 });
                 for entry in raw {
                     let name = entry.file_name().to_string_lossy().to_string();
-                    if matches!(name.as_str(), ".git" | "target" | ".build" | "node_modules" | ".DS_Store") {
+                    if matches!(
+                        name.as_str(),
+                        ".git" | "target" | ".build" | "node_modules" | ".DS_Store"
+                    ) {
                         continue;
                     }
                     let ft = entry.file_type();
@@ -499,7 +603,10 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
                     } else {
                         format!("{clean_rel}/{name}")
                     };
-                    if !query.is_empty() && !name.to_lowercase().contains(&query) && !path_str.to_lowercase().contains(&query) {
+                    if !query.is_empty()
+                        && !name.to_lowercase().contains(&query)
+                        && !path_str.to_lowercase().contains(&query)
+                    {
                         continue;
                     }
                     all_entries.push(json!({
@@ -513,7 +620,11 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
             }
             let matched = all_entries.len();
             let page_size = 100usize;
-            let entries: Vec<Value> = all_entries.into_iter().skip(offset).take(page_size).collect();
+            let entries: Vec<Value> = all_entries
+                .into_iter()
+                .skip(offset)
+                .take(page_size)
+                .collect();
             let next_offset = offset + entries.len();
             json!({
                 "entries": entries,
@@ -524,10 +635,19 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
             })
         }
         "files.search" => {
-            let query = params.get("query").and_then(|v| v.as_str()).unwrap_or("").trim().to_lowercase();
+            let query = params
+                .get("query")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_lowercase();
             let mut matched = Vec::new();
             collect_search_files(root, root, &query, &mut matched, 0);
-            matched.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.len().cmp(&b.1.len())).then_with(|| a.1.cmp(&b.1)));
+            matched.sort_by(|a, b| {
+                b.0.cmp(&a.0)
+                    .then_with(|| a.1.len().cmp(&b.1.len()))
+                    .then_with(|| a.1.cmp(&b.1))
+            });
             let total_matched = matched.len();
             let entries: Vec<Value> = matched.into_iter().take(60).map(|(_, _p, v)| v).collect();
             json!({
@@ -539,13 +659,24 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
             })
         }
         "files.read" => {
-            let path = params.get("path").or_else(|| params.get("id")).and_then(|v| v.as_str()).unwrap_or("README.md");
+            let path = params
+                .get("path")
+                .or_else(|| params.get("id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("README.md");
             let Some(full_path) = validate_rpc_read_path(root, path) else {
                 return json!({ "text": "", "revision": "rev-blocked", "offset": 0, "nextOffset": 0, "size": 0, "more": false });
             };
             let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let limit = (params.get("limit").and_then(|v| v.as_u64()).unwrap_or(65536) as usize).clamp(1, 512 * 1024);
-            let text_content = if fs::metadata(&full_path).map(|m| m.len() <= 16 * 1024 * 1024).unwrap_or(false) {
+            let limit = (params
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(65536) as usize)
+                .clamp(1, 512 * 1024);
+            let text_content = if fs::metadata(&full_path)
+                .map(|m| m.len() <= 16 * 1024 * 1024)
+                .unwrap_or(false)
+            {
                 fs::read_to_string(&full_path).unwrap_or_default()
             } else {
                 String::new()
@@ -558,8 +689,15 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
                 return json!({ "data": "", "revision": "bin-blocked", "offset": 0, "nextOffset": 0, "size": 0, "more": false });
             };
             let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let limit = (params.get("limit").and_then(|v| v.as_u64()).unwrap_or(65536) as usize).clamp(1, 512 * 1024);
-            let bytes = if fs::metadata(&full_path).map(|m| m.len() <= 16 * 1024 * 1024).unwrap_or(false) {
+            let limit = (params
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(65536) as usize)
+                .clamp(1, 512 * 1024);
+            let bytes = if fs::metadata(&full_path)
+                .map(|m| m.len() <= 16 * 1024 * 1024)
+                .unwrap_or(false)
+            {
                 fs::read(&full_path).unwrap_or_default()
             } else {
                 Vec::new()
@@ -583,7 +721,10 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
             let mut entries: Vec<Value> = staged
                 .into_iter()
                 .map(|f| {
-                    let name = Path::new(&f.path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| f.path.clone());
+                    let name = Path::new(&f.path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| f.path.clone());
                     json!({
                         "path": f.path, "name": name,
                         "status": if f.is_deleted { "deleted" } else { "modified" },
@@ -594,7 +735,10 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
             if entries.is_empty() {
                 if let Some(last) = engine.latest_receipt() {
                     for fc in last.file_changes {
-                        let name = Path::new(&fc.path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| fc.path.clone());
+                        let name = Path::new(&fc.path)
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| fc.path.clone());
                         entries.push(json!({
                             "path": fc.path, "name": name, "status": fc.kind,
                             "staged": false, "unstaged": true, "untracked": fc.kind == "created" || fc.kind == "added",
@@ -608,15 +752,24 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
         "changes.read" => {
             let path = params.get("path").and_then(|v| v.as_str()).unwrap_or("");
             let want_staged = params.get("staged").and_then(|v| v.as_bool());
-            let staged = if want_staged != Some(false) { lock_unpoison(&engine.vfs()).export_staged() } else { Vec::new() };
+            let staged = if want_staged != Some(false) {
+                lock_unpoison(&engine.vfs()).export_staged()
+            } else {
+                Vec::new()
+            };
             let diff = if let Some(f) = staged.into_iter().find(|f| f.path == path) {
                 let old = validate_rpc_read_path(root, path)
-                    .filter(|p| fs::metadata(p).map(|m| m.len() <= 2 * 1024 * 1024).unwrap_or(false))
+                    .filter(|p| {
+                        fs::metadata(p)
+                            .map(|m| m.len() <= 2 * 1024 * 1024)
+                            .unwrap_or(false)
+                    })
                     .and_then(|p| fs::read_to_string(p).ok())
                     .unwrap_or_default();
                 render_unified_diff(path, &old, if f.is_deleted { "" } else { &f.content })
             } else if want_staged != Some(true) {
-                engine.latest_receipt()
+                engine
+                    .latest_receipt()
                     .and_then(|last| last.snapshot_before.zip(last.snapshot_after))
                     .and_then(|(b, a)| engine.cas_diff_between(&b, Some(a.as_str())).ok())
                     .map(|(_, full_diff)| filter_unified_diff_for_path(&full_diff, path))
@@ -625,7 +778,11 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
                 String::new()
             };
             let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let limit = (params.get("limit").and_then(|v| v.as_u64()).unwrap_or(65536) as usize).clamp(1, 512 * 1024);
+            let limit = (params
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(65536) as usize)
+                .clamp(1, 512 * 1024);
             crate::ui::worker_handlers::paginate_text_response(&diff, "diff", offset, limit)
         }
         _ => json!({ "entries": [] }),
@@ -654,7 +811,13 @@ fn filter_unified_diff_for_path(full_diff: &str, target_path: &str) -> String {
     }
 }
 
-fn collect_search_files(root: &Path, dir: &Path, query: &str, out: &mut Vec<(i32, String, Value)>, depth: usize) {
+fn collect_search_files(
+    root: &Path,
+    dir: &Path,
+    query: &str,
+    out: &mut Vec<(i32, String, Value)>,
+    depth: usize,
+) {
     if depth > 6 || out.len() >= 1000 {
         return;
     }
@@ -667,11 +830,16 @@ fn collect_search_files(root: &Path, dir: &Path, query: &str, out: &mut Vec<(i32
             break;
         }
         let name = entry.file_name().to_string_lossy().to_string();
-        if matches!(name.as_str(), ".git" | "target" | ".build" | "node_modules" | ".DS_Store") {
+        if matches!(
+            name.as_str(),
+            ".git" | "target" | ".build" | "node_modules" | ".DS_Store"
+        ) {
             continue;
         }
         let path = entry.path();
-        if entry.file_type().map(|t| t.is_symlink()).unwrap_or(true) || SafetyPolicy::check_path(&path).is_err() {
+        if entry.file_type().map(|t| t.is_symlink()).unwrap_or(true)
+            || SafetyPolicy::check_path(&path).is_err()
+        {
             continue;
         }
         let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
@@ -696,7 +864,11 @@ fn collect_search_files(root: &Path, dir: &Path, query: &str, out: &mut Vec<(i32
                 } else {
                     50
                 };
-                out.push((score, rel_str.clone(), json!({ "path": rel_str, "name": name, "type": "file" })));
+                out.push((
+                    score,
+                    rel_str.clone(),
+                    json!({ "path": rel_str, "name": name, "type": "file" }),
+                ));
             }
         }
     }
@@ -715,8 +887,14 @@ mod tests {
 
     struct DummyUiProvider;
     impl ILlmProvider for DummyUiProvider {
-        fn provider_name(&self) -> &str { "dummy" }
-        fn complete<'a>(&'a self, _req: ProviderRequest, _cancel: Option<CancellationToken>) -> BoxFuture<'a, Result<ProviderResponse, ProviderError>> {
+        fn provider_name(&self) -> &str {
+            "dummy"
+        }
+        fn complete<'a>(
+            &'a self,
+            _req: ProviderRequest,
+            _cancel: Option<CancellationToken>,
+        ) -> BoxFuture<'a, Result<ProviderResponse, ProviderError>> {
             Box::pin(async { Err(ProviderError::Cancelled) })
         }
     }
@@ -728,23 +906,44 @@ mod tests {
         assert_eq!(catalog["model"], "gemini-2.5-pro");
         assert_eq!(catalog["reasoningEffort"], "high");
         let providers = catalog["providers"].as_array().unwrap();
-        assert!(providers.len() >= 19, "Expected >= 19 curated AppKit providers");
+        assert!(
+            providers.len() >= 19,
+            "Expected >= 19 curated AppKit providers"
+        );
         let mut ids = BTreeSet::new();
         for p in providers {
             let id = p["id"].as_str().unwrap();
             assert!(ids.insert(id), "Duplicate provider id in models.list: {id}");
             assert!(!p["models"].as_array().unwrap().is_empty());
         }
-        for expected in ["openai-codex", "anthropic", "gemini", "deepseek", "xai", "groq", "mistral", "qwen", "ollama", "apple-playground"] {
+        for expected in [
+            "openai-codex",
+            "anthropic",
+            "gemini",
+            "deepseek",
+            "xai",
+            "groq",
+            "mistral",
+            "qwen",
+            "ollama",
+            "apple-playground",
+        ] {
             assert!(ids.contains(expected), "Missing {expected} in models.list");
         }
 
         // Dynamic fallback inclusion for non-default canonical providers (e.g. cerebras)
         let dyn_cat = build_model_catalog("cerebras", "gpt-oss-120b", "medium", 4);
-        assert!(dyn_cat["providers"].as_array().unwrap().iter().any(|p| p["id"] == "cerebras"));
+        assert!(dyn_cat["providers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["id"] == "cerebras"));
 
         // Discovery deduplicates models cleanly
-        let disc = build_sovereign_model_discovery("ollama", &["llama3.2".into(), "llama3.2".into(), "phi4:latest".into()]);
+        let disc = build_sovereign_model_discovery(
+            "ollama",
+            &["llama3.2".into(), "llama3.2".into(), "phi4:latest".into()],
+        );
         assert_eq!(disc["state"], "ready");
         let disc_models = disc["models"].as_array().unwrap();
         let mut model_ids = BTreeSet::new();
@@ -761,23 +960,65 @@ mod tests {
 
         let ap = state.active_provider.clone();
         let am = state.active_model.clone();
-        let saved_nim = handle_provider_credential_rpc("nvidiaNim.saveKey", &json!({"apiKey": "nvapi-test-1234"}), &mut state.provider_keys, &ap, &am, &engine);
+        let saved_nim = handle_provider_credential_rpc(
+            "nvidiaNim.saveKey",
+            &json!({"apiKey": "nvapi-test-1234"}),
+            &mut state.provider_keys,
+            &ap,
+            &am,
+            &engine,
+        );
         assert_eq!(saved_nim["provider"], "nvidiaNim");
         assert_eq!(saved_nim["canonicalProvider"], "nvidia-nim");
         assert_eq!(saved_nim["saved"], true);
 
-        let cleared_nim = handle_provider_credential_rpc("nvidiaNim.saveKey", &json!({"apiKey": ""}), &mut state.provider_keys, &ap, &am, &engine);
+        let cleared_nim = handle_provider_credential_rpc(
+            "nvidiaNim.saveKey",
+            &json!({"apiKey": ""}),
+            &mut state.provider_keys,
+            &ap,
+            &am,
+            &engine,
+        );
         assert_eq!(cleared_nim["saved"], false);
 
-        let status_cline = handle_provider_credential_rpc("clinePass.status", &json!({}), &mut state.provider_keys, &ap, &am, &engine);
+        let status_cline = handle_provider_credential_rpc(
+            "clinePass.status",
+            &json!({}),
+            &mut state.provider_keys,
+            &ap,
+            &am,
+            &engine,
+        );
         assert_eq!(status_cline["provider"], "clinePass");
         assert_eq!(status_cline["canonicalProvider"], "cline-pass");
 
         // Saving and then clearing the ACTIVE provider's key must immediately purge `engine.config_snapshot().api_key`
-        let _ = handle_provider_credential_rpc("openai.saveKey", &json!({"apiKey": "sk-live-openai-temp"}), &mut state.provider_keys, &ap, &am, &engine);
-        assert_eq!(engine.config_snapshot().api_key.as_deref(), Some("sk-live-openai-temp"));
-        let _ = handle_provider_credential_rpc("openai.saveKey", &json!({"apiKey": ""}), &mut state.provider_keys, &ap, &am, &engine);
-        if std::env::var("OPENAI_API_KEY").ok().filter(|s| !s.trim().is_empty()).is_none() {
+        let _ = handle_provider_credential_rpc(
+            "openai.saveKey",
+            &json!({"apiKey": "sk-live-openai-temp"}),
+            &mut state.provider_keys,
+            &ap,
+            &am,
+            &engine,
+        );
+        assert_eq!(
+            engine.config_snapshot().api_key.as_deref(),
+            Some("sk-live-openai-temp")
+        );
+        let _ = handle_provider_credential_rpc(
+            "openai.saveKey",
+            &json!({"apiKey": ""}),
+            &mut state.provider_keys,
+            &ap,
+            &am,
+            &engine,
+        );
+        if std::env::var("OPENAI_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .is_none()
+        {
             assert!(engine.config_snapshot().api_key.is_none());
         }
     }

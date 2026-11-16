@@ -89,10 +89,23 @@ impl TransactionJournal {
         };
         let active_turn = self.current_turn_id().to_string();
         let new_bytes = previous_content.as_ref().map(|b| b.len()).unwrap_or(0);
-        let mut total_bytes: usize = self.transactions.iter().map(|t| t.previous_content.as_ref().map(|b| b.len()).unwrap_or(0)).sum();
-        while self.transactions.len() >= 512 || (!self.transactions.is_empty() && total_bytes.saturating_add(new_bytes) > 64 * 1024 * 1024) {
+        let mut total_bytes: usize = self
+            .transactions
+            .iter()
+            .map(|t| t.previous_content.as_ref().map(|b| b.len()).unwrap_or(0))
+            .sum();
+        while self.transactions.len() >= 512
+            || (!self.transactions.is_empty()
+                && total_bytes.saturating_add(new_bytes) > 64 * 1024 * 1024)
+        {
             let evicted = self.transactions.remove(0);
-            total_bytes = total_bytes.saturating_sub(evicted.previous_content.as_ref().map(|b| b.len()).unwrap_or(0));
+            total_bytes = total_bytes.saturating_sub(
+                evicted
+                    .previous_content
+                    .as_ref()
+                    .map(|b| b.len())
+                    .unwrap_or(0),
+            );
             for idx in self.checkpoints.values_mut() {
                 *idx = idx.saturating_sub(1);
             }
@@ -133,7 +146,9 @@ impl TransactionJournal {
     }
 
     pub fn rollback_turn(&mut self, turn_id: Option<&str>) -> RollbackResult {
-        let target_turn = turn_id.unwrap_or_else(|| self.current_turn_id()).to_string();
+        let target_turn = turn_id
+            .unwrap_or_else(|| self.current_turn_id())
+            .to_string();
         let mut to_revert = Vec::new();
         let mut remaining = Vec::new();
         let mut removed_before: Vec<usize> = Vec::new();
@@ -227,9 +242,15 @@ impl TransactionJournal {
                 .as_deref()
                 .map(|b| String::from_utf8_lossy(b).into_owned())
                 .unwrap_or_default();
-            let after_str = crate::infrastructure::search_tools::read_text_file_bounded(&p, 8 * 1024 * 1024).unwrap_or_default();
+            let after_str =
+                crate::infrastructure::search_tools::read_text_file_bounded(&p, 8 * 1024 * 1024)
+                    .unwrap_or_default();
             if before_str != after_str || !p.exists() {
-                let rel = p.strip_prefix(cwd).unwrap_or(&p).to_string_lossy().into_owned();
+                let rel = p
+                    .strip_prefix(cwd)
+                    .unwrap_or(&p)
+                    .to_string_lossy()
+                    .into_owned();
                 diffs.push(render_unified_diff(&rel, &before_str, &after_str));
                 files.push(rel);
             }
@@ -241,11 +262,18 @@ impl TransactionJournal {
         })
     }
 
-    fn apply_revert(tx: &MutationTransaction, restored: &mut Vec<String>, errors: &mut Vec<String>) {
+    fn apply_revert(
+        tx: &MutationTransaction,
+        restored: &mut Vec<String>,
+        errors: &mut Vec<String>,
+    ) {
         if tx.created_new_file {
             if let Err(e) = fs::remove_file(&tx.target_path) {
                 if tx.target_path.exists() {
-                    errors.push(format!("Failed to remove {}: {e}", tx.target_path.display()));
+                    errors.push(format!(
+                        "Failed to remove {}: {e}",
+                        tx.target_path.display()
+                    ));
                     return;
                 }
             }
@@ -253,10 +281,16 @@ impl TransactionJournal {
         } else if let Some(ref prev) = tx.previous_content {
             match crate::infrastructure::search_tools::atomic_write_file(&tx.target_path, prev) {
                 Ok(_) => restored.push(format!("[Restored] {}", tx.target_path.display())),
-                Err(e) => errors.push(format!("Failed to restore {}: {e}", tx.target_path.display())),
+                Err(e) => errors.push(format!(
+                    "Failed to restore {}: {e}",
+                    tx.target_path.display()
+                )),
             }
         } else {
-            errors.push(format!("Cannot restore {}: prior content was not recorded", tx.target_path.display()));
+            errors.push(format!(
+                "Cannot restore {}: prior content was not recorded",
+                tx.target_path.display()
+            ));
         }
     }
 }

@@ -1,12 +1,27 @@
 // [LAYER: INFRASTRUCTURE]
 use crate::domain::interfaces::{BoxFuture, IHttpProvider, ILlmProvider};
 use crate::domain::types::messages::{ToolCall, ToolCallFunction};
-use crate::domain::types::provider_registry::{canonicalize_provider_id, infer_wire_dialect_from_endpoint, lookup_provider_descriptor, opencode_go_model_id, resolve_model_aware_wire_and_model, retired_provider_remediation, WireDialect};
+use crate::domain::types::provider_registry::{
+    canonicalize_provider_id, infer_wire_dialect_from_endpoint, lookup_provider_descriptor,
+    opencode_go_model_id, resolve_model_aware_wire_and_model, retired_provider_remediation,
+    WireDialect,
+};
 use crate::domain::types::runtime::CancellationToken;
-use crate::domain::types::tick_result::{finalize_provider_response, is_retryable_http_status, ProviderError, ProviderRequest, ProviderResponse, ProviderTokenUsage};
-use crate::infrastructure::codex_oauth::{build_codex_oauth_post, resolve_codex_base_url, CodexAccountStore};
-use crate::infrastructure::sse_and_response_parsers::{classify_stream_or_response_error, parse_multidialect_sse_stream, parse_responses_json, IncrementalSseAggregator};
-use crate::infrastructure::wire_dialects::{build_anthropic_messages_payload, build_chat_completions_payload_with_endpoint, build_google_gemini_payload, build_openai_responses_payload};
+use crate::domain::types::tick_result::{
+    finalize_provider_response, is_retryable_http_status, ProviderError, ProviderRequest,
+    ProviderResponse, ProviderTokenUsage,
+};
+use crate::infrastructure::codex_oauth::{
+    build_codex_oauth_post, resolve_codex_base_url, CodexAccountStore,
+};
+use crate::infrastructure::sse_and_response_parsers::{
+    classify_stream_or_response_error, parse_multidialect_sse_stream, parse_responses_json,
+    IncrementalSseAggregator,
+};
+use crate::infrastructure::wire_dialects::{
+    build_anthropic_messages_payload, build_chat_completions_payload_with_endpoint,
+    build_google_gemini_payload, build_openai_responses_payload,
+};
 use serde_json::Value;
 use std::time::Duration;
 
@@ -14,9 +29,16 @@ use std::time::Duration;
 pub const MAX_HTTP_RESPONSE_BODY_BYTES: usize = 16 * 1024 * 1024;
 const MAX_DISCOVERY_BODY_BYTES: usize = 2 * 1024 * 1024;
 
-async fn read_bounded_response_text(mut resp: reqwest::Response, max_bytes: usize) -> Result<String, ProviderError> {
+async fn read_bounded_response_text(
+    mut resp: reqwest::Response,
+    max_bytes: usize,
+) -> Result<String, ProviderError> {
     let mut buf = Vec::new();
-    while let Some(chunk) = resp.chunk().await.map_err(|e| ProviderError::Transport(e.without_url().to_string()))? {
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| ProviderError::Transport(e.without_url().to_string()))?
+    {
         if buf.len().saturating_add(chunk.len()) > max_bytes {
             return Err(ProviderError::Transport(format!(
                 "HTTP response body exceeded {max_bytes}-byte safety cap"
@@ -63,7 +85,11 @@ pub async fn probe_local_ollama_model() -> Option<String> {
 }
 
 /// Bounded live `GET /models` discovery probe for OpenAI-compatible gateways (vLLM, LM Studio, Groq, Mistral, etc.).
-pub async fn probe_openai_compatible_models(endpoint: &str, api_key: Option<&str>, timeout_ms: u64) -> Vec<String> {
+pub async fn probe_openai_compatible_models(
+    endpoint: &str,
+    api_key: Option<&str>,
+    timeout_ms: u64,
+) -> Vec<String> {
     let Ok(client) = reqwest::Client::builder()
         .timeout(Duration::from_millis(timeout_ms.clamp(100, 5_000)))
         .build()
@@ -108,14 +134,20 @@ pub async fn probe_openai_compatible_models(endpoint: &str, api_key: Option<&str
 }
 
 /// Parses SSE streams across OpenAI Chat, OpenAI Responses, Anthropic Messages, and Gemini dialects.
-pub fn parse_sse_stream(raw_sse: &str, provider_label: &str) -> Result<ProviderResponse, ProviderError> {
+pub fn parse_sse_stream(
+    raw_sse: &str,
+    provider_label: &str,
+) -> Result<ProviderResponse, ProviderError> {
     parse_multidialect_sse_stream(raw_sse, provider_label, extract_openai_usage)
 }
 
 pub(crate) fn extract_openai_usage(body: &Value) -> Option<ProviderTokenUsage> {
     let u = body.get("usage")?;
     let prompt_tokens = u.get("prompt_tokens").and_then(Value::as_u64)? as usize;
-    let completion_tokens = u.get("completion_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
+    let completion_tokens = u
+        .get("completion_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
     let cached_prompt_tokens = u
         .get("prompt_tokens_details")
         .and_then(|d| d.get("cached_tokens"))
@@ -157,7 +189,8 @@ fn looks_like_sse(text: &str, content_type: Option<&str>) -> bool {
     let trimmed = text.trim_start();
     trimmed.starts_with("data:")
         || trimmed.starts_with("event:")
-        || (trimmed.starts_with(':') && (trimmed.contains("\ndata:") || trimmed.contains("\nevent:")))
+        || (trimmed.starts_with(':')
+            && (trimmed.contains("\ndata:") || trimmed.contains("\nevent:")))
 }
 
 fn is_non_loopback_cleartext_http(endpoint: &str) -> bool {
@@ -166,9 +199,16 @@ fn is_non_loopback_cleartext_http(endpoint: &str) -> bool {
         return false;
     };
     let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-    let host_port = authority.rsplit_once('@').map(|(_, hp)| hp).unwrap_or(authority);
+    let host_port = authority
+        .rsplit_once('@')
+        .map(|(_, hp)| hp)
+        .unwrap_or(authority);
     let host = if host_port.starts_with('[') {
-        host_port.split(']').next().unwrap_or("").trim_start_matches('[')
+        host_port
+            .split(']')
+            .next()
+            .unwrap_or("")
+            .trim_start_matches('[')
     } else {
         host_port.split(':').next().unwrap_or("")
     };
@@ -181,7 +221,11 @@ async fn stream_incremental_sse_response(
     max_bytes: usize,
 ) -> Result<ProviderResponse, ProviderError> {
     let mut agg = IncrementalSseAggregator::new(provider_label, extract_openai_usage, max_bytes);
-    while let Some(chunk) = resp.chunk().await.map_err(|e| ProviderError::Transport(e.without_url().to_string()))? {
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| ProviderError::Transport(e.without_url().to_string()))?
+    {
         agg.push_bytes(&chunk)?;
     }
     agg.finish()
@@ -243,8 +287,12 @@ impl HttpProvider {
     }
 
     pub(crate) fn resolve_request_route(&self, raw_model: &str) -> (WireDialect, String) {
-        let (model_wire, normalized_model) =
-            resolve_model_aware_wire_and_model(&self.name, raw_model, &self.endpoint, self.wire_dialect);
+        let (model_wire, normalized_model) = resolve_model_aware_wire_and_model(
+            &self.name,
+            raw_model,
+            &self.endpoint,
+            self.wire_dialect,
+        );
         if self.explicit_wire_override {
             (self.wire_dialect, normalized_model)
         } else {
@@ -274,7 +322,10 @@ impl HttpProvider {
                 if trimmed.contains(":generateContent") {
                     trimmed.to_string()
                 } else if let Some((base, q)) = trimmed.split_once('?') {
-                    format!("{}/models/{model}:generateContent?{q}", base.trim_end_matches('/'))
+                    format!(
+                        "{}/models/{model}:generateContent?{q}",
+                        base.trim_end_matches('/')
+                    )
                 } else {
                     format!("{trimmed}/models/{model}:generateContent")
                 }
@@ -305,9 +356,13 @@ impl HttpProvider {
                 }
             }
             WireDialect::ChatCompletions => {
-                if trimmed.ends_with("/chat/completions") { trimmed.to_string() }
-                else if trimmed.ends_with("/v1") { format!("{trimmed}/chat/completions") }
-                else { format!("{trimmed}/v1/chat/completions") }
+                if trimmed.ends_with("/chat/completions") {
+                    trimmed.to_string()
+                } else if trimmed.ends_with("/v1") {
+                    format!("{trimmed}/chat/completions")
+                } else {
+                    format!("{trimmed}/v1/chat/completions")
+                }
             }
         }
     }
@@ -328,7 +383,11 @@ impl HttpProvider {
         build_google_gemini_payload(req)
     }
 
-    fn apply_auth_headers(&self, builder: reqwest::RequestBuilder, dialect: WireDialect) -> reqwest::RequestBuilder {
+    fn apply_auth_headers(
+        &self,
+        builder: reqwest::RequestBuilder,
+        dialect: WireDialect,
+    ) -> reqwest::RequestBuilder {
         let mut builder = builder;
         let canon = canonicalize_provider_id(&self.name);
         if canon == "openrouter" {
@@ -336,7 +395,12 @@ impl HttpProvider {
                 .header("HTTP-Referer", "https://github.com/heav3ns/heav3ns-micro")
                 .header("X-Title", "HEAV3NS-MICRO");
         }
-        let Some(key) = self.api_key.as_deref().map(str::trim).filter(|k| !k.is_empty()) else {
+        let Some(key) = self
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+        else {
             return builder;
         };
         match dialect {
@@ -345,14 +409,19 @@ impl HttpProvider {
                 if canon == "codewhale" {
                     return builder.bearer_auth(key);
                 }
-                let is_oauth = key.starts_with("sk-ant-oat") || (canon.contains("subscription") && !key.starts_with("sk-ant-api"));
+                let is_oauth = key.starts_with("sk-ant-oat")
+                    || (canon.contains("subscription") && !key.starts_with("sk-ant-api"));
                 if is_oauth {
                     builder = builder
                         .bearer_auth(key)
                         .header("anthropic-beta", "oauth-2025-04-20");
                 } else {
                     builder = builder.header("x-api-key", key);
-                    if !self.endpoint.to_ascii_lowercase().contains("api.anthropic.com") {
+                    if !self
+                        .endpoint
+                        .to_ascii_lowercase()
+                        .contains("api.anthropic.com")
+                    {
                         builder = builder.bearer_auth(key);
                     }
                 }
@@ -364,14 +433,21 @@ impl HttpProvider {
     }
 
     fn parse_openai_response(body: &Value) -> Result<ProviderResponse, ProviderError> {
-        if let Some(err) = classify_stream_or_response_error(body, "", &body.to_string()) { return Err(err); }
+        if let Some(err) = classify_stream_or_response_error(body, "", &body.to_string()) {
+            return Err(err);
+        }
         let choice = body
             .get("choices")
             .and_then(|c| c.as_array())
             .and_then(|a| a.first())
-            .ok_or_else(|| ProviderError::Transport("Missing choices[0] in OpenAI response".to_string()))?;
+            .ok_or_else(|| {
+                ProviderError::Transport("Missing choices[0] in OpenAI response".to_string())
+            })?;
         let msg = choice.get("message").unwrap_or(choice);
-        let content = msg.get("content").and_then(|c| c.as_str()).map(String::from);
+        let content = msg
+            .get("content")
+            .and_then(|c| c.as_str())
+            .map(String::from);
         let mut tool_calls = Vec::new();
         if let Some(raw_calls) = msg.get("tool_calls").and_then(|tc| tc.as_array()) {
             for (idx, tc) in raw_calls.iter().enumerate() {
@@ -381,7 +457,12 @@ impl HttpProvider {
                     .map(String::from)
                     .unwrap_or_else(|| format!("call_{}", idx + 1));
                 if let Some(func) = tc.get("function") {
-                    let name = func.get("name").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+                    let name = func
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
                     let raw_args = match func.get("arguments") {
                         Some(Value::String(s)) => s.clone(),
                         Some(other) => other.to_string(),
@@ -397,7 +478,10 @@ impl HttpProvider {
                         tool_calls.push(ToolCall {
                             id,
                             r#type: "function".to_string(),
-                            function: ToolCallFunction { name, arguments: raw_args },
+                            function: ToolCallFunction {
+                                name,
+                                arguments: raw_args,
+                            },
                             thought_signature: sig,
                         });
                     }
@@ -410,17 +494,25 @@ impl HttpProvider {
     }
 
     fn parse_anthropic_response(body: &Value) -> Result<ProviderResponse, ProviderError> {
-        if let Some(err) = classify_stream_or_response_error(body, "", &body.to_string()) { return Err(err); }
+        if let Some(err) = classify_stream_or_response_error(body, "", &body.to_string()) {
+            return Err(err);
+        }
         let blocks = body
             .get("content")
             .and_then(|c| c.as_array())
-            .ok_or_else(|| ProviderError::Transport("Missing content array in Anthropic response".to_string()))?;
+            .ok_or_else(|| {
+                ProviderError::Transport("Missing content array in Anthropic response".to_string())
+            })?;
         let mut text_parts = Vec::new();
         let mut tool_calls = Vec::new();
         for (idx, block) in blocks.iter().enumerate() {
             match block.get("type").and_then(|t| t.as_str()) {
                 Some("text") => {
-                    if let Some(t) = block.get("text").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                    if let Some(t) = block
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                    {
                         text_parts.push(t.to_string());
                     }
                 }
@@ -430,13 +522,23 @@ impl HttpProvider {
                         .and_then(|v| v.as_str())
                         .map(String::from)
                         .unwrap_or_else(|| format!("toolu_{}", idx + 1));
-                    let name = block.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let input = block.get("input").map(|v| v.to_string()).unwrap_or_else(|| "{}".to_string());
+                    let name = block
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let input = block
+                        .get("input")
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "{}".to_string());
                     if !name.is_empty() {
                         tool_calls.push(ToolCall {
                             id,
                             r#type: "function".to_string(),
-                            function: ToolCallFunction { name, arguments: input },
+                            function: ToolCallFunction {
+                                name,
+                                arguments: input,
+                            },
                             thought_signature: None,
                         });
                     }
@@ -444,11 +546,18 @@ impl HttpProvider {
                 _ => {}
             }
         }
-        let mut resp = finalize_provider_response(Some(text_parts.join("\n")), tool_calls, "anthropic");
+        let mut resp =
+            finalize_provider_response(Some(text_parts.join("\n")), tool_calls, "anthropic");
         if let Some(u) = body.get("usage") {
             let uncached = u.get("input_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
-            let cache_read = u.get("cache_read_input_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
-            let cache_create = u.get("cache_creation_input_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let cache_read = u
+                .get("cache_read_input_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            let cache_create = u
+                .get("cache_creation_input_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
             let out_tok = u.get("output_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
             resp.usage = Some(ProviderTokenUsage {
                 prompt_tokens: uncached + cache_read + cache_create,
@@ -461,23 +570,47 @@ impl HttpProvider {
     }
 
     fn parse_gemini_response(body: &Value) -> Result<ProviderResponse, ProviderError> {
-        if let Some(err) = classify_stream_or_response_error(body, "", &body.to_string()) { return Err(err); }
-        let candidate = body.get("candidates").and_then(|c| c.as_array()).and_then(|a| a.first());
-        let raw_parts = candidate.and_then(|c| c.get("content")).and_then(|c| c.get("parts")).and_then(|p| p.as_array());
+        if let Some(err) = classify_stream_or_response_error(body, "", &body.to_string()) {
+            return Err(err);
+        }
+        let candidate = body
+            .get("candidates")
+            .and_then(|c| c.as_array())
+            .and_then(|a| a.first());
+        let raw_parts = candidate
+            .and_then(|c| c.get("content"))
+            .and_then(|c| c.get("parts"))
+            .and_then(|p| p.as_array());
         if raw_parts.is_none() {
-            if let Some(reason) = candidate.and_then(|c| c.get("finishReason")).and_then(Value::as_str) {
+            if let Some(reason) = candidate
+                .and_then(|c| c.get("finishReason"))
+                .and_then(Value::as_str)
+            {
                 if !matches!(reason, "STOP" | "MAX_TOKENS") {
-                    return Err(ProviderError::HttpStatus { status: 200, body: format!("Gemini candidate blocked: finishReason = {reason}"), retryable: false, retry_after_ms: None });
+                    return Err(ProviderError::HttpStatus {
+                        status: 200,
+                        body: format!("Gemini candidate blocked: finishReason = {reason}"),
+                        retryable: false,
+                        retry_after_ms: None,
+                    });
                 }
             }
         }
-        let parts = raw_parts.ok_or_else(|| ProviderError::Transport("Missing candidates[0].content.parts in Gemini response".to_string()))?;
+        let parts = raw_parts.ok_or_else(|| {
+            ProviderError::Transport(
+                "Missing candidates[0].content.parts in Gemini response".to_string(),
+            )
+        })?;
         let mut text_parts = Vec::new();
         let mut thought_parts = Vec::new();
         let mut tool_calls = Vec::new();
         for (idx, part) in parts.iter().enumerate() {
             let is_thought = part.get("thought").and_then(Value::as_bool) == Some(true);
-            if let Some(t) = part.get("text").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            if let Some(t) = part
+                .get("text")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+            {
                 if is_thought {
                     thought_parts.push(t.to_string());
                 } else {
@@ -485,8 +618,15 @@ impl HttpProvider {
                 }
             }
             if let Some(fc) = part.get("functionCall") {
-                let name = fc.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let args = fc.get("args").map(|v| v.to_string()).unwrap_or_else(|| "{}".to_string());
+                let name = fc
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let args = fc
+                    .get("args")
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "{}".to_string());
                 let sig = part
                     .get("thoughtSignature")
                     .or_else(|| part.get("thought_signature"))
@@ -499,7 +639,10 @@ impl HttpProvider {
                     tool_calls.push(ToolCall {
                         id: format!("gemini_call_{}", idx + 1),
                         r#type: "function".to_string(),
-                        function: ToolCallFunction { name, arguments: args },
+                        function: ToolCallFunction {
+                            name,
+                            arguments: args,
+                        },
                         thought_signature: sig,
                     });
                 }
@@ -508,12 +651,22 @@ impl HttpProvider {
         if text_parts.is_empty() && tool_calls.is_empty() && !thought_parts.is_empty() {
             text_parts = thought_parts;
         }
-        let mut resp = finalize_provider_response(Some(text_parts.join("\n")), tool_calls, "gemini");
+        let mut resp =
+            finalize_provider_response(Some(text_parts.join("\n")), tool_calls, "gemini");
         if let Some(um) = body.get("usageMetadata") {
             resp.usage = Some(ProviderTokenUsage {
-                prompt_tokens: um.get("promptTokenCount").and_then(Value::as_u64).unwrap_or(0) as usize,
-                completion_tokens: um.get("candidatesTokenCount").and_then(Value::as_u64).unwrap_or(0) as usize,
-                cached_prompt_tokens: um.get("cachedContentTokenCount").and_then(Value::as_u64).unwrap_or(0) as usize,
+                prompt_tokens: um
+                    .get("promptTokenCount")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0) as usize,
+                completion_tokens: um
+                    .get("candidatesTokenCount")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0) as usize,
+                cached_prompt_tokens: um
+                    .get("cachedContentTokenCount")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0) as usize,
                 is_exact: true,
             });
         }
@@ -557,7 +710,10 @@ impl ILlmProvider for HttpProvider {
                     retry_after_ms: None,
                 });
             }
-            let has_key = self.api_key.as_deref().is_some_and(|k| !k.trim().is_empty());
+            let has_key = self
+                .api_key
+                .as_deref()
+                .is_some_and(|k| !k.trim().is_empty());
             if has_key && is_non_loopback_cleartext_http(&self.endpoint) {
                 return Err(ProviderError::HttpStatus {
                     status: 400,
@@ -578,14 +734,20 @@ impl ILlmProvider for HttpProvider {
                 WireDialect::ChatCompletions => self.build_openai_payload(&effective_req),
             };
 
-            let has_explicit_sk = self.api_key.as_deref().is_some_and(|k| k.trim().starts_with("sk-"));
+            let has_explicit_sk = self
+                .api_key
+                .as_deref()
+                .is_some_and(|k| k.trim().starts_with("sk-"));
             let use_codex_oauth = canon_provider == "openai-codex"
                 && !has_explicit_sk
                 && self.endpoint.trim_end_matches('/') == "https://api.openai.com/v1";
 
             let http_fut = async {
                 let codex_oauth = if use_codex_oauth {
-                    CodexAccountStore::default_store().get_valid_active_credentials().await.map_err(ProviderError::Transport)?
+                    CodexAccountStore::default_store()
+                        .get_valid_active_credentials()
+                        .await
+                        .map_err(ProviderError::Transport)?
                 } else {
                     None
                 };
@@ -597,7 +759,9 @@ impl ILlmProvider for HttpProvider {
                     build_codex_oauth_post(&self.client, &url, oauth_token, account_id.as_deref())
                 } else {
                     self.apply_auth_headers(
-                        self.client.post(&url).header("content-type", "application/json"),
+                        self.client
+                            .post(&url)
+                            .header("content-type", "application/json"),
                         effective_wire,
                     )
                 };
@@ -608,10 +772,21 @@ impl ILlmProvider for HttpProvider {
                     .map_err(|e| ProviderError::Transport(e.without_url().to_string()))?;
                 let status = resp.status().as_u16();
                 let retry_after_ms = parse_retry_after_header(resp.headers());
-                let content_type = resp.headers().get("content-type").and_then(|v| v.to_str().ok()).map(String::from);
+                let content_type = resp
+                    .headers()
+                    .get("content-type")
+                    .and_then(|v| v.to_str().ok())
+                    .map(String::from);
 
-                if (200..300).contains(&status) && is_event_stream_content_type(content_type.as_deref()) {
-                    return stream_incremental_sse_response(resp, &self.name, MAX_HTTP_RESPONSE_BODY_BYTES).await;
+                if (200..300).contains(&status)
+                    && is_event_stream_content_type(content_type.as_deref())
+                {
+                    return stream_incremental_sse_response(
+                        resp,
+                        &self.name,
+                        MAX_HTTP_RESPONSE_BODY_BYTES,
+                    )
+                    .await;
                 }
 
                 let text = read_bounded_response_text(resp, MAX_HTTP_RESPONSE_BODY_BYTES).await?;
@@ -620,13 +795,20 @@ impl ILlmProvider for HttpProvider {
                     if effective_wire == WireDialect::ChatCompletions && status == 400 {
                         let mut needs_retry = false;
                         let mut healed_payload = payload.clone();
-                        if text.contains("max_completion_tokens") && healed_payload.get("max_tokens").is_some() {
-                            if let Some(tokens) = healed_payload.as_object_mut().and_then(|o| o.remove("max_tokens")) {
+                        if text.contains("max_completion_tokens")
+                            && healed_payload.get("max_tokens").is_some()
+                        {
+                            if let Some(tokens) = healed_payload
+                                .as_object_mut()
+                                .and_then(|o| o.remove("max_tokens"))
+                            {
                                 healed_payload["max_completion_tokens"] = tokens;
                                 needs_retry = true;
                             }
                         }
-                        if text.contains("reasoning_effort") && text.contains("set reasoning_effort to 'none'") {
+                        if text.contains("reasoning_effort")
+                            && text.contains("set reasoning_effort to 'none'")
+                        {
                             healed_payload["reasoning_effort"] = Value::String("none".to_string());
                             needs_retry = true;
                         }
@@ -638,23 +820,58 @@ impl ILlmProvider for HttpProvider {
                         }
                         if needs_retry {
                             let retry_builder = self.apply_auth_headers(
-                                self.client.post(&url).header("content-type", "application/json"),
+                                self.client
+                                    .post(&url)
+                                    .header("content-type", "application/json"),
                                 effective_wire,
                             );
-                            let retry_resp = retry_builder.json(&healed_payload).send().await.map_err(|e| ProviderError::Transport(e.without_url().to_string()))?;
+                            let retry_resp = retry_builder
+                                .json(&healed_payload)
+                                .send()
+                                .await
+                                .map_err(|e| {
+                                    ProviderError::Transport(e.without_url().to_string())
+                                })?;
                             let retry_status = retry_resp.status().as_u16();
                             let retry_ra = parse_retry_after_header(retry_resp.headers());
-                            let retry_ct = retry_resp.headers().get("content-type").and_then(|v| v.to_str().ok()).map(String::from);
-                            if (200..300).contains(&retry_status) && is_event_stream_content_type(retry_ct.as_deref()) {
-                                return stream_incremental_sse_response(retry_resp, &self.name, MAX_HTTP_RESPONSE_BODY_BYTES).await;
+                            let retry_ct = retry_resp
+                                .headers()
+                                .get("content-type")
+                                .and_then(|v| v.to_str().ok())
+                                .map(String::from);
+                            if (200..300).contains(&retry_status)
+                                && is_event_stream_content_type(retry_ct.as_deref())
+                            {
+                                return stream_incremental_sse_response(
+                                    retry_resp,
+                                    &self.name,
+                                    MAX_HTTP_RESPONSE_BODY_BYTES,
+                                )
+                                .await;
                             }
-                            let retry_text = read_bounded_response_text(retry_resp, MAX_HTTP_RESPONSE_BODY_BYTES).await?;
+                            let retry_text = read_bounded_response_text(
+                                retry_resp,
+                                MAX_HTTP_RESPONSE_BODY_BYTES,
+                            )
+                            .await?;
                             if (200..300).contains(&retry_status) {
-                                if looks_like_sse(&retry_text, retry_ct.as_deref()) { return parse_sse_stream(&retry_text, &self.name); }
-                                let json_body: Value = serde_json::from_str(&retry_text).map_err(|e| ProviderError::Transport(format!("Invalid JSON from provider: {e}")))?;
+                                if looks_like_sse(&retry_text, retry_ct.as_deref()) {
+                                    return parse_sse_stream(&retry_text, &self.name);
+                                }
+                                let json_body: Value =
+                                    serde_json::from_str(&retry_text).map_err(|e| {
+                                        ProviderError::Transport(format!(
+                                            "Invalid JSON from provider: {e}"
+                                        ))
+                                    })?;
                                 return Self::parse_openai_response(&json_body);
                             }
-                            return Err(ProviderError::HttpStatus { status: retry_status, body: retry_text, retryable: is_retryable_http_status(retry_status), retry_after_ms: retry_ra });
+                            return Err(ProviderError::HttpStatus {
+                                status: retry_status,
+                                body: retry_text,
+                                retryable: is_retryable_http_status(retry_status),
+                                retry_after_ms: retry_ra,
+                            });
                         }
                     }
 
@@ -663,23 +880,67 @@ impl ILlmProvider for HttpProvider {
                     }
                     if let Some((ref rejected_tok, _)) = codex_oauth {
                         if status == 401 {
-                            let (new_token, new_account_id) = CodexAccountStore::default_store().force_refresh_active(rejected_tok).await.map_err(|e| ProviderError::HttpStatus { status: 401, body: e, retryable: false, retry_after_ms: None })?;
-                            let retry_b = build_codex_oauth_post(&self.client, &url, &new_token, new_account_id.as_deref());
-                            let retry_resp = retry_b.json(&payload).send().await.map_err(|e| ProviderError::Transport(e.without_url().to_string()))?;
+                            let (new_token, new_account_id) = CodexAccountStore::default_store()
+                                .force_refresh_active(rejected_tok)
+                                .await
+                                .map_err(|e| ProviderError::HttpStatus {
+                                    status: 401,
+                                    body: e,
+                                    retryable: false,
+                                    retry_after_ms: None,
+                                })?;
+                            let retry_b = build_codex_oauth_post(
+                                &self.client,
+                                &url,
+                                &new_token,
+                                new_account_id.as_deref(),
+                            );
+                            let retry_resp = retry_b.json(&payload).send().await.map_err(|e| {
+                                ProviderError::Transport(e.without_url().to_string())
+                            })?;
                             let retry_status = retry_resp.status().as_u16();
                             let retry_ra = parse_retry_after_header(retry_resp.headers());
-                            let retry_ct = retry_resp.headers().get("content-type").and_then(|v| v.to_str().ok()).map(String::from);
-                            if (200..300).contains(&retry_status) && is_event_stream_content_type(retry_ct.as_deref()) {
-                                return stream_incremental_sse_response(retry_resp, &self.name, MAX_HTTP_RESPONSE_BODY_BYTES).await;
+                            let retry_ct = retry_resp
+                                .headers()
+                                .get("content-type")
+                                .and_then(|v| v.to_str().ok())
+                                .map(String::from);
+                            if (200..300).contains(&retry_status)
+                                && is_event_stream_content_type(retry_ct.as_deref())
+                            {
+                                return stream_incremental_sse_response(
+                                    retry_resp,
+                                    &self.name,
+                                    MAX_HTTP_RESPONSE_BODY_BYTES,
+                                )
+                                .await;
                             }
-                            let retry_text = read_bounded_response_text(retry_resp, MAX_HTTP_RESPONSE_BODY_BYTES).await?;
+                            let retry_text = read_bounded_response_text(
+                                retry_resp,
+                                MAX_HTTP_RESPONSE_BODY_BYTES,
+                            )
+                            .await?;
                             if (200..300).contains(&retry_status) {
-                                if looks_like_sse(&retry_text, retry_ct.as_deref()) { return parse_sse_stream(&retry_text, &self.name); }
-                                let json_body: Value = serde_json::from_str(&retry_text).map_err(|e| ProviderError::Transport(format!("Invalid JSON from provider: {e}")))?;
+                                if looks_like_sse(&retry_text, retry_ct.as_deref()) {
+                                    return parse_sse_stream(&retry_text, &self.name);
+                                }
+                                let json_body: Value =
+                                    serde_json::from_str(&retry_text).map_err(|e| {
+                                        ProviderError::Transport(format!(
+                                            "Invalid JSON from provider: {e}"
+                                        ))
+                                    })?;
                                 return parse_responses_json(&json_body, &self.name);
                             }
-                            if retry_status == 429 { CodexAccountStore::default_store().record_rate_limit(retry_ra); }
-                            return Err(ProviderError::HttpStatus { status: retry_status, body: retry_text, retryable: is_retryable_http_status(retry_status), retry_after_ms: retry_ra });
+                            if retry_status == 429 {
+                                CodexAccountStore::default_store().record_rate_limit(retry_ra);
+                            }
+                            return Err(ProviderError::HttpStatus {
+                                status: retry_status,
+                                body: retry_text,
+                                retryable: is_retryable_http_status(retry_status),
+                                retry_after_ms: retry_ra,
+                            });
                         }
                     }
 
@@ -694,8 +955,9 @@ impl ILlmProvider for HttpProvider {
                 if looks_like_sse(&text, content_type.as_deref()) {
                     return parse_sse_stream(&text, &self.name);
                 }
-                let json_body: Value = serde_json::from_str(&text)
-                    .map_err(|e| ProviderError::Transport(format!("Invalid JSON from provider: {e}")))?;
+                let json_body: Value = serde_json::from_str(&text).map_err(|e| {
+                    ProviderError::Transport(format!("Invalid JSON from provider: {e}"))
+                })?;
                 match effective_wire {
                     WireDialect::AnthropicMessages => Self::parse_anthropic_response(&json_body),
                     WireDialect::GoogleGemini => Self::parse_gemini_response(&json_body),
@@ -730,7 +992,10 @@ mod tests {
         let provider = HttpProvider::new("openai", "https://api.openai.com/v1", None, 30_000);
         let req = ProviderRequest {
             model: "gpt-5.6-terra".to_string(),
-            messages: vec![crate::domain::types::messages::SessionMessage::new(Role::User, "Hello")],
+            messages: vec![crate::domain::types::messages::SessionMessage::new(
+                Role::User,
+                "Hello",
+            )],
             tools: Vec::new(),
             max_tokens: 4096,
             temperature: 0.0,
@@ -743,7 +1008,10 @@ mod tests {
 
         let req_with_tools = ProviderRequest {
             model: "gpt-5.6-terra".to_string(),
-            messages: vec![crate::domain::types::messages::SessionMessage::new(Role::User, "List files")],
+            messages: vec![crate::domain::types::messages::SessionMessage::new(
+                Role::User,
+                "List files",
+            )],
             tools: vec![serde_json::json!({
                 "type": "function",
                 "function": { "name": "list_files", "parameters": {} }
@@ -758,7 +1026,10 @@ mod tests {
         for reasoning_model in ["o1-mini", "o3-mini", "o4-mini"] {
             let req_o = ProviderRequest {
                 model: reasoning_model.to_string(),
-                messages: vec![crate::domain::types::messages::SessionMessage::new(Role::User, "Hello")],
+                messages: vec![crate::domain::types::messages::SessionMessage::new(
+                    Role::User,
+                    "Hello",
+                )],
                 tools: Vec::new(),
                 max_tokens: 2048,
                 temperature: 1.0,
@@ -776,7 +1047,10 @@ mod tests {
         let provider = HttpProvider::new("openai", "https://api.openai.com/v1", None, 30_000);
         let req = ProviderRequest {
             model: "gpt-3.5-turbo".to_string(),
-            messages: vec![crate::domain::types::messages::SessionMessage::new(Role::User, "Hello")],
+            messages: vec![crate::domain::types::messages::SessionMessage::new(
+                Role::User,
+                "Hello",
+            )],
             tools: Vec::new(),
             max_tokens: 1024,
             temperature: 0.0,

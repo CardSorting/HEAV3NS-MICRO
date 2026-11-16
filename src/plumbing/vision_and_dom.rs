@@ -42,7 +42,10 @@ pub fn decode_image_metadata(bytes: &[u8]) -> Result<Value, String> {
         return Err("Empty image buffer".to_string());
     }
     if bytes.len() > MAX_IMAGE_PAYLOAD_BYTES {
-        return Err(format!("Image exceeds max budget of {} bytes", MAX_IMAGE_PAYLOAD_BYTES));
+        return Err(format!(
+            "Image exceeds max budget of {} bytes",
+            MAX_IMAGE_PAYLOAD_BYTES
+        ));
     }
 
     // 1. PNG: 89 50 4E 47 0D 0A 1A 0A + IHDR @ 16..24
@@ -52,23 +55,59 @@ pub fn decode_image_metadata(bytes: &[u8]) -> Result<Value, String> {
         let bit_depth = if bytes.len() > 24 { bytes[24] } else { 8 };
         let color_type = if bytes.len() > 25 { bytes[25] } else { 6 };
         let has_alpha = color_type == 4 || color_type == 6;
-        return Ok(build_img_meta("png", "image/png", width, height, bytes.len(), has_alpha, bit_depth, false));
+        return Ok(build_img_meta(
+            "png",
+            "image/png",
+            width,
+            height,
+            bytes.len(),
+            has_alpha,
+            bit_depth,
+            false,
+        ));
     }
 
     // 2. GIF: GIF87a / GIF89a
     if bytes.len() >= 10 && (&bytes[0..6] == b"GIF87a" || &bytes[0..6] == b"GIF89a") {
         let width = u16::from_le_bytes([bytes[6], bytes[7]]) as u32;
         let height = u16::from_le_bytes([bytes[8], bytes[9]]) as u32;
-        let animated = bytes.windows(3).filter(|w| *w == [0x21, 0xF9, 0x04]).count() > 1;
-        return Ok(build_img_meta("gif", "image/gif", width, height, bytes.len(), true, 8, animated));
+        let animated = bytes
+            .windows(3)
+            .filter(|w| *w == [0x21, 0xF9, 0x04])
+            .count()
+            > 1;
+        return Ok(build_img_meta(
+            "gif",
+            "image/gif",
+            width,
+            height,
+            bytes.len(),
+            true,
+            8,
+            animated,
+        ));
     }
 
     // 3. BMP: 'BM' + width @ 18..22, height @ 22..26
     if bytes.len() >= 26 && &bytes[0..2] == b"BM" {
         let width = i32::from_le_bytes([bytes[18], bytes[19], bytes[20], bytes[21]]).unsigned_abs();
-        let height = i32::from_le_bytes([bytes[22], bytes[23], bytes[24], bytes[25]]).unsigned_abs();
-        let bpp = if bytes.len() >= 30 { u16::from_le_bytes([bytes[28], bytes[29]]) as u8 } else { 24 };
-        return Ok(build_img_meta("bmp", "image/bmp", width, height, bytes.len(), bpp == 32, bpp, false));
+        let height =
+            i32::from_le_bytes([bytes[22], bytes[23], bytes[24], bytes[25]]).unsigned_abs();
+        let bpp = if bytes.len() >= 30 {
+            u16::from_le_bytes([bytes[28], bytes[29]]) as u8
+        } else {
+            24
+        };
+        return Ok(build_img_meta(
+            "bmp",
+            "image/bmp",
+            width,
+            height,
+            bytes.len(),
+            bpp == 32,
+            bpp,
+            false,
+        ));
     }
 
     // 4. WebP: 'RIFF'....'WEBP'
@@ -84,7 +123,7 @@ pub fn decode_image_metadata(bytes: &[u8]) -> Result<Value, String> {
             let b2 = bytes[23] as u32;
             let b3 = bytes[24] as u32;
             let w = (b0 | ((b1 & 0x3F) << 8)) + 1;
-            let h = (((b1 >> 6) | (b2 << 2) | ((b3 & 0x0F) << 10))) + 1;
+            let h = ((b1 >> 6) | (b2 << 2) | ((b3 & 0x0F) << 10)) + 1;
             let has_alpha = ((b3 >> 4) & 0x01) == 1;
             (w, h, has_alpha)
         } else if chunk == b"VP8X" && bytes.len() >= 30 {
@@ -95,7 +134,16 @@ pub fn decode_image_metadata(bytes: &[u8]) -> Result<Value, String> {
         } else {
             (0, 0, false)
         };
-        return Ok(build_img_meta("webp", "image/webp", width, height, bytes.len(), alpha, 8, false));
+        return Ok(build_img_meta(
+            "webp",
+            "image/webp",
+            width,
+            height,
+            bytes.len(),
+            alpha,
+            8,
+            false,
+        ));
     }
 
     // 5. JPEG: FF D8 ... scan SOF0/SOF1/SOF2 (FF C0 / FF C1 / FF C2)
@@ -135,7 +183,16 @@ pub fn decode_image_metadata(bytes: &[u8]) -> Result<Value, String> {
             }
             idx = idx.saturating_add(seg_len);
         }
-        return Ok(build_img_meta("jpeg", "image/jpeg", width, height, bytes.len(), false, bit_depth, false));
+        return Ok(build_img_meta(
+            "jpeg",
+            "image/jpeg",
+            width,
+            height,
+            bytes.len(),
+            false,
+            bit_depth,
+            false,
+        ));
     }
 
     // 6. SVG: XML/SVG text header
@@ -143,19 +200,38 @@ pub fn decode_image_metadata(bytes: &[u8]) -> Result<Value, String> {
     let trimmed = text.trim_start();
     if trimmed.starts_with("<svg") || (trimmed.starts_with("<?xml") && trimmed.contains("<svg")) {
         let (w, h) = parse_svg_dimensions(trimmed);
-        return Ok(build_img_meta("svg", "image/svg+xml", w, h, bytes.len(), true, 8, false));
+        return Ok(build_img_meta(
+            "svg",
+            "image/svg+xml",
+            w,
+            h,
+            bytes.len(),
+            true,
+            8,
+            false,
+        ));
     }
 
     Err("Unrecognized binary image header (expected PNG, JPEG, GIF, WebP, BMP, or SVG)".to_string())
 }
 
-fn build_img_meta(fmt: &str, mime: &str, width: u32, height: u32, byte_size: usize, has_alpha: bool, bit_depth: u8, animated: bool) -> Value {
+fn build_img_meta(
+    fmt: &str,
+    mime: &str,
+    width: u32,
+    height: u32,
+    byte_size: usize,
+    has_alpha: bool,
+    bit_depth: u8,
+    animated: bool,
+) -> Value {
     let aspect = calculate_aspect_ratio(width, height);
     let megapixels = ((width as f64 * height as f64) / 1_000_000.0 * 1000.0).round() / 1000.0;
     // Vision token heuristic (~85 base + 170 per 512x512 tile)
     let tiles_x = ((width.max(1) as u64).saturating_add(511) / 512).max(1);
     let tiles_y = ((height.max(1) as u64).saturating_add(511) / 512).max(1);
-    let estimated_vision_tokens = 85u64.saturating_add(tiles_x.saturating_mul(tiles_y).saturating_mul(170));
+    let estimated_vision_tokens =
+        85u64.saturating_add(tiles_x.saturating_mul(tiles_y).saturating_mul(170));
     json!({
         "format": fmt, "mimeType": mime, "width": width, "height": height,
         "aspectRatio": aspect, "megapixels": megapixels, "byteSize": byte_size,
@@ -167,10 +243,16 @@ fn build_img_meta(fmt: &str, mime: &str, width: u32, height: u32, byte_size: usi
 fn parse_svg_dimensions(svg: &str) -> (u32, u32) {
     let extract_attr = |attr: &str| -> Option<u32> {
         let pat = format!("{}=\"", attr);
-        let pos = svg.match_indices(&pat).find(|(p, _)| *p == 0 || svg.as_bytes()[p - 1].is_ascii_whitespace())?.0;
+        let pos = svg
+            .match_indices(&pat)
+            .find(|(p, _)| *p == 0 || svg.as_bytes()[p - 1].is_ascii_whitespace())?
+            .0;
         let rest = &svg[pos + pat.len()..];
         let end = rest.find('"')?;
-        let digits: String = rest[..end].chars().take_while(|c| c.is_ascii_digit()).collect();
+        let digits: String = rest[..end]
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
         digits.parse::<u32>().ok()
     };
     if let (Some(w), Some(h)) = (extract_attr("width"), extract_attr("height")) {
@@ -242,8 +324,13 @@ pub fn generate_synthetic_svg(width: u32, height: u32, title: &str) -> String {
 }
 
 pub fn validate_navigation_url(url: &str) -> Result<String, String> {
-    if url.chars().any(|c| (c as u32) <= 0x1F || (c as u32) == 0x7F) {
-        return Err("Blocked URL containing control characters (WHATWG authority ambiguity)".to_string());
+    if url
+        .chars()
+        .any(|c| (c as u32) <= 0x1F || (c as u32) == 0x7F)
+    {
+        return Err(
+            "Blocked URL containing control characters (WHATWG authority ambiguity)".to_string(),
+        );
     }
     let trimmed = url.trim();
     if trimmed.is_empty() {
@@ -251,48 +338,105 @@ pub fn validate_navigation_url(url: &str) -> Result<String, String> {
     }
     let normalized_dots: String = trimmed
         .chars()
-        .map(|c| if matches!(c, '\u{3002}' | '\u{FF0E}' | '\u{FF61}') { '.' } else { c })
+        .map(|c| {
+            if matches!(c, '\u{3002}' | '\u{FF0E}' | '\u{FF61}') {
+                '.'
+            } else {
+                c
+            }
+        })
         .collect();
     let lower = normalized_dots.to_ascii_lowercase();
-    for blocked_scheme in ["javascript:", "vbscript:", "data:text/html", "chrome://", "chrome-extension://", "view-source:"] {
+    for blocked_scheme in [
+        "javascript:",
+        "vbscript:",
+        "data:text/html",
+        "chrome://",
+        "chrome-extension://",
+        "view-source:",
+    ] {
         if lower.starts_with(blocked_scheme) {
             return Err(format!("Blocked unsafe URL scheme: {}", blocked_scheme));
         }
     }
-    for secret_prefix in ["sk-ant-", "sk-proj-", "ghp_", "gho_", "akia", "aiza", "xoxb-", "xoxp-"] {
-        if lower.contains(secret_prefix) { return Err("Blocked URL containing embedded API key or secret token (exfiltration guard)".to_string()); }
+    for secret_prefix in [
+        "sk-ant-", "sk-proj-", "ghp_", "gho_", "akia", "aiza", "xoxb-", "xoxp-",
+    ] {
+        if lower.contains(secret_prefix) {
+            return Err(
+                "Blocked URL containing embedded API key or secret token (exfiltration guard)"
+                    .to_string(),
+            );
+        }
     }
     if lower.starts_with("file://") {
         let decoded = percent_decode_ascii(&lower).replace('\\', "/");
         if decoded.contains("/../") || decoded.ends_with("/..") {
             return Err("Blocked path traversal in file:// URL".to_string());
         }
-        let path_part = decoded.strip_prefix("file://localhost").or_else(|| decoded.strip_prefix("file://")).unwrap_or(&decoded);
-        let sensitive = ["/etc/", "/root/", "/var/run/", "/proc/", "/sys/", "/private/etc/"];
-        let cred_hit = crate::plumbing::secret_redactor::DeterministicSecretRedactor::classify_sensitive_path(path_part, crate::plumbing::secret_redactor::CredentialDenyScope::ModelContext).is_some();
-        if path_part == "/etc" || path_part == "/private/etc" || sensitive.iter().any(|s| decoded.contains(s)) || cred_hit {
+        let path_part = decoded
+            .strip_prefix("file://localhost")
+            .or_else(|| decoded.strip_prefix("file://"))
+            .unwrap_or(&decoded);
+        let sensitive = [
+            "/etc/",
+            "/root/",
+            "/var/run/",
+            "/proc/",
+            "/sys/",
+            "/private/etc/",
+        ];
+        let cred_hit =
+            crate::plumbing::secret_redactor::DeterministicSecretRedactor::classify_sensitive_path(
+                path_part,
+                crate::plumbing::secret_redactor::CredentialDenyScope::ModelContext,
+            )
+            .is_some();
+        if path_part == "/etc"
+            || path_part == "/private/etc"
+            || sensitive.iter().any(|s| decoded.contains(s))
+            || cred_hit
+        {
             return Err("Blocked sensitive local file:// path".to_string());
         }
         return Ok(trimmed.to_string());
     }
-    if !lower.starts_with("http://") && !lower.starts_with("https://") && !lower.starts_with("about:blank") {
+    if !lower.starts_with("http://")
+        && !lower.starts_with("https://")
+        && !lower.starts_with("about:blank")
+    {
         return Err("URL must use http://, https://, file://, or about:blank".to_string());
     }
-    if let Some(after_scheme) = lower.strip_prefix("http://").or_else(|| lower.strip_prefix("https://")) {
-        let authority_end = after_scheme.find(|c| matches!(c, '/' | '?' | '#')).unwrap_or(after_scheme.len());
+    if let Some(after_scheme) = lower
+        .strip_prefix("http://")
+        .or_else(|| lower.strip_prefix("https://"))
+    {
+        let authority_end = after_scheme
+            .find(|c| matches!(c, '/' | '?' | '#'))
+            .unwrap_or(after_scheme.len());
         let authority = &after_scheme[..authority_end];
         if authority.contains('\\') {
-            return Err("Blocked URL with backslash in authority (WHATWG parser differential guard)".to_string());
+            return Err(
+                "Blocked URL with backslash in authority (WHATWG parser differential guard)"
+                    .to_string(),
+            );
         }
         if authority.contains('@') {
-            return Err("Blocked URL with userinfo '@' in authority (host-spoofing guard)".to_string());
+            return Err(
+                "Blocked URL with userinfo '@' in authority (host-spoofing guard)".to_string(),
+            );
         }
         if authority.contains('%') {
-            return Err("Blocked URL with percent-encoded hostname (SSRF obfuscation guard)".to_string());
+            return Err(
+                "Blocked URL with percent-encoded hostname (SSRF obfuscation guard)".to_string(),
+            );
         }
         let host = extract_authority_host(authority);
         if is_blocked_ssrf_host(host) {
-            return Err(format!("Blocked cloud metadata / private / loopback SSRF endpoint: {}", host));
+            return Err(format!(
+                "Blocked cloud metadata / private / loopback SSRF endpoint: {}",
+                host
+            ));
         }
     }
     // Cloud metadata & SSRF protection (AWS/GCP/Alibaba/Azure IMDSv1/v2 + IPv4-mapped IPv6 + CGNAT)
@@ -378,16 +522,25 @@ fn parse_nonstandard_ipv4(host: &str) -> Option<std::net::Ipv4Addr> {
     let addr = match vals.len() {
         1 => u32::try_from(last).ok()?,
         2 => {
-            if last > 0x00FF_FFFF { return None; }
+            if last > 0x00FF_FFFF {
+                return None;
+            }
             ((vals[0] as u32) << 24) | (last as u32)
         }
         3 => {
-            if last > 0xFFFF { return None; }
+            if last > 0xFFFF {
+                return None;
+            }
             ((vals[0] as u32) << 24) | ((vals[1] as u32) << 16) | (last as u32)
         }
         4 => {
-            if last > 255 { return None; }
-            ((vals[0] as u32) << 24) | ((vals[1] as u32) << 16) | ((vals[2] as u32) << 8) | (last as u32)
+            if last > 255 {
+                return None;
+            }
+            ((vals[0] as u32) << 24)
+                | ((vals[1] as u32) << 16)
+                | ((vals[2] as u32) << 8)
+                | (last as u32)
         }
         _ => return None,
     };
@@ -396,14 +549,26 @@ fn parse_nonstandard_ipv4(host: &str) -> Option<std::net::Ipv4Addr> {
 
 fn is_blocked_ipv4(v4: std::net::Ipv4Addr) -> bool {
     let o = v4.octets();
-    v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
-        || o[0] == 0 || v4.is_broadcast() || v4.is_multicast()
+    v4.is_loopback()
+        || v4.is_private()
+        || v4.is_link_local()
+        || v4.is_unspecified()
+        || o[0] == 0
+        || v4.is_broadcast()
+        || v4.is_multicast()
         || (o[0] == 100 && (64..=127).contains(&o[1]))
 }
 
 fn is_blocked_ssrf_host(host: &str) -> bool {
     let host = host.trim_end_matches('.');
-    if host.is_empty() || matches!(host, "localhost" | "metadata.google.internal" | "metadata.goog") || host.ends_with(".localhost") || host.ends_with(".internal") {
+    if host.is_empty()
+        || matches!(
+            host,
+            "localhost" | "metadata.google.internal" | "metadata.goog"
+        )
+        || host.ends_with(".localhost")
+        || host.ends_with(".internal")
+    {
         return true;
     }
     if let Ok(ip) = host.parse::<std::net::IpAddr>() {
@@ -414,10 +579,18 @@ fn is_blocked_ssrf_host(host: &str) -> bool {
                     return is_blocked_ipv4(mapped);
                 }
                 let seg = v6.segments();
-                if matches!(seg[0..6], [0, 0, 0, 0, 0xffff, 0] | [0x0064, 0xff9b, 0, 0, 0, 0]) {
-                    return is_blocked_ipv4(std::net::Ipv4Addr::from(((seg[6] as u32) << 16) | (seg[7] as u32)));
+                if matches!(
+                    seg[0..6],
+                    [0, 0, 0, 0, 0xffff, 0] | [0x0064, 0xff9b, 0, 0, 0, 0]
+                ) {
+                    return is_blocked_ipv4(std::net::Ipv4Addr::from(
+                        ((seg[6] as u32) << 16) | (seg[7] as u32),
+                    ));
                 }
-                v6.is_loopback() || v6.is_unspecified() || (seg[0] & 0xfe00 == 0xfc00) || (seg[0] & 0xffc0 == 0xfe80)
+                v6.is_loopback()
+                    || v6.is_unspecified()
+                    || (seg[0] & 0xfe00 == 0xfc00)
+                    || (seg[0] & 0xffc0 == 0xfe80)
             }
         };
     }
@@ -434,16 +607,31 @@ pub fn expression_targets_blocked_url(expr: &str) -> Option<String> {
             let start = search_from + pos;
             let rest = &expr[start..];
             let end = rest
-                .find(|c: char| matches!(c, '"' | '\'' | '`' | ')' | ' ' | '\n' | '\r' | '\t' | '>' | ';'))
+                .find(|c: char| {
+                    matches!(
+                        c,
+                        '"' | '\'' | '`' | ')' | ' ' | '\n' | '\r' | '\t' | '>' | ';'
+                    )
+                })
                 .unwrap_or(rest.len());
             let candidate = &rest[..end];
             if let Err(reason) = validate_navigation_url(candidate) {
                 return Some(reason);
             }
             let cand_lower = candidate.to_ascii_lowercase();
-            for priv_host in ["127.0.0.1", "localhost", "[::1]", "10.", "192.168.", "172.16."] {
+            for priv_host in [
+                "127.0.0.1",
+                "localhost",
+                "[::1]",
+                "10.",
+                "192.168.",
+                "172.16.",
+            ] {
                 if cand_lower.contains(&format!("://{}", priv_host)) {
-                    return Some(format!("Blocked private/loopback URL literal in JS eval: {}", candidate));
+                    return Some(format!(
+                        "Blocked private/loopback URL literal in JS eval: {}",
+                        candidate
+                    ));
                 }
             }
             search_from = start + end.max(scheme.len());
@@ -454,13 +642,29 @@ pub fn expression_targets_blocked_url(expr: &str) -> Option<String> {
 
 pub fn redact_cdp_url(url: &str) -> String {
     let mut out = url.to_string();
-    for key in ["token", "api_key", "apikey", "secret", "password", "access_token", "session_key", "auth"] {
+    for key in [
+        "token",
+        "api_key",
+        "apikey",
+        "secret",
+        "password",
+        "access_token",
+        "session_key",
+        "auth",
+    ] {
         for sep in ["?", "&"] {
             let pat = format!("{}{}=", sep, key);
             let mut search_from = 0usize;
-            while let Some(rel_pos) = out[search_from..].as_bytes().windows(pat.len()).position(|w| w.eq_ignore_ascii_case(pat.as_bytes())) {
+            while let Some(rel_pos) = out[search_from..]
+                .as_bytes()
+                .windows(pat.len())
+                .position(|w| w.eq_ignore_ascii_case(pat.as_bytes()))
+            {
                 let val_start = search_from + rel_pos + pat.len();
-                let val_end = out[val_start..].find(|c| c == '&' || c == '#').map(|i| val_start + i).unwrap_or(out.len());
+                let val_end = out[val_start..]
+                    .find(|c| c == '&' || c == '#')
+                    .map(|i| val_start + i)
+                    .unwrap_or(out.len());
                 out.replace_range(val_start..val_end, "[REDACTED]");
                 search_from = val_start + "[REDACTED]".len();
             }
@@ -487,7 +691,8 @@ pub fn sanitize_trojan_unicode(text: &str) -> String {
 pub fn snapshot_html_dom(html: &str, url: &str, max_elements: usize) -> Value {
     let bounded_html = crate::plumbing::text_tokens::safe_utf8_prefix(html, MAX_DOM_SNAPSHOT_BYTES);
     let sanitized = strip_heavy_html_blocks(bounded_html);
-    let title = extract_tag_inner(&sanitized, "title").unwrap_or_else(|| "Untitled Document".to_string());
+    let title =
+        extract_tag_inner(&sanitized, "title").unwrap_or_else(|| "Untitled Document".to_string());
     let mut interactive = Vec::new();
     let mut som_id = 1usize;
     let limit = max_elements.clamp(1, 250);
@@ -499,14 +704,25 @@ pub fn snapshot_html_dom(html: &str, url: &str, max_elements: usize) -> Value {
         if bytes[i] == b'<' {
             let mut quote: Option<u8> = None;
             let rel_end = bytes[i..].iter().position(|&b| match quote {
-                Some(q) => { if b == q { quote = None; } false }
-                None if b == b'"' || b == b'\'' => { quote = Some(b); false }
+                Some(q) => {
+                    if b == q {
+                        quote = None;
+                    }
+                    false
+                }
+                None if b == b'"' || b == b'\'' => {
+                    quote = Some(b);
+                    false
+                }
                 None => b == b'>',
             });
             if let Some(rel_end) = rel_end {
                 let tag_slice = &sanitized[i + 1..i + rel_end];
                 let trimmed = tag_slice.trim();
-                if !trimmed.starts_with('/') && !trimmed.starts_with('!') && !trimmed.starts_with('?') {
+                if !trimmed.starts_with('/')
+                    && !trimmed.starts_with('!')
+                    && !trimmed.starts_with('?')
+                {
                     let tag_name: String = trimmed
                         .chars()
                         .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
@@ -515,10 +731,23 @@ pub fn snapshot_html_dom(html: &str, url: &str, max_elements: usize) -> Value {
                     let role = extract_html_attr(trimmed, "role").unwrap_or_default();
                     let is_interactive = matches!(
                         tag_name.as_str(),
-                        "A" | "BUTTON" | "INPUT" | "SELECT" | "TEXTAREA" | "SUMMARY" | "DETAILS" | "OPTION"
+                        "A" | "BUTTON"
+                            | "INPUT"
+                            | "SELECT"
+                            | "TEXTAREA"
+                            | "SUMMARY"
+                            | "DETAILS"
+                            | "OPTION"
                     ) || matches!(
                         role.as_str(),
-                        "button" | "link" | "textbox" | "checkbox" | "menuitem" | "tab" | "switch" | "combobox"
+                        "button"
+                            | "link"
+                            | "textbox"
+                            | "checkbox"
+                            | "menuitem"
+                            | "tab"
+                            | "switch"
+                            | "combobox"
                     ) || extract_html_attr(trimmed, "onclick").is_some();
 
                     if is_interactive {
@@ -618,7 +847,10 @@ fn extract_html_attr(tag_body: &str, attr_name: &str) -> Option<String> {
     let lower = tag_body.to_ascii_lowercase();
     for quote in ['"', '\''] {
         let pat = format!("{}={}", attr_name.to_ascii_lowercase(), quote);
-        if let Some((pos, _)) = lower.match_indices(&pat).find(|(p, _)| *p == 0 || lower.as_bytes()[p - 1].is_ascii_whitespace()) {
+        if let Some((pos, _)) = lower
+            .match_indices(&pat)
+            .find(|(p, _)| *p == 0 || lower.as_bytes()[p - 1].is_ascii_whitespace())
+        {
             let rest = &tag_body[pos + pat.len()..];
             if let Some(end) = rest.find(quote) {
                 return Some(rest[..end].trim().to_string());
@@ -629,8 +861,13 @@ fn extract_html_attr(tag_body: &str, attr_name: &str) -> Option<String> {
 }
 
 fn extract_following_text(after_open_tag: &str) -> String {
-    let end = after_open_tag.find('<').unwrap_or_else(|| after_open_tag.len().min(120));
-    collapse_whitespace(crate::plumbing::text_tokens::safe_utf8_prefix(after_open_tag, end.min(120)))
+    let end = after_open_tag
+        .find('<')
+        .unwrap_or_else(|| after_open_tag.len().min(120));
+    collapse_whitespace(crate::plumbing::text_tokens::safe_utf8_prefix(
+        after_open_tag,
+        end.min(120),
+    ))
 }
 
 fn strip_all_tags(html: &str) -> String {
@@ -654,13 +891,21 @@ fn collapse_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-pub fn parse_coordinate_value(val: Option<&Value>, dim: u32, default: i32, is_norm_1000: bool) -> i32 {
+pub fn parse_coordinate_value(
+    val: Option<&Value>,
+    dim: u32,
+    default: i32,
+    is_norm_1000: bool,
+) -> i32 {
     let parsed: Option<f64> = match val {
         Some(Value::Number(n)) => n.as_f64(),
         Some(Value::String(s)) => {
             let trimmed = s.trim();
             if let Some(pct) = trimmed.strip_suffix('%') {
-                pct.trim().parse::<f64>().ok().map(|p| (p / 100.0) * (dim as f64))
+                pct.trim()
+                    .parse::<f64>()
+                    .ok()
+                    .map(|p| (p / 100.0) * (dim as f64))
             } else {
                 trimmed.parse::<f64>().ok()
             }
@@ -683,9 +928,18 @@ pub fn parse_coordinate_value(val: Option<&Value>, dim: u32, default: i32, is_no
 }
 
 pub fn parse_scroll_deltas(args: &Value) -> (i32, i32) {
-    let dir = args.get("direction").and_then(|v| v.as_str()).map(|s| s.trim().to_ascii_lowercase());
-    let amount = args.get("amount").or_else(|| args.get("clicks")).or_else(|| args.get("steps"))
-        .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+    let dir = args
+        .get("direction")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_ascii_lowercase());
+    let amount = args
+        .get("amount")
+        .or_else(|| args.get("clicks"))
+        .or_else(|| args.get("steps"))
+        .and_then(|v| {
+            v.as_i64()
+                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        })
         .unwrap_or(2)
         .clamp(-100, 100) as i32;
     let step = amount.saturating_mul(120);
@@ -698,27 +952,47 @@ pub fn parse_scroll_deltas(args: &Value) -> (i32, i32) {
             _ => (0, -step),
         }
     } else {
-        let dx = args.get("delta_x").or_else(|| args.get("dx"))
-            .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+        let dx = args
+            .get("delta_x")
+            .or_else(|| args.get("dx"))
+            .and_then(|v| {
+                v.as_i64()
+                    .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+            })
             .unwrap_or(0) as i32;
-        let dy = args.get("delta_y").or_else(|| args.get("dy"))
-            .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+        let dy = args
+            .get("delta_y")
+            .or_else(|| args.get("dy"))
+            .and_then(|v| {
+                v.as_i64()
+                    .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+            })
             .unwrap_or(-240) as i32;
         (dx, dy)
     }
 }
 
-pub fn parse_drag_points(args: &Value, width: u32, height: u32, cur: [i32; 2], is_norm_1000: bool) -> ([i32; 2], [i32; 2]) {
+pub fn parse_drag_points(
+    args: &Value,
+    width: u32,
+    height: u32,
+    cur: [i32; 2],
+    is_norm_1000: bool,
+) -> ([i32; 2], [i32; 2]) {
     let (fx, fy) = if let Some(arr) = args.get("from").and_then(|v| v.as_array()) {
         if arr.len() >= 2 {
-            (parse_coordinate_value(arr.get(0), width, cur[0], is_norm_1000),
-             parse_coordinate_value(arr.get(1), height, cur[1], is_norm_1000))
+            (
+                parse_coordinate_value(arr.get(0), width, cur[0], is_norm_1000),
+                parse_coordinate_value(arr.get(1), height, cur[1], is_norm_1000),
+            )
         } else {
             (cur[0], cur[1])
         }
     } else {
-        (parse_coordinate_value(args.get("from_x"), width, cur[0], is_norm_1000),
-         parse_coordinate_value(args.get("from_y"), height, cur[1], is_norm_1000))
+        (
+            parse_coordinate_value(args.get("from_x"), width, cur[0], is_norm_1000),
+            parse_coordinate_value(args.get("from_y"), height, cur[1], is_norm_1000),
+        )
     };
 
     let max_w = width.min(i32::MAX as u32) as i32;
@@ -730,25 +1004,49 @@ pub fn parse_drag_points(args: &Value, width: u32, height: u32, cur: [i32; 2], i
 
     let (tx, ty) = if let Some(arr) = args.get("to").and_then(|v| v.as_array()) {
         if arr.len() >= 2 {
-            (parse_coordinate_value(arr.get(0), width, def_tx, is_norm_1000),
-             parse_coordinate_value(arr.get(1), height, def_ty, is_norm_1000))
+            (
+                parse_coordinate_value(arr.get(0), width, def_tx, is_norm_1000),
+                parse_coordinate_value(arr.get(1), height, def_ty, is_norm_1000),
+            )
         } else {
             (def_tx, def_ty)
         }
     } else {
-        (parse_coordinate_value(args.get("to_x").or_else(|| args.get("x")), width, def_tx, is_norm_1000),
-         parse_coordinate_value(args.get("to_y").or_else(|| args.get("y")), height, def_ty, is_norm_1000))
+        (
+            parse_coordinate_value(
+                args.get("to_x").or_else(|| args.get("x")),
+                width,
+                def_tx,
+                is_norm_1000,
+            ),
+            parse_coordinate_value(
+                args.get("to_y").or_else(|| args.get("y")),
+                height,
+                def_ty,
+                is_norm_1000,
+            ),
+        )
     };
 
-    ([fx_clamped, fy_clamped],
-     [tx.clamp(0, max_w), ty.clamp(0, max_h)])
+    (
+        [fx_clamped, fy_clamped],
+        [tx.clamp(0, max_w), ty.clamp(0, max_h)],
+    )
 }
 
 pub fn extract_key_sequence(args: &Value) -> String {
     if let Some(arr) = args.get("keys").and_then(|v| v.as_array()) {
-        arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("+")
+        arr.iter()
+            .filter_map(|v| v.as_str())
+            .collect::<Vec<_>>()
+            .join("+")
     } else {
-        args.get("keys").or_else(|| args.get("key")).or_else(|| args.get("text")).and_then(|v| v.as_str()).unwrap_or("Return").to_string()
+        args.get("keys")
+            .or_else(|| args.get("key"))
+            .or_else(|| args.get("text"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("Return")
+            .to_string()
     }
 }
 
@@ -756,15 +1054,28 @@ pub fn is_blocked_key_combo(combo: &str) -> bool {
     let norm = combo.trim().to_ascii_lowercase().replace(' ', "");
     matches!(
         norm.as_str(),
-        "cmd+shift+backspace" | "command+shift+backspace" | "cmd+option+backspace" | "cmd+alt+backspace"
-        | "cmd+ctrl+q" | "command+control+q" | "cmd+shift+q" | "command+shift+q"
-        | "win+l" | "super+l" | "ctrl+alt+del" | "ctrl+alt+delete" | "option+f4" | "alt+f4"
+        "cmd+shift+backspace"
+            | "command+shift+backspace"
+            | "cmd+option+backspace"
+            | "cmd+alt+backspace"
+            | "cmd+ctrl+q"
+            | "command+control+q"
+            | "cmd+shift+q"
+            | "command+shift+q"
+            | "win+l"
+            | "super+l"
+            | "ctrl+alt+del"
+            | "ctrl+alt+delete"
+            | "option+f4"
+            | "alt+f4"
     )
 }
 
 pub fn is_blocked_type_pattern(text: &str) -> bool {
     let lower = text.trim().to_ascii_lowercase();
-    ["rm -rf /", ":(){:|:&};:", "mkfs", "| bash", "| sh", "| zsh"].iter().any(|p| lower.contains(p))
+    ["rm -rf /", ":(){:|:&};:", "mkfs", "| bash", "| sh", "| zsh"]
+        .iter()
+        .any(|p| lower.contains(p))
 }
 
 pub fn normalize_cua_action(raw: &str) -> &str {
@@ -792,4 +1103,3 @@ pub fn normalize_cua_action(raw: &str) -> &str {
         other => other,
     }
 }
-

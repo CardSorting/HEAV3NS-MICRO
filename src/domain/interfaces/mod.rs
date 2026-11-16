@@ -42,8 +42,17 @@ pub trait ISessionVfs: Send + Sync {
 /// Contractual sovereignty interface for pure-Rust Content-Addressable Workspace Snapshots (`CAS`).
 pub trait IWorkspaceSnapshotCas: Send + Sync {
     fn capture_snapshot(&mut self, label: &str, turn_number: u64) -> Result<String, String>;
-    fn diff_between(&self, base_id: &str, target_id: Option<&str>) -> Result<(Vec<FileChangeReceipt>, String), String>;
-    fn undo_turn_changes(&mut self, pre_turn_id: &str, post_turn_id: &str, force: bool) -> Result<Vec<String>, String>;
+    fn diff_between(
+        &self,
+        base_id: &str,
+        target_id: Option<&str>,
+    ) -> Result<(Vec<FileChangeReceipt>, String), String>;
+    fn undo_turn_changes(
+        &mut self,
+        pre_turn_id: &str,
+        post_turn_id: &str,
+        force: bool,
+    ) -> Result<Vec<String>, String>;
     fn restore_full_snapshot(&mut self, snapshot_id: &str) -> Result<Vec<String>, String>;
 }
 
@@ -54,7 +63,10 @@ pub trait ISkillsIngestor: Send + Sync {
 
 /// Contractual sovereignty interface for cached workspace environment and governance probing.
 pub trait IWorkspacePromptProbe: Send + Sync {
-    fn probe_workspace(&self, workspace_root: &Path) -> crate::domain::types::skill_types::WorkspacePromptFacts;
+    fn probe_workspace(
+        &self,
+        workspace_root: &Path,
+    ) -> crate::domain::types::skill_types::WorkspacePromptFacts;
 }
 
 /// Contractual sovereignty interface for atomic file mutation journaling and rollback.
@@ -65,31 +77,62 @@ pub trait ITransactionJournal: Send + Sync {
 
 /// Contractual sovereignty interface for spatial action mediation and target grounding.
 pub trait ISpatialMediator: Send + Sync {
-    fn ground_contract(&self, contract: &crate::domain::types::spatial_types::SpatialActionContract) -> crate::domain::spatial_action::SpatialGroundingResult;
+    fn ground_contract(
+        &self,
+        contract: &crate::domain::types::spatial_types::SpatialActionContract,
+    ) -> crate::domain::spatial_action::SpatialGroundingResult;
 }
 
 /// Contractual sovereignty interface for Wrapper A (Spatial Grounding Gate).
 pub trait ISpatialGroundingGate: Send + Sync {
-    fn ground(&self, contract: &crate::domain::types::spatial_types::SpatialActionContract) -> crate::domain::spatial_action::SpatialGroundingResult;
+    fn ground(
+        &self,
+        contract: &crate::domain::types::spatial_types::SpatialActionContract,
+    ) -> crate::domain::spatial_action::SpatialGroundingResult;
 }
 
 /// Contractual sovereignty interface for Wrapper B (Execution Assurance Gate).
 pub trait IExecutionAssuranceGate: Send + Sync {
-    fn assure_pre(&self, grounded: &crate::domain::spatial_action::GroundedSpatialTarget, contract: &crate::domain::types::spatial_types::SpatialActionContract) -> Result<(), crate::domain::types::spatial_types::SpatialError>;
-    fn verify_post(&mut self, action: &str, grounded: Option<&crate::domain::spatial_action::GroundedSpatialTarget>, before: &crate::domain::types::spatial_types::SpatialScene, after: &crate::domain::types::spatial_types::SpatialScene, duration_ms: u64) -> crate::domain::spatial_action::SpatialExecutionReceipt;
+    fn assure_pre(
+        &self,
+        grounded: &crate::domain::spatial_action::GroundedSpatialTarget,
+        contract: &crate::domain::types::spatial_types::SpatialActionContract,
+    ) -> Result<(), crate::domain::types::spatial_types::SpatialError>;
+    fn verify_post(
+        &mut self,
+        action: &str,
+        grounded: Option<&crate::domain::spatial_action::GroundedSpatialTarget>,
+        before: &crate::domain::types::spatial_types::SpatialScene,
+        after: &crate::domain::types::spatial_types::SpatialScene,
+        duration_ms: u64,
+    ) -> crate::domain::spatial_action::SpatialExecutionReceipt;
 }
 
 /// Contractual sovereignty interface for environmental observation and modal trap detection.
 pub trait IEnvironmentalObserver: Send + Sync {
-    fn observe_environment(&self) -> crate::domain::types::environmental_types::EnvironmentalObservation;
-    fn detect_modal_trap(&self, obs: &crate::domain::types::environmental_types::EnvironmentalObservation) -> Option<String>;
+    fn observe_environment(
+        &self,
+    ) -> crate::domain::types::environmental_types::EnvironmentalObservation;
+    fn detect_modal_trap(
+        &self,
+        obs: &crate::domain::types::environmental_types::EnvironmentalObservation,
+    ) -> Option<String>;
 }
 
 /// Contractual sovereignty interface for durable behavioral knowledge, interaction patterns, and environmental reconciliation.
 pub trait IBehavioralKnowledgeStore: Send + Sync {
     fn record_outcome(&mut self, pattern_id: &str, app: &str, success: bool, epoch: u64);
-    fn lookup_pattern(&self, app: &str, trigger: &str) -> Option<crate::domain::types::learned_knowledge_types::LearnedInteractionPattern>;
-    fn reconcile_state(&self, recorded_epoch: u64, current_epoch: u64, hash_drift: bool) -> crate::domain::types::learned_knowledge_types::EnvironmentalReconciliationReport;
+    fn lookup_pattern(
+        &self,
+        app: &str,
+        trigger: &str,
+    ) -> Option<crate::domain::types::learned_knowledge_types::LearnedInteractionPattern>;
+    fn reconcile_state(
+        &self,
+        recorded_epoch: u64,
+        current_epoch: u64,
+        hash_drift: bool,
+    ) -> crate::domain::types::learned_knowledge_types::EnvironmentalReconciliationReport;
 }
 
 /// Contractual sovereignty marker for file-backed behavioral knowledge stores.
@@ -97,12 +140,19 @@ pub trait IBehavioralStore: IBehavioralKnowledgeStore {}
 
 /// Contractual sovereignty interface for consulting the Synthetic Swarm on environmental interpretation and recovery.
 pub trait ISwarmIntelligenceConsultant: Send + Sync {
-    fn consult(&self, req: &crate::domain::types::swarm_intelligence_types::SwarmConsultationRequest) -> crate::domain::types::swarm_intelligence_types::SwarmConsultationResponse;
+    fn consult(
+        &self,
+        req: &crate::domain::types::swarm_intelligence_types::SwarmConsultationRequest,
+    ) -> crate::domain::types::swarm_intelligence_types::SwarmConsultationResponse;
 }
 
 /// Contractual sovereignty interface for structural environmental element diffing.
 pub trait IEnvironmentalDiffer: Send + Sync {
-    fn compute_deltas(&self, before: &[serde_json::Value], after: &[serde_json::Value]) -> serde_json::Value;
+    fn compute_deltas(
+        &self,
+        before: &[serde_json::Value],
+        after: &[serde_json::Value],
+    ) -> serde_json::Value;
 }
 
 /// Contractual sovereignty interface for spatial geometry operations and union calculation.
@@ -112,7 +162,11 @@ pub trait ISpatialGeometry: Send + Sync {
 
 /// Contractual sovereignty interface for closed-loop Computer Use orchestration.
 pub trait IComputerUseOrchestrator: Send + Sync {
-    fn execute_closed_loop(&self, goal: &str, contract: &crate::domain::types::spatial_types::SpatialActionContract) -> Result<serde_json::Value, String>;
+    fn execute_closed_loop(
+        &self,
+        goal: &str,
+        contract: &crate::domain::types::spatial_types::SpatialActionContract,
+    ) -> Result<serde_json::Value, String>;
 }
 
 /// Contractual sovereignty interface for batch and single tool execution.
@@ -152,7 +206,8 @@ pub trait ICodexAccountStore: Send + Sync {
     fn active_account_id(&self) -> Option<String>;
     fn rpc_snapshot(&self) -> serde_json::Value;
     fn switch_account(&self, target_id: &str) -> Result<serde_json::Value, String>;
-    fn rename_account(&self, target_id: &str, new_label: &str) -> Result<serde_json::Value, String>;
+    fn rename_account(&self, target_id: &str, new_label: &str)
+        -> Result<serde_json::Value, String>;
     fn remove_account(&self, target_id: &str) -> Result<serde_json::Value, String>;
     fn sign_out(&self, all: bool) -> Result<serde_json::Value, String>;
     fn clear_limit(&self, target_id: &str) -> Result<serde_json::Value, String>;
@@ -167,8 +222,19 @@ pub trait ICodexAccountStore: Send + Sync {
 /// Manages project target discovery, process execution, output capture, and cancellation.
 pub trait IProjectRunner: Send + Sync {
     fn discover(&self, workspace_root: &Path) -> serde_json::Value;
-    fn start(&self, workspace_root: &Path, target_id: &str, expected_revision: Option<&str>) -> Result<serde_json::Value, String>;
+    fn start(
+        &self,
+        workspace_root: &Path,
+        target_id: &str,
+        expected_revision: Option<&str>,
+    ) -> Result<serde_json::Value, String>;
     fn stop(&self) -> serde_json::Value;
     fn status(&self) -> serde_json::Value;
-    fn configure(&self, workspace_root: &Path, command: &str, cwd: &str, preview: Option<&str>) -> Result<serde_json::Value, String>;
+    fn configure(
+        &self,
+        workspace_root: &Path,
+        command: &str,
+        cwd: &str,
+        preview: Option<&str>,
+    ) -> Result<serde_json::Value, String>;
 }

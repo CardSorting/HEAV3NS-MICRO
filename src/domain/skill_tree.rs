@@ -42,15 +42,34 @@ pub struct SkillTreeCatalog {
 }
 
 impl Default for SkillTreeCatalog {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
-fn seed_node(id: &str, name: &str, desc: &str, cat: &str, tier: u8, prereqs: &[&str], tags: &[&str], instr: &str) -> SkillNode {
+fn seed_node(
+    id: &str,
+    name: &str,
+    desc: &str,
+    cat: &str,
+    tier: u8,
+    prereqs: &[&str],
+    tags: &[&str],
+    instr: &str,
+) -> SkillNode {
     SkillNode {
-        id: id.into(), name: name.into(), description: desc.into(), category: cat.into(), tier,
-        prerequisites: prereqs.iter().map(|s| (*s).into()).collect(), synergies: Vec::new(),
-        tags: tags.iter().map(|s| (*s).into()).collect(), mastery: if tier == 1 { 100 } else { 85 },
-        unlocked: true, instructions: instr.into(), source_format: "markdown".into(),
+        id: id.into(),
+        name: name.into(),
+        description: desc.into(),
+        category: cat.into(),
+        tier,
+        prerequisites: prereqs.iter().map(|s| (*s).into()).collect(),
+        synergies: Vec::new(),
+        tags: tags.iter().map(|s| (*s).into()).collect(),
+        mastery: if tier == 1 { 100 } else { 85 },
+        unlocked: true,
+        instructions: instr.into(),
+        source_format: "markdown".into(),
     }
 }
 
@@ -63,7 +82,11 @@ impl SkillTreeCatalog {
             seed_node("adversarial-auditor", "Adversarial Security & Failure-Mode Auditor", "Hunts edge cases, injection vectors, race conditions, and silent failure paths with concrete root-cause fixes.", "security", 3, &["joyzoning-sovereignty"], &["security", "audit", "hardening", "red-team"], "1. Enumerate trust boundaries and untrusted inputs.\n2. Test boundary conditions, malformed payloads, and path traversal.\n3. Replace monkey patches with structural invariants."),
             seed_node("performance-auditor", "Sub-Millisecond Performance & Token Optimizer", "Profiles algorithmic complexity, memory allocations, and token budget efficiency across hot paths.", "systems", 3, &["joyzoning-sovereignty"], &["performance", "latency", "tokens", "optimization"], "1. Eliminate O(N^2) loops and redundant clones.\n2. Bound output payloads with deterministic token truncation.\n3. Verify p50/p95 latency via micro-benchmarks."),
         ];
-        let mut cat = Self { nodes, active_soul: Self::default_soul(), competency_scores: BTreeMap::new() };
+        let mut cat = Self {
+            nodes,
+            active_soul: Self::default_soul(),
+            competency_scores: BTreeMap::new(),
+        };
         cat.recompute_competencies();
         cat
     }
@@ -77,7 +100,8 @@ impl SkillTreeCatalog {
         let axioms = vec![
             "Fix root causes rather than symptoms; never weaken architectural checks.".into(),
             "Verify every mutation with deterministic tests and structural audits.".into(),
-            "Preserve user sovereignty, credential confidentiality, and zero-trust boundaries.".into(),
+            "Preserve user sovereignty, credential confidentiality, and zero-trust boundaries."
+                .into(),
         ];
         let hash = format!("{:08x}", fnv1a_32(axioms.join("|").as_bytes()));
         SoulProfile {
@@ -98,10 +122,16 @@ impl SkillTreeCatalog {
     pub fn recompute_competencies(&mut self) {
         let total = self.nodes.len().max(1) as f64;
         let avg_mastery = self.nodes.iter().map(|n| n.mastery as f64).sum::<f64>() / total;
-        self.competency_scores.insert("architecturalSovereignty".into(), (avg_mastery / 100.0).clamp(0.0, 1.0));
-        self.competency_scores.insert("computerUseAutonomy".into(), 0.96);
-        self.competency_scores.insert("adversarialResilience".into(), 0.97);
-        self.competency_scores.insert("tokenEfficiency".into(), 0.95);
+        self.competency_scores.insert(
+            "architecturalSovereignty".into(),
+            (avg_mastery / 100.0).clamp(0.0, 1.0),
+        );
+        self.competency_scores
+            .insert("computerUseAutonomy".into(), 0.96);
+        self.competency_scores
+            .insert("adversarialResilience".into(), 0.97);
+        self.competency_scores
+            .insert("tokenEfficiency".into(), 0.95);
     }
 
     /// Runs Kahn's algorithm for deterministic topological ordering and cycle detection across the skill DAG.
@@ -120,7 +150,11 @@ impl SkillTreeCatalog {
             }
         }
 
-        let mut queue: VecDeque<String> = in_degree.iter().filter(|(_, &deg)| deg == 0).map(|(k, _)| k.clone()).collect();
+        let mut queue: VecDeque<String> = in_degree
+            .iter()
+            .filter(|(_, &deg)| deg == 0)
+            .map(|(k, _)| k.clone())
+            .collect();
         let mut topo_order = Vec::new();
         while let Some(curr) = queue.pop_front() {
             topo_order.push(curr.clone());
@@ -159,9 +193,22 @@ impl SkillTreeCatalog {
             .and_then(|v| v.as_str())
             .map(slugify)
             .unwrap_or_else(|| slugify(&prompt));
-        let name = args.get("name").and_then(|v| v.as_str()).unwrap_or(&prompt).trim().to_string();
-        let category = args.get("category").and_then(|v| v.as_str()).unwrap_or("custom").to_string();
-        let tier = args.get("tier").and_then(|v| v.as_u64()).unwrap_or(2).clamp(1, 5) as u8;
+        let name = args
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&prompt)
+            .trim()
+            .to_string();
+        let category = args
+            .get("category")
+            .and_then(|v| v.as_str())
+            .unwrap_or("custom")
+            .to_string();
+        let tier = args
+            .get("tier")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(2)
+            .clamp(1, 5) as u8;
         let description = args
             .get("description")
             .and_then(|v| v.as_str())
@@ -180,15 +227,25 @@ impl SkillTreeCatalog {
         let prereqs: Vec<String> = args
             .get("prerequisites")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
             .unwrap_or_else(|| vec!["joyzoning-sovereignty".to_string()]);
         if prereqs.iter().any(|p| p == &id) {
-            return Err(format!("Skill '{id}' cannot list itself as a prerequisite."));
+            return Err(format!(
+                "Skill '{id}' cannot list itself as a prerequisite."
+            ));
         }
         let tags: Vec<String> = args
             .get("tags")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
             .unwrap_or_else(|| vec![category.clone(), "forged".to_string()]);
 
         let node = SkillNode {
@@ -206,7 +263,9 @@ impl SkillTreeCatalog {
             source_format: "forged".into(),
         };
         self.upsert_node(node.clone());
-        Ok(json!({ "status": "forged", "skill": node, "markdown": Self::render_skill_markdown(&node) }))
+        Ok(
+            json!({ "status": "forged", "skill": node, "markdown": Self::render_skill_markdown(&node) }),
+        )
     }
 
     pub fn apply_power_up_pack(&mut self, node_id: &str, pack: &str) -> Result<Value, String> {
@@ -219,7 +278,11 @@ impl SkillTreeCatalog {
             "telemetry-auditor" | "telemetry" => "\n- [Power-Up: Telemetry Auditor] Emit structured progress events and verify zero silent failures.",
             other => return Err(format!("Unknown power-up pack '{other}'. Supported: tdd-enforcer, security-hardener, latency-optimizer, accessibility-som, joyzoning-strict, telemetry-auditor")),
         };
-        let node = self.nodes.iter_mut().find(|n| n.id == node_id).ok_or_else(|| format!("Skill '{node_id}' not found"))?;
+        let node = self
+            .nodes
+            .iter_mut()
+            .find(|n| n.id == node_id)
+            .ok_or_else(|| format!("Skill '{node_id}' not found"))?;
         if !node.instructions.contains(addon) {
             node.instructions.push_str(addon);
         }
@@ -229,15 +292,27 @@ impl SkillTreeCatalog {
         Ok(json!({ "status": "power_up_applied", "pack": pack, "skill": cloned }))
     }
 
-    pub fn clone_skill(&mut self, source_id: &str, new_id: &str, new_name: Option<&str>) -> Result<Value, String> {
-        let src = self.nodes.iter().find(|n| n.id == source_id).cloned().ok_or_else(|| format!("Source skill '{source_id}' not found"))?;
+    pub fn clone_skill(
+        &mut self,
+        source_id: &str,
+        new_id: &str,
+        new_name: Option<&str>,
+    ) -> Result<Value, String> {
+        let src = self
+            .nodes
+            .iter()
+            .find(|n| n.id == source_id)
+            .cloned()
+            .ok_or_else(|| format!("Source skill '{source_id}' not found"))?;
         let target_id = slugify(new_id);
         if target_id == src.id {
             return Err("Target clone ID must differ from source skill ID".to_string());
         }
         let forked = SkillNode {
             id: target_id,
-            name: new_name.map(|s| s.to_string()).unwrap_or_else(|| format!("{} (Fork)", src.name)),
+            name: new_name
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("{} (Fork)", src.name)),
             prerequisites: vec![src.id.clone()],
             ..src
         };
@@ -245,13 +320,24 @@ impl SkillTreeCatalog {
         Ok(json!({ "status": "cloned", "sourceId": source_id, "skill": forked }))
     }
 
-    pub fn lint_and_autofix_skill(&mut self, node_id: &str, autofix: bool) -> Result<Value, String> {
-        let node = self.nodes.iter_mut().find(|n| n.id == node_id).ok_or_else(|| format!("Skill '{node_id}' not found"))?;
+    pub fn lint_and_autofix_skill(
+        &mut self,
+        node_id: &str,
+        autofix: bool,
+    ) -> Result<Value, String> {
+        let node = self
+            .nodes
+            .iter_mut()
+            .find(|n| n.id == node_id)
+            .ok_or_else(|| format!("Skill '{node_id}' not found"))?;
         let mut issues = Vec::new();
         if node.description.trim().len() < 16 {
             issues.push("Description is too short (< 16 chars)".to_string());
             if autofix {
-                node.description = format!("Sovereign operational capability for {} with deterministic verification.", node.name);
+                node.description = format!(
+                    "Sovereign operational capability for {} with deterministic verification.",
+                    node.name
+                );
             }
         }
         if node.instructions.trim().len() < 24 {
@@ -275,7 +361,9 @@ impl SkillTreeCatalog {
         }
         let threats = SafetyPolicy::scan_for_threats(&node.instructions, "context");
         for t in threats {
-            issues.push(format!("Security threat detected in skill instructions: {t}"));
+            issues.push(format!(
+                "Security threat detected in skill instructions: {t}"
+            ));
         }
         Ok(json!({
             "skillId": node.id,
@@ -286,10 +374,16 @@ impl SkillTreeCatalog {
         }))
     }
 
-    pub fn ingest_multi_format(&mut self, filename: &str, raw_content: &str) -> Result<Value, String> {
+    pub fn ingest_multi_format(
+        &mut self,
+        filename: &str,
+        raw_content: &str,
+    ) -> Result<Value, String> {
         let sanitized = sanitize_trojan_unicode(raw_content);
         let lower_name = filename.to_ascii_lowercase();
-        if lower_name.ends_with(".soul.md") || lower_name.contains("soul") && lower_name.ends_with(".json") {
+        if lower_name.ends_with(".soul.md")
+            || lower_name.contains("soul") && lower_name.ends_with(".json")
+        {
             let soul = Self::parse_soul_document(filename, &sanitized);
             self.active_soul = soul.clone();
             return Ok(json!({ "kind": "soul", "profile": soul }));
@@ -305,9 +399,25 @@ impl SkillTreeCatalog {
         if trimmed.starts_with('{') {
             if let Ok(val) = serde_json::from_str::<Value>(trimmed) {
                 let data = val.get("data").unwrap_or(&val);
-                let name = data.get("name").or_else(|| data.get("title")).and_then(|v| v.as_str()).unwrap_or(filename).to_string();
-                let desc = data.get("description").or_else(|| data.get("personality")).and_then(|v| v.as_str()).unwrap_or("Imported JSON capability").to_string();
-                let instr = data.get("instructions").or_else(|| data.get("system_prompt")).or_else(|| data.get("mes_example")).and_then(|v| v.as_str()).unwrap_or(trimmed).to_string();
+                let name = data
+                    .get("name")
+                    .or_else(|| data.get("title"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(filename)
+                    .to_string();
+                let desc = data
+                    .get("description")
+                    .or_else(|| data.get("personality"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Imported JSON capability")
+                    .to_string();
+                let instr = data
+                    .get("instructions")
+                    .or_else(|| data.get("system_prompt"))
+                    .or_else(|| data.get("mes_example"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(trimmed)
+                    .to_string();
                 return SkillNode {
                     id: slugify(&name),
                     name,
@@ -325,10 +435,14 @@ impl SkillTreeCatalog {
             }
         }
         // Auto-sense Anthropic Claude XML (<skill> or <instructions>)
-        if trimmed.starts_with('<') && (trimmed.contains("<instructions>") || trimmed.contains("<skill")) {
+        if trimmed.starts_with('<')
+            && (trimmed.contains("<instructions>") || trimmed.contains("<skill"))
+        {
             let name = extract_xml_tag(trimmed, "name").unwrap_or_else(|| filename.to_string());
-            let desc = extract_xml_tag(trimmed, "description").unwrap_or_else(|| "Imported Claude XML skill".to_string());
-            let instr = extract_xml_tag(trimmed, "instructions").unwrap_or_else(|| trimmed.to_string());
+            let desc = extract_xml_tag(trimmed, "description")
+                .unwrap_or_else(|| "Imported Claude XML skill".to_string());
+            let instr =
+                extract_xml_tag(trimmed, "instructions").unwrap_or_else(|| trimmed.to_string());
             return SkillNode {
                 id: slugify(&name),
                 name,
@@ -345,7 +459,10 @@ impl SkillTreeCatalog {
             };
         }
         // Default: Markdown with optional YAML frontmatter
-        let mut name = filename.trim_end_matches(".md").trim_end_matches(".skill").to_string();
+        let mut name = filename
+            .trim_end_matches(".md")
+            .trim_end_matches(".skill")
+            .to_string();
         let mut desc = "Markdown skill capability".to_string();
         let mut category = "general".to_string();
         let mut prereqs = Vec::new();
@@ -393,7 +510,11 @@ impl SkillTreeCatalog {
     pub fn parse_soul_document(filename: &str, content: &str) -> SoulProfile {
         let mut soul = Self::default_soul();
         let clean = sanitize_trojan_unicode(content);
-        soul.id = slugify(filename.trim_end_matches(".soul.md").trim_end_matches(".md"));
+        soul.id = slugify(
+            filename
+                .trim_end_matches(".soul.md")
+                .trim_end_matches(".md"),
+        );
         for line in clean.lines() {
             let l = line.trim();
             if let Some(v) = l.strip_prefix("name:") {
@@ -417,7 +538,11 @@ impl SkillTreeCatalog {
     }
 
     pub fn export_node(&self, node_id: &str, format: &str) -> Result<Value, String> {
-        let node = self.nodes.iter().find(|n| n.id == node_id).ok_or_else(|| format!("Skill '{node_id}' not found"))?;
+        let node = self
+            .nodes
+            .iter()
+            .find(|n| n.id == node_id)
+            .ok_or_else(|| format!("Skill '{node_id}' not found"))?;
         let fmt = format.trim().to_ascii_lowercase();
         let payload = match fmt.as_str() {
             "character_card_v2" | "card" => json!({
@@ -454,20 +579,42 @@ fn slugify(input: &str) -> String {
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
-    let collapsed = s.split('-').filter(|p| !p.is_empty()).collect::<Vec<_>>().join("-");
-    if collapsed.is_empty() { "custom-skill".to_string() } else { collapsed }
+    let collapsed = s
+        .split('-')
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if collapsed.is_empty() {
+        "custom-skill".to_string()
+    } else {
+        collapsed
+    }
 }
 
 fn escape_xml(input: &str) -> String {
-    input.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
+    input
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 fn unescape_xml(input: &str) -> String {
-    input.replace("&apos;", "'").replace("&quot;", "\"").replace("&gt;", ">").replace("&lt;", "<").replace("&amp;", "&")
+    input
+        .replace("&apos;", "'")
+        .replace("&quot;", "\"")
+        .replace("&gt;", ">")
+        .replace("&lt;", "<")
+        .replace("&amp;", "&")
 }
 
 fn escape_yaml_quoted(input: &str) -> String {
-    input.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r")
+    input
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
 }
 
 fn extract_xml_tag(xml: &str, tag: &str) -> Option<String> {

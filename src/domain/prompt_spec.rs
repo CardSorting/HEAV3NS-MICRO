@@ -73,7 +73,11 @@ impl ModelPromptFamily {
             Self::Anthropic
         } else if {
             let unvendored = m.split_once('/').map(|(_, s)| s).unwrap_or(&m);
-            m.contains("gpt-6") || m.contains("gpt-5") || unvendored.starts_with("o1") || unvendored.starts_with("o3") || unvendored.starts_with("o4")
+            m.contains("gpt-6")
+                || m.contains("gpt-5")
+                || unvendored.starts_with("o1")
+                || unvendored.starts_with("o3")
+                || unvendored.starts_with("o4")
         } {
             Self::OpenAiReasoning
         } else {
@@ -130,7 +134,11 @@ impl Default for SystemPromptSpec {
 }
 
 impl SystemPromptSpec {
-    pub fn for_turn(config: &AgentConfig, authority: ExecutionAuthorityLevel, active_soul: Option<SoulProfile>) -> Self {
+    pub fn for_turn(
+        config: &AgentConfig,
+        authority: ExecutionAuthorityLevel,
+        active_soul: Option<SoulProfile>,
+    ) -> Self {
         Self {
             profile: PromptProfile::select(config),
             authority,
@@ -139,7 +147,11 @@ impl SystemPromptSpec {
         }
     }
 
-    pub fn for_specialist(role: impl Into<String>, parent_objective: impl Into<String>, assigned_files: Vec<String>) -> Self {
+    pub fn for_specialist(
+        role: impl Into<String>,
+        parent_objective: impl Into<String>,
+        assigned_files: Vec<String>,
+    ) -> Self {
         Self {
             profile: PromptProfile::SwarmSpecialist,
             authority: ExecutionAuthorityLevel::Autonomous,
@@ -231,22 +243,37 @@ impl SystemPromptSpec {
         skills: &[SkillManifest],
     ) -> String {
         if self.profile == PromptProfile::SideQuestion {
-            return format!("# Environment\n{}", Self::render_env_line(config, workspace_root, facts));
+            return format!(
+                "# Environment\n{}",
+                Self::render_env_line(config, workspace_root, facts)
+            );
         }
         let mut tail = Vec::new();
         if self.profile == PromptProfile::SwarmSpecialist {
             if let Some(ctx) = self.swarm_specialist.as_ref() {
-                let mut scope_lines = vec![format!("# Assignment Scope\n- Parent Objective: {}", ctx.parent_objective)];
+                let mut scope_lines = vec![format!(
+                    "# Assignment Scope\n- Parent Objective: {}",
+                    ctx.parent_objective
+                )];
                 if !ctx.assigned_files.is_empty() {
-                    scope_lines.push(format!("- Assigned Files (exclusive): {}", ctx.assigned_files.join(", ")));
+                    scope_lines.push(format!(
+                        "- Assigned Files (exclusive): {}",
+                        ctx.assigned_files.join(", ")
+                    ));
                 }
                 scope_lines.push(Self::render_env_line(config, workspace_root, facts));
                 tail.push(scope_lines.join("\n"));
             } else {
-                tail.push(format!("# Environment\n{}", Self::render_env_line(config, workspace_root, facts)));
+                tail.push(format!(
+                    "# Environment\n{}",
+                    Self::render_env_line(config, workspace_root, facts)
+                ));
             }
         } else {
-            tail.push(format!("# Environment\n{}", Self::render_env_line(config, workspace_root, facts)));
+            tail.push(format!(
+                "# Environment\n{}",
+                Self::render_env_line(config, workspace_root, facts)
+            ));
         }
 
         let compact_jz = self.profile != PromptProfile::Standard;
@@ -314,9 +341,21 @@ impl SystemPromptSpec {
         }
     }
 
-    fn render_env_line(config: &AgentConfig, workspace_root: &Path, facts: &WorkspacePromptFacts) -> String {
-        let os = if facts.os.is_empty() { "unknown" } else { facts.os.as_str() };
-        let shell = if facts.shell.is_empty() { "sh" } else { facts.shell.as_str() };
+    fn render_env_line(
+        config: &AgentConfig,
+        workspace_root: &Path,
+        facts: &WorkspacePromptFacts,
+    ) -> String {
+        let os = if facts.os.is_empty() {
+            "unknown"
+        } else {
+            facts.os.as_str()
+        };
+        let shell = if facts.shell.is_empty() {
+            "sh"
+        } else {
+            facts.shell.as_str()
+        };
         let mut line = format!(
             "- Workspace: {} | OS: {} | Shell: {} | Model: {}",
             workspace_root.display(),
@@ -382,15 +421,24 @@ impl SystemPromptSpec {
         lines.push("<available_skills trust=\"untrusted-catalog\">".to_string());
         for s in skills.iter().take(max_items) {
             let desc = truncate_text_to_token_budget(s.description.trim(), 36);
-            let clean_name = escape_angle_brackets(&s.name).replace('"', "\\\"").replace(['\n', '\r'], " ");
-            let clean_desc = escape_angle_brackets(&desc).replace('"', "\\\"").replace(['\n', '\r'], " ");
+            let clean_name = escape_angle_brackets(&s.name)
+                .replace('"', "\\\"")
+                .replace(['\n', '\r'], " ");
+            let clean_desc = escape_angle_brackets(&desc)
+                .replace('"', "\\\"")
+                .replace(['\n', '\r'], " ");
             lines.push(format!("  - \"{clean_name}\": \"{clean_desc}\""));
         }
         if skills.len() > max_items {
-            lines.push(format!("  [{} additional skills omitted]", skills.len() - max_items));
+            lines.push(format!(
+                "  [{} additional skills omitted]",
+                skills.len() - max_items
+            ));
         }
         lines.push("</available_skills>".to_string());
-        lines.push("Call `use_skill(name=\"<exact_name>\")` when a task matches a skill.".to_string());
+        lines.push(
+            "Call `use_skill(name=\"<exact_name>\")` when a task matches a skill.".to_string(),
+        );
         Some(lines.join("\n"))
     }
 
@@ -421,8 +469,14 @@ pub fn format_bounded_handoff_item(raw: &str, max_bytes: usize) -> String {
     let cap = max_bytes.saturating_sub(marker.len()).max(32);
     let (mut escaped_len, mut cut) = (0usize, 0usize);
     for (idx, ch) in raw.char_indices() {
-        let ch_len = match ch { '&' => 5, '<' | '>' => 4, _ => ch.len_utf8() };
-        if escaped_len + ch_len > cap { break; }
+        let ch_len = match ch {
+            '&' => 5,
+            '<' | '>' => 4,
+            _ => ch.len_utf8(),
+        };
+        if escaped_len + ch_len > cap {
+            break;
+        }
         escaped_len += ch_len;
         cut = idx + ch.len_utf8();
     }
@@ -430,5 +484,8 @@ pub fn format_bounded_handoff_item(raw: &str, max_bytes: usize) -> String {
 }
 
 pub fn escape_angle_brackets(input: &str) -> String {
-    input.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    input
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }

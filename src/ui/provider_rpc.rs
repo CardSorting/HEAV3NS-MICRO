@@ -1,6 +1,8 @@
 // [LAYER: UI]
 use crate::core::engine::AgentEngine;
-use crate::domain::types::provider_registry::{canonicalize_provider_id, is_retired_provider, lookup_provider_descriptor, PROVIDER_DESCRIPTORS};
+use crate::domain::types::provider_registry::{
+    canonicalize_provider_id, is_retired_provider, lookup_provider_descriptor, PROVIDER_DESCRIPTORS,
+};
 use crate::plumbing::hash_and_math::now_ms;
 use crate::plumbing::text_tokens::mask_secret_preview;
 use crate::ui::cli_presenter::Heav3nsUserConfig;
@@ -19,7 +21,10 @@ fn is_valid_ipc_model_id(raw: &str) -> bool {
     if !first.is_ascii_alphanumeric() {
         return false;
     }
-    chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '/' | '[' | ']' | '-' | '@' | '+'))
+    chars.all(|c| {
+        c.is_ascii_alphanumeric()
+            || matches!(c, '.' | '_' | ':' | '/' | '[' | ']' | '-' | '@' | '+')
+    })
 }
 
 /// Handles ChatGPT multi-account mutations (`switch`, `rename`, `remove`, `signOut`, `clearLimit`, `setAuto`).
@@ -39,7 +44,10 @@ pub fn handle_account_mutation_rpc(method: &str, params: &Value) -> Result<Value
         }
         "clearLimit" => store.clear_limit(target),
         "setAuto" => {
-            let enabled = params.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+            let enabled = params
+                .get("enabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
             store.set_auto_switch(enabled)
         }
         _ => Ok(store.rpc_snapshot()),
@@ -60,12 +68,21 @@ pub fn handle_provider_credential_rpc(
     let raw_prefix = method.split('.').next().unwrap_or("openrouter");
     let action = method.split('.').nth(1).unwrap_or("status");
     let target_raw = if raw_prefix == "provider" {
-        params.get("provider").and_then(Value::as_str).unwrap_or(active_provider)
+        params
+            .get("provider")
+            .and_then(Value::as_str)
+            .unwrap_or(active_provider)
     } else {
         raw_prefix
     };
     let desc = lookup_provider_descriptor(target_raw);
-    if desc.is_none() && (target_raw.is_empty() || target_raw.len() > 64 || !target_raw.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))) {
+    if desc.is_none()
+        && (target_raw.is_empty()
+            || target_raw.len() > 64
+            || !target_raw
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.')))
+    {
         return json!({ "error": "Invalid provider identifier." });
     }
     let slot = desc
@@ -82,7 +99,8 @@ pub fn handle_provider_credential_rpc(
     let active_slot = lookup_provider_descriptor(active_provider)
         .map(|d| d.secret_slot)
         .unwrap_or(active_provider);
-    let affects_active = active_slot.eq_ignore_ascii_case(&slot) || active_provider.eq_ignore_ascii_case(&canon_id);
+    let affects_active =
+        active_slot.eq_ignore_ascii_case(&slot) || active_provider.eq_ignore_ascii_case(&canon_id);
 
     let apply_clear = |keys: &mut BTreeMap<String, String>| {
         keys.remove(&slot);
@@ -94,13 +112,17 @@ pub fn handle_provider_credential_rpc(
                 .unwrap_or(true)
         });
         if persist {
-            let _cfg_guard = USER_CONFIG_IO_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let _cfg_guard = USER_CONFIG_IO_LOCK
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             if let Some(mut ucfg) = Heav3nsUserConfig::load() {
                 ucfg.set_provider_key(&slot, String::new());
                 let cfg_matches = ucfg.provider.as_deref().is_some_and(|p| {
                     lookup_provider_descriptor(p)
                         .map(|d| d.secret_slot.eq_ignore_ascii_case(&slot))
-                        .unwrap_or_else(|| p.eq_ignore_ascii_case(&slot) || p.eq_ignore_ascii_case(&canon_id))
+                        .unwrap_or_else(|| {
+                            p.eq_ignore_ascii_case(&slot) || p.eq_ignore_ascii_case(&canon_id)
+                        })
                 });
                 if cfg_matches {
                     ucfg.api_key = None;
@@ -109,14 +131,27 @@ pub fn handle_provider_credential_rpc(
             }
         }
         if affects_active {
-            let endpoints = Heav3nsUserConfig::load().map(|c| c.provider_endpoints).unwrap_or_default();
-            engine.switch_http_provider_with_vault(active_provider, active_model, None, Some(String::new()), keys, &endpoints);
+            let endpoints = Heav3nsUserConfig::load()
+                .map(|c| c.provider_endpoints)
+                .unwrap_or_default();
+            engine.switch_http_provider_with_vault(
+                active_provider,
+                active_model,
+                None,
+                Some(String::new()),
+                keys,
+                &endpoints,
+            );
         }
     };
 
     match action {
         "saveKey" => {
-            if let Some(raw_k) = params.get("key").or_else(|| params.get("apiKey")).and_then(Value::as_str) {
+            if let Some(raw_k) = params
+                .get("key")
+                .or_else(|| params.get("apiKey"))
+                .and_then(Value::as_str)
+            {
                 let clean = raw_k.trim().to_string();
                 if clean.len() > 4096 {
                     return json!({ "error": "API key exceeds 4096-byte safety limit." });
@@ -129,14 +164,25 @@ pub fn handle_provider_credential_rpc(
                         provider_keys.insert(raw_prefix.to_string(), clean.clone());
                     }
                     if persist {
-                        let _cfg_guard = USER_CONFIG_IO_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+                        let _cfg_guard = USER_CONFIG_IO_LOCK
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner());
                         let mut ucfg = Heav3nsUserConfig::load().unwrap_or_default();
                         ucfg.set_provider_key(&slot, clean.clone());
                         let _ = ucfg.save();
                     }
                     if affects_active {
-                        let endpoints = Heav3nsUserConfig::load().map(|c| c.provider_endpoints).unwrap_or_default();
-                        engine.switch_http_provider_with_vault(active_provider, active_model, None, Some(clean), provider_keys, &endpoints);
+                        let endpoints = Heav3nsUserConfig::load()
+                            .map(|c| c.provider_endpoints)
+                            .unwrap_or_default();
+                        engine.switch_http_provider_with_vault(
+                            active_provider,
+                            active_model,
+                            None,
+                            Some(clean),
+                            provider_keys,
+                            &endpoints,
+                        );
                     }
                 }
             }
@@ -147,7 +193,13 @@ pub fn handle_provider_credential_rpc(
 
     let saved_val = provider_keys
         .get(&slot)
-        .or_else(|| if raw_prefix != "provider" { provider_keys.get(raw_prefix) } else { None })
+        .or_else(|| {
+            if raw_prefix != "provider" {
+                provider_keys.get(raw_prefix)
+            } else {
+                None
+            }
+        })
         .cloned();
     let env_val = desc.and_then(|d| {
         d.env_vars
@@ -155,7 +207,8 @@ pub fn handle_provider_credential_rpc(
             .find_map(|ev| std::env::var(ev).ok().filter(|v| !v.trim().is_empty()))
     });
     let effective = saved_val.clone().or(env_val);
-    let has_oauth = canon_id == "openai-codex" && AgentEngine::default_account_store().has_active_account();
+    let has_oauth =
+        canon_id == "openai-codex" && AgentEngine::default_account_store().has_active_account();
     json!({
         "provider": if raw_prefix == "provider" && !target_raw.is_empty() { target_raw } else { raw_prefix },
         "canonicalProvider": canon_id,
@@ -173,7 +226,11 @@ fn catalog_model_slugs(provider: &str, keep_vendor: bool, limit: usize) -> Vec<S
         let slug = if keep_vendor {
             entry.id.clone()
         } else {
-            entry.id.split_once('/').map(|(_, s)| s.to_string()).unwrap_or_else(|| entry.id.clone())
+            entry
+                .id
+                .split_once('/')
+                .map(|(_, s)| s.to_string())
+                .unwrap_or_else(|| entry.id.clone())
         };
         if is_valid_ipc_model_id(&slug) && seen.insert(slug.clone()) {
             out.push(slug);
@@ -202,8 +259,21 @@ fn normalize_ipc_reasoning(raw: &str) -> &'static str {
 }
 
 /// Builds the synchronized `models.list` catalog across all 65 active canonical providers (`WorkspaceModelCatalog` contract).
-pub fn build_sovereign_model_catalog(provider: &str, model: &str, reasoning: &str, revision: i64, local_ollama: &[String]) -> Value {
-    build_sovereign_model_catalog_with_recent(provider, model, reasoning, revision, local_ollama, &[])
+pub fn build_sovereign_model_catalog(
+    provider: &str,
+    model: &str,
+    reasoning: &str,
+    revision: i64,
+    local_ollama: &[String],
+) -> Value {
+    build_sovereign_model_catalog_with_recent(
+        provider,
+        model,
+        reasoning,
+        revision,
+        local_ollama,
+        &[],
+    )
 }
 
 pub fn build_sovereign_model_catalog_with_recent(
@@ -215,11 +285,13 @@ pub fn build_sovereign_model_catalog_with_recent(
     recent_entries: &[(String, String, String)],
 ) -> Value {
     let active_prov = canonicalize_provider_id(provider);
-    let safe_prov = if active_prov.is_empty() || active_prov == "scripted" || is_retired_provider(&active_prov) {
-        "openai-codex".to_string()
-    } else {
-        active_prov
-    };
+    let safe_prov =
+        if active_prov.is_empty() || active_prov == "scripted" || is_retired_provider(&active_prov)
+        {
+            "openai-codex".to_string()
+        } else {
+            active_prov
+        };
     let safe_reasoning = normalize_ipc_reasoning(reasoning);
     let ollama_models: Vec<String> = {
         let mut dedup = Vec::new();
@@ -230,35 +302,149 @@ pub fn build_sovereign_model_catalog_with_recent(
             }
         }
         if dedup.is_empty() {
-            vec!["qwen2.5-coder:14b".to_string(), "deepseek-r1:14b".to_string(), "llama3.2".to_string()]
+            vec![
+                "qwen2.5-coder:14b".to_string(),
+                "deepseek-r1:14b".to_string(),
+                "llama3.2".to_string(),
+            ]
         } else {
             dedup
         }
     };
 
     let curated: &[(&str, &str, &str, bool)] = &[
-        ("openai-codex", "OpenAI Codex", "OpenAI Responses (/v1/responses) reasoning & tool execution", false),
-        ("openai", "OpenAI API", "Direct OpenAI Chat Completions frontier models", false),
-        ("claude-subscription-directsdk-experimental", "Claude Code", "Anthropic Claude subscription & OAuth direct SDK", false),
-        ("anthropic", "Anthropic Claude", "Native Anthropic Messages (/v1/messages) with KV-pinning", false),
-        ("gemini", "Google Gemini", "Native Gemini v1beta high-context multimodal synthesis", false),
-        ("deepseek", "DeepSeek", "DeepSeek V4 Pro / V4.1 Flash / Reasoner", false),
-        ("xai", "xAI Grok", "Grok 4.7 & Grok Build fast engineering models", false),
-        ("groq", "Groq", "Ultra-low-latency LPU inference gateway", false),
-        ("mistral", "Mistral AI", "Mistral Large & Codestral code specialists", false),
-        ("qwen", "Alibaba Qwen", "DashScope Qwen 3.8 Max Prime & Coder", false),
-        ("moonshot", "Moonshot Kimi", "Kimi K3.1 Pro & K2.7 Code 1M-context models", false),
-        ("zai", "Z.ai GLM", "GLM 5.3 FlashX & GLM 5.1 reasoning suite", false),
-        ("nvidia-nim", "NVIDIA NIM", "NVIDIA Nemotron & enterprise NIM endpoints", true),
-        ("openrouter", "OpenRouter", "Live auto-refreshed 460+ multi-vendor gateway", true),
-        ("orcarouter", "OrcaRouter", "Unified multi-vendor reasoning & coding router", true),
-        ("codewhale", "Codewhale", "Model-aware multi-dialect cloud gateway", true),
-        ("cline-pass", "Cline Pass", "Cline multi-vendor coding gateway", true),
-        ("nous", "Nous Research", "Hermes 4 70B & 405B open-weights frontier", false),
-        ("opencode", "OpenCode Zen", "OpenCode Zen model-aware coding router", false),
-        ("opencode-go", "OpenCode Go", "OpenCode Go multi-dialect subscription roster", false),
-        ("ollama", "Local Ollama (Zero-Key)", "100% local private inference on localhost:11434", false),
-        ("apple-playground", "On this Mac (Playground)", "Local Apple Foundation Models on-device loopback", false),
+        (
+            "openai-codex",
+            "OpenAI Codex",
+            "OpenAI Responses (/v1/responses) reasoning & tool execution",
+            false,
+        ),
+        (
+            "openai",
+            "OpenAI API",
+            "Direct OpenAI Chat Completions frontier models",
+            false,
+        ),
+        (
+            "claude-subscription-directsdk-experimental",
+            "Claude Code",
+            "Anthropic Claude subscription & OAuth direct SDK",
+            false,
+        ),
+        (
+            "anthropic",
+            "Anthropic Claude",
+            "Native Anthropic Messages (/v1/messages) with KV-pinning",
+            false,
+        ),
+        (
+            "gemini",
+            "Google Gemini",
+            "Native Gemini v1beta high-context multimodal synthesis",
+            false,
+        ),
+        (
+            "deepseek",
+            "DeepSeek",
+            "DeepSeek V4 Pro / V4.1 Flash / Reasoner",
+            false,
+        ),
+        (
+            "xai",
+            "xAI Grok",
+            "Grok 4.7 & Grok Build fast engineering models",
+            false,
+        ),
+        (
+            "groq",
+            "Groq",
+            "Ultra-low-latency LPU inference gateway",
+            false,
+        ),
+        (
+            "mistral",
+            "Mistral AI",
+            "Mistral Large & Codestral code specialists",
+            false,
+        ),
+        (
+            "qwen",
+            "Alibaba Qwen",
+            "DashScope Qwen 3.8 Max Prime & Coder",
+            false,
+        ),
+        (
+            "moonshot",
+            "Moonshot Kimi",
+            "Kimi K3.1 Pro & K2.7 Code 1M-context models",
+            false,
+        ),
+        (
+            "zai",
+            "Z.ai GLM",
+            "GLM 5.3 FlashX & GLM 5.1 reasoning suite",
+            false,
+        ),
+        (
+            "nvidia-nim",
+            "NVIDIA NIM",
+            "NVIDIA Nemotron & enterprise NIM endpoints",
+            true,
+        ),
+        (
+            "openrouter",
+            "OpenRouter",
+            "Live auto-refreshed 460+ multi-vendor gateway",
+            true,
+        ),
+        (
+            "orcarouter",
+            "OrcaRouter",
+            "Unified multi-vendor reasoning & coding router",
+            true,
+        ),
+        (
+            "codewhale",
+            "Codewhale",
+            "Model-aware multi-dialect cloud gateway",
+            true,
+        ),
+        (
+            "cline-pass",
+            "Cline Pass",
+            "Cline multi-vendor coding gateway",
+            true,
+        ),
+        (
+            "nous",
+            "Nous Research",
+            "Hermes 4 70B & 405B open-weights frontier",
+            false,
+        ),
+        (
+            "opencode",
+            "OpenCode Zen",
+            "OpenCode Zen model-aware coding router",
+            false,
+        ),
+        (
+            "opencode-go",
+            "OpenCode Go",
+            "OpenCode Go multi-dialect subscription roster",
+            false,
+        ),
+        (
+            "ollama",
+            "Local Ollama (Zero-Key)",
+            "100% local private inference on localhost:11434",
+            false,
+        ),
+        (
+            "apple-playground",
+            "On this Mac (Playground)",
+            "Local Apple Foundation Models on-device loopback",
+            false,
+        ),
     ];
 
     let mut seen_ids = BTreeSet::new();
@@ -274,7 +460,8 @@ pub fn build_sovereign_model_catalog_with_recent(
             ],
             _ => catalog_model_slugs(id, keep_vendor, 6),
         };
-        providers_json.push(json!({ "id": id, "label": label, "detail": detail, "models": models }));
+        providers_json
+            .push(json!({ "id": id, "label": label, "detail": detail, "models": models }));
     }
 
     for d in PROVIDER_DESCRIPTORS {
@@ -413,7 +600,9 @@ pub fn build_sovereign_model_discovery(provider: &str, live_probed: &[String]) -
                 let id = if keep_vendor {
                     e.id.clone()
                 } else {
-                    e.id.split_once('/').map(|(_, s)| s.to_string()).unwrap_or_else(|| e.id.clone())
+                    e.id.split_once('/')
+                        .map(|(_, s)| s.to_string())
+                        .unwrap_or_else(|| e.id.clone())
                 };
                 if is_valid_ipc_model_id(&id) && seen.insert(id.clone()) {
                     list.push(json!({

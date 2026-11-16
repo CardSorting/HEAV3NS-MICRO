@@ -42,7 +42,8 @@ impl SessionCompactor {
 
     #[inline]
     pub fn is_checkpoint(msg: &SessionMessage) -> bool {
-        (msg.role == Role::User || msg.role == Role::Assistant) && msg.content.starts_with(CONTEXT_CHECKPOINT_PREFIX)
+        (msg.role == Role::User || msg.role == Role::Assistant)
+            && msg.content.starts_with(CONTEXT_CHECKPOINT_PREFIX)
     }
 
     pub fn group_turns(conversation: &[SessionMessage]) -> Vec<Vec<SessionMessage>> {
@@ -96,7 +97,10 @@ impl SessionCompactor {
             .cloned()
             .collect();
 
-        let conversation: Vec<SessionMessage> = canonical.into_iter().filter(|m| m.role != Role::System).collect();
+        let conversation: Vec<SessionMessage> = canonical
+            .into_iter()
+            .filter(|m| m.role != Role::System)
+            .collect();
         let turns = Self::group_turns(&conversation);
         if turns.len() <= 1 {
             return (
@@ -165,7 +169,11 @@ impl SessionCompactor {
         )
     }
 
-    fn build_checkpoint(&self, messages: &[SessionMessage], max_tokens: usize) -> (SessionMessage, String) {
+    fn build_checkpoint(
+        &self,
+        messages: &[SessionMessage],
+        max_tokens: usize,
+    ) -> (SessionMessage, String) {
         let mut hasher = Sha256::new();
         for (i, m) in messages.iter().enumerate() {
             if i > 0 {
@@ -180,7 +188,8 @@ impl SessionCompactor {
         } else {
             messages
         };
-        let per_msg_budget = ((max_tokens.saturating_sub(64)) / covered_slice.len().max(1)).clamp(8, 180);
+        let per_msg_budget =
+            ((max_tokens.saturating_sub(64)) / covered_slice.len().max(1)).clamp(8, 180);
         let mut records = Vec::with_capacity(covered_slice.len());
         let mut used_tokens = 48usize;
         for m in covered_slice {
@@ -237,7 +246,10 @@ impl SessionCompactor {
                 .as_ref()
                 .map(|tcs| {
                     tcs.iter()
-                        .map(|tc| 8 + estimate_text_tokens(&tc.function.name) + estimate_text_tokens(&tc.function.arguments))
+                        .map(|tc| {
+                            8 + estimate_text_tokens(&tc.function.name)
+                                + estimate_text_tokens(&tc.function.arguments)
+                        })
                         .sum()
                 })
                 .unwrap_or(0);
@@ -247,7 +259,8 @@ impl SessionCompactor {
                 used += msg_tokens;
             } else if kept_rev.is_empty() && msg.role != Role::Tool {
                 let mut clamped = msg.clone();
-                clamped.content = truncate_text_to_token_budget(&msg.content, remaining_budget.saturating_sub(4));
+                clamped.content =
+                    truncate_text_to_token_budget(&msg.content, remaining_budget.saturating_sub(4));
                 clamped.tool_calls = None;
                 kept_rev.push(clamped);
                 break;
@@ -266,7 +279,10 @@ impl SessionCompactor {
                 }
             } else if let Some(fallback) = non_system.iter().rev().find(|m| m.role == Role::User) {
                 let mut clamped = fallback.clone();
-                clamped.content = truncate_text_to_token_budget(&fallback.content, (remaining_budget / 3).max(32));
+                clamped.content = truncate_text_to_token_budget(
+                    &fallback.content,
+                    (remaining_budget / 3).max(32),
+                );
                 clamped.tool_calls = None;
                 kept_rev.insert(0, clamped);
             } else {
@@ -278,7 +294,10 @@ impl SessionCompactor {
         if kept_rev.is_empty() {
             if let Some(fallback) = non_system.iter().rev().find(|m| m.role == Role::User) {
                 let mut clamped = fallback.clone();
-                clamped.content = truncate_text_to_token_budget(&fallback.content, remaining_budget.saturating_sub(4));
+                clamped.content = truncate_text_to_token_budget(
+                    &fallback.content,
+                    remaining_budget.saturating_sub(4),
+                );
                 clamped.tool_calls = None;
                 kept_rev.push(clamped);
             }
@@ -374,11 +393,19 @@ impl SessionStore {
         self.rebuild_arena();
     }
 
-    pub fn compact(&mut self, compactor: &SessionCompactor, policy: &CompactionPolicy) -> CompactionReport {
+    pub fn compact(
+        &mut self,
+        compactor: &SessionCompactor,
+        policy: &CompactionPolicy,
+    ) -> CompactionReport {
         self.compact_session(compactor, policy)
     }
 
-    pub fn compact_session(&mut self, compactor: &SessionCompactor, policy: &CompactionPolicy) -> CompactionReport {
+    pub fn compact_session(
+        &mut self,
+        compactor: &SessionCompactor,
+        policy: &CompactionPolicy,
+    ) -> CompactionReport {
         let (compacted, report) = compactor.compact(&self.messages, policy, &self.transcript);
         if report.compacted {
             self.messages = compacted;
@@ -405,15 +432,23 @@ impl SessionStore {
             }
             let msg: SessionMessage = serde_json::from_str(trimmed)
                 .map_err(|e| format!("Invalid session JSONL syntax at line {}: {e}", idx + 1))?;
-            required_bytes = required_bytes.saturating_add(msg.content.len().saturating_add(3) & !3);
+            required_bytes =
+                required_bytes.saturating_add(msg.content.len().saturating_add(3) & !3);
             parsed.push(msg);
         }
         if required_bytes > self.arena.capacity_bytes() {
-            return Err("CONTEXT_LIMIT: saved messages exceed session capacity; existing context was kept".to_string());
+            return Err(
+                "CONTEXT_LIMIT: saved messages exceed session capacity; existing context was kept"
+                    .to_string(),
+            );
         }
         self.messages = parsed.clone();
         self.transcript = parsed;
-        self.turn_count = self.messages.iter().filter(|m| m.role == Role::User).count() as u64;
+        self.turn_count = self
+            .messages
+            .iter()
+            .filter(|m| m.role == Role::User)
+            .count() as u64;
         self.context_generation += 1;
         self.rebuild_arena();
         Ok(())

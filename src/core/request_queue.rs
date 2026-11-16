@@ -79,7 +79,9 @@ impl RuntimeRequestQueue {
                 prompt_bytes, st.max_prompt_bytes
             ));
         }
-        if st.pending_count >= st.max_pending || st.pending_bytes.saturating_add(prompt_bytes) > st.max_total_bytes {
+        if st.pending_count >= st.max_pending
+            || st.pending_bytes.saturating_add(prompt_bytes) > st.max_total_bytes
+        {
             return Err(format!(
                 "RUNTIME_QUEUE_FULL: {} pending requests ({} bytes queued)",
                 st.pending_count, st.pending_bytes
@@ -104,7 +106,8 @@ impl RuntimeRequestQueue {
 
 /// Short-TTL mtime-aware cache for `SkillsIngestor::discover` so multi-round tool loops avoid redundant disk walks.
 pub fn discover_skills_cached(workspace_root: &Path) -> Vec<SkillManifest> {
-    static CACHE: OnceLock<Mutex<HashMap<PathBuf, (u64, u128, Vec<SkillManifest>)>>> = OnceLock::new();
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, (u64, u128, Vec<SkillManifest>)>>> =
+        OnceLock::new();
     let dir_mtime = std::fs::metadata(workspace_root.join(".agents").join("skills"))
         .or_else(|_| std::fs::metadata(workspace_root.join("skills")))
         .and_then(|m| m.modified())
@@ -126,7 +129,10 @@ pub fn discover_skills_cached(workspace_root: &Path) -> Vec<SkillManifest> {
         if guard.len() >= 32 {
             guard.clear();
         }
-        guard.insert(workspace_root.to_path_buf(), (now, dir_mtime, fresh.clone()));
+        guard.insert(
+            workspace_root.to_path_buf(),
+            (now, dir_mtime, fresh.clone()),
+        );
     }
     fresh
 }
@@ -144,7 +150,14 @@ impl PromptComposer {
         tool_defs_tokens: usize,
     ) -> (Vec<SessionMessage>, String) {
         let spec = SystemPromptSpec::for_turn(config, ExecutionAuthorityLevel::Autonomous, None);
-        Self::compose_with_spec(config, workspace_root, session, memory, tool_defs_tokens, &spec)
+        Self::compose_with_spec(
+            config,
+            workspace_root,
+            session,
+            memory,
+            tool_defs_tokens,
+            &spec,
+        )
     }
 
     pub fn compose_with_spec(
@@ -196,7 +209,8 @@ impl PromptComposer {
         let ctx_tokens = ctx_block.as_deref().map(estimate_text_tokens).unwrap_or(0);
 
         let system_tokens = estimate_text_tokens(&sys_content);
-        let budget = ContextBudgetInfo::calculate(config.context_window_tokens, config.max_output_tokens);
+        let budget =
+            ContextBudgetInfo::calculate(config.context_window_tokens, config.max_output_tokens);
         let available_history_tokens = budget
             .available_input_tokens
             .saturating_sub(system_tokens + tool_defs_tokens + ctx_tokens)
@@ -209,8 +223,10 @@ impl PromptComposer {
             }
         }
 
-        let mut composed =
-            SessionCompactor::truncate_to_token_budget(&raw_messages, available_history_tokens + system_tokens);
+        let mut composed = SessionCompactor::truncate_to_token_budget(
+            &raw_messages,
+            available_history_tokens + system_tokens,
+        );
 
         // Append-only volatile context delta (`LUMI-MEMORY/1` + `ExecutionPosture`) on the final User turn
         // so index 0 (`Role::System`) stays byte-pinned AND index 1 is NEVER an orphaned `Role::Assistant`!

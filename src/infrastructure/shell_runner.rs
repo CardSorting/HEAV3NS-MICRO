@@ -49,7 +49,10 @@ async fn kill_process_tree(pid: Option<u32>) {
     let _ = pid;
 }
 
-async fn drain_pipe_bounded<R: tokio::io::AsyncRead + Unpin>(mut pipe: Option<R>, max_bytes: usize) -> Vec<u8> {
+async fn drain_pipe_bounded<R: tokio::io::AsyncRead + Unpin>(
+    mut pipe: Option<R>,
+    max_bytes: usize,
+) -> Vec<u8> {
     let Some(ref mut reader) = pipe else {
         return Vec::new();
     };
@@ -128,7 +131,9 @@ pub async fn execute_shell_command_sandboxed(
             fn drop(&mut self) {
                 #[cfg(unix)]
                 if let Some(pid) = self.0.take() {
-                    let _ = std::process::Command::new("kill").args(["-KILL", &format!("-{pid}")]).status();
+                    let _ = std::process::Command::new("kill")
+                        .args(["-KILL", &format!("-{pid}")])
+                        .status();
                 }
             }
         }
@@ -169,7 +174,8 @@ pub async fn execute_shell_command_sandboxed(
             Ok((Ok(status), out_bytes, err_bytes)) => {
                 pg_guard.0 = None;
                 let exit_code = status.code().unwrap_or(-1);
-                let (cleaned_out, _pty_replies) = SafetyPolicy::strip_and_respond_pty_queries(&out_bytes, 24, 80);
+                let (cleaned_out, _pty_replies) =
+                    SafetyPolicy::strip_and_respond_pty_queries(&out_bytes, 24, 80);
                 let stdout = String::from_utf8_lossy(&cleaned_out).into_owned();
                 let stderr = String::from_utf8_lossy(&err_bytes).into_owned();
                 let mut advisories = Vec::new();
@@ -218,5 +224,12 @@ pub async fn execute_shell_command(
     timeout_ms: u64,
     cancel_token: Option<&CancellationToken>,
 ) -> Result<(Value, bool), String> {
-    execute_shell_command_sandboxed(cmd_str, cwd, timeout_ms, SeatbeltSandboxMode::Unrestricted, cancel_token).await
+    execute_shell_command_sandboxed(
+        cmd_str,
+        cwd,
+        timeout_ms,
+        SeatbeltSandboxMode::Unrestricted,
+        cancel_token,
+    )
+    .await
 }

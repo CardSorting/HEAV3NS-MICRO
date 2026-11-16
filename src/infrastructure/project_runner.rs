@@ -74,19 +74,55 @@ impl ProjectRunner {
             ));
         }
         if workspace_root.join("Cargo.toml").exists() {
-            targets.push(make_target("cargo-test", "Rust Test Suite (cargo test)", "cargo test", ".", None));
-            targets.push(make_target("flight-suite", "Agent Flight Verification (--flight)", "cargo run -- --flight", ".", None));
+            targets.push(make_target(
+                "cargo-test",
+                "Rust Test Suite (cargo test)",
+                "cargo test",
+                ".",
+                None,
+            ));
+            targets.push(make_target(
+                "flight-suite",
+                "Agent Flight Verification (--flight)",
+                "cargo run -- --flight",
+                ".",
+                None,
+            ));
         }
         if workspace_root.join("native/Package.swift").exists() {
-            targets.push(make_target("swift-native-test", "Native macOS AppKit Tests (swift test)", "swift test", "native", None));
+            targets.push(make_target(
+                "swift-native-test",
+                "Native macOS AppKit Tests (swift test)",
+                "swift test",
+                "native",
+                None,
+            ));
         } else if workspace_root.join("Package.swift").exists() {
-            targets.push(make_target("swift-test", "Swift Package Tests (swift test)", "swift test", ".", None));
+            targets.push(make_target(
+                "swift-test",
+                "Swift Package Tests (swift test)",
+                "swift test",
+                ".",
+                None,
+            ));
         }
         if workspace_root.join("package.json").exists() {
-            targets.push(make_target("npm-test", "Node Test Suite (npm test)", "npm test", ".", None));
+            targets.push(make_target(
+                "npm-test",
+                "Node Test Suite (npm test)",
+                "npm test",
+                ".",
+                None,
+            ));
         }
         if targets.is_empty() {
-            targets.push(make_target("workspace-status", "Workspace Status Check", "git status --short", ".", None));
+            targets.push(make_target(
+                "workspace-status",
+                "Workspace Status Check",
+                "git status --short",
+                ".",
+                None,
+            ));
         }
         targets
     }
@@ -114,17 +150,26 @@ impl IProjectRunner for ProjectRunner {
         json!({ "targets": self.build_targets(workspace_root) })
     }
 
-    fn start(&self, workspace_root: &Path, target_id: &str, expected_revision: Option<&str>) -> Result<Value, String> {
+    fn start(
+        &self,
+        workspace_root: &Path,
+        target_id: &str,
+        expected_revision: Option<&str>,
+    ) -> Result<Value, String> {
         let targets = self.build_targets(workspace_root);
         let target = targets
             .into_iter()
             .find(|t| t.get("id").and_then(Value::as_str) == Some(target_id))
-            .ok_or_else(|| format!("PROJECT_CHANGED: Run target '{target_id}' is no longer available."))?;
+            .ok_or_else(|| {
+                format!("PROJECT_CHANGED: Run target '{target_id}' is no longer available.")
+            })?;
 
         if let Some(exp) = expected_revision.filter(|s| !s.is_empty()) {
             let actual = target.get("revision").and_then(Value::as_str).unwrap_or("");
             if actual != exp {
-                return Err("PROJECT_CHANGED: Target configuration changed; review and retry.".to_string());
+                return Err(
+                    "PROJECT_CHANGED: Target configuration changed; review and retry.".to_string(),
+                );
             }
         }
 
@@ -140,7 +185,9 @@ impl IProjectRunner for ProjectRunner {
         {
             let mut st = lock_unpoison(&self.inner);
             if matches!(st.state.as_str(), "starting" | "running" | "stopping") {
-                return Err("Project is already running. Stop it before starting another run.".to_string());
+                return Err(
+                    "Project is already running. Stop it before starting another run.".to_string(),
+                );
             }
             st.state = "starting".to_string();
         }
@@ -181,7 +228,9 @@ impl IProjectRunner for ProjectRunner {
                     signal_process_group(p, "-KILL");
                 }
                 let _ = child.start_kill();
-                tokio::spawn(async move { let _ = child.wait().await; });
+                tokio::spawn(async move {
+                    let _ = child.wait().await;
+                });
                 st.child_pid = None;
                 st.state = "stopped".to_string();
                 st.revision = st.revision.saturating_add(1);
@@ -262,18 +311,31 @@ impl IProjectRunner for ProjectRunner {
         Self::status_json(&st)
     }
 
-    fn configure(&self, workspace_root: &Path, command: &str, cwd: &str, preview: Option<&str>) -> Result<Value, String> {
+    fn configure(
+        &self,
+        workspace_root: &Path,
+        command: &str,
+        cwd: &str,
+        preview: Option<&str>,
+    ) -> Result<Value, String> {
         let trimmed = command.trim();
         if trimmed.is_empty() {
             return Err("Run command cannot be empty.".to_string());
         }
-        let clean_cwd = if cwd.trim().is_empty() { "." } else { cwd.trim() };
+        let clean_cwd = if cwd.trim().is_empty() {
+            "."
+        } else {
+            cwd.trim()
+        };
         let _ = resolve_safe_cwd(workspace_root, clean_cwd)?;
         let mut st = lock_unpoison(&self.inner);
         st.custom_target = Some(CustomRunTarget {
             command: trimmed.to_string(),
             cwd: clean_cwd.to_string(),
-            preview: preview.map(str::trim).filter(|s| !s.is_empty()).map(String::from),
+            preview: preview
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from),
         });
         st.revision = st.revision.saturating_add(1);
         Ok(json!({ "configured": true, "id": "custom" }))
@@ -331,7 +393,10 @@ async fn push_bounded_run_output(inner: &Arc<Mutex<ProjectRunState>>, chunk: &st
     st.revision = st.revision.saturating_add(1);
 }
 
-async fn drain_stream<R: tokio::io::AsyncRead + Unpin>(mut reader: R, inner: Arc<Mutex<ProjectRunState>>) {
+async fn drain_stream<R: tokio::io::AsyncRead + Unpin>(
+    mut reader: R,
+    inner: Arc<Mutex<ProjectRunState>>,
+) {
     use tokio::io::AsyncReadExt;
     let mut buf = [0u8; 4096];
     let mut pending: Vec<u8> = Vec::new();
@@ -404,7 +469,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("heav3ns-run-test-{}", now_ms()));
         std::fs::create_dir_all(&dir).unwrap();
         let runner = ProjectRunner::create_runner();
-        runner.configure(&dir, "echo zenith-run-ok", ".", None).unwrap();
+        runner
+            .configure(&dir, "echo zenith-run-ok", ".", None)
+            .unwrap();
         let targets = runner.discover(&dir);
         let custom = targets["targets"]
             .as_array()
@@ -426,7 +493,10 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
-        panic!("ProjectRunner did not complete in time: {:?}", runner.status());
+        panic!(
+            "ProjectRunner did not complete in time: {:?}",
+            runner.status()
+        );
     }
 
     #[tokio::test]
@@ -434,12 +504,17 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("heav3ns-stop-test-{}", now_ms()));
         std::fs::create_dir_all(&dir).unwrap();
         let runner = ProjectRunner::create_runner();
-        assert!(runner.configure(&dir, "echo nope", "../../etc", None).is_err());
+        assert!(runner
+            .configure(&dir, "echo nope", "../../etc", None)
+            .is_err());
 
         runner.configure(&dir, "sleep 30", ".", None).unwrap();
         runner.start(&dir, "custom", None).unwrap();
         let stopping = runner.stop();
-        assert!(matches!(stopping["state"].as_str(), Some("stopping" | "stopped")));
+        assert!(matches!(
+            stopping["state"].as_str(),
+            Some("stopping" | "stopped")
+        ));
 
         for _ in 0..40 {
             let st = runner.status();
@@ -449,6 +524,9 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
-        panic!("ProjectRunner did not transition to stopped: {:?}", runner.status());
+        panic!(
+            "ProjectRunner did not transition to stopped: {:?}",
+            runner.status()
+        );
     }
 }

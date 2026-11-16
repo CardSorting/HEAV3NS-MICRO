@@ -1,9 +1,12 @@
 // [LAYER: INFRASTRUCTURE]
 use crate::domain::interfaces::{BoxFuture, ILlmProvider};
-use crate::plumbing::hash_and_math::lock_unpoison;
 use crate::domain::types::messages::{Role, SessionMessage, ToolCall, ToolCallFunction};
 use crate::domain::types::runtime::CancellationToken;
-use crate::domain::types::tick_result::{finalize_provider_response, is_retryable_http_status, ProviderError, ProviderRequest, ProviderResponse};
+use crate::domain::types::tick_result::{
+    finalize_provider_response, is_retryable_http_status, ProviderError, ProviderRequest,
+    ProviderResponse,
+};
+use crate::plumbing::hash_and_math::lock_unpoison;
 use serde_json::Value;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -97,7 +100,13 @@ impl ScriptedProvider {
     pub fn tool_messages_by_request(&self) -> Vec<Vec<SessionMessage>> {
         lock_unpoison(&self.recorded_requests)
             .iter()
-            .map(|r| r.messages.iter().filter(|m| m.role == Role::Tool).cloned().collect())
+            .map(|r| {
+                r.messages
+                    .iter()
+                    .filter(|m| m.role == Role::Tool)
+                    .cloned()
+                    .collect()
+            })
             .collect()
     }
 
@@ -135,9 +144,10 @@ impl ILlmProvider for ScriptedProvider {
                 .pop_front()
                 .unwrap_or_else(|| ProviderStep::text("Scripted provider queue exhausted."));
             match step {
-                ProviderStep::Completion { content, tool_calls } => {
-                    Ok(finalize_provider_response(content, tool_calls, "scripted"))
-                }
+                ProviderStep::Completion {
+                    content,
+                    tool_calls,
+                } => Ok(finalize_provider_response(content, tool_calls, "scripted")),
                 ProviderStep::HttpError { status, message } => Err(ProviderError::HttpStatus {
                     status,
                     body: message,
@@ -157,4 +167,3 @@ impl ILlmProvider for ScriptedProvider {
         })
     }
 }
-

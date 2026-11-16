@@ -103,7 +103,10 @@ pub fn run_stress_benchmarks() -> Value {
         arena_samples.push(t_sub.elapsed().as_micros() as f64);
         arena.reset();
     }
-    let arena_metrics = LatencyMetrics::compute(arena_samples, t_arena_start.elapsed().as_secs_f64() * 1000.0);
+    let arena_metrics = LatencyMetrics::compute(
+        arena_samples,
+        t_arena_start.elapsed().as_secs_f64() * 1000.0,
+    );
 
     // 2. Self-Healing Tool Call Parser Stress (25k malformed repairs)
     let t_parser_start = Instant::now();
@@ -124,7 +127,10 @@ pub fn run_stress_benchmarks() -> Value {
         }
         parser_samples.push((t_sub.elapsed().as_micros() as f64) / 100.0);
     }
-    let parser_metrics = LatencyMetrics::compute(parser_samples, t_parser_start.elapsed().as_secs_f64() * 1000.0);
+    let parser_metrics = LatencyMetrics::compute(
+        parser_samples,
+        t_parser_start.elapsed().as_secs_f64() * 1000.0,
+    );
 
     // 3. Deterministic Secret Redactor Stress (25k buffer scans)
     let t_redactor_start = Instant::now();
@@ -144,7 +150,10 @@ pub fn run_stress_benchmarks() -> Value {
         }
         redactor_samples.push((t_sub.elapsed().as_micros() as f64) / 100.0);
     }
-    let redactor_metrics = LatencyMetrics::compute(redactor_samples, t_redactor_start.elapsed().as_secs_f64() * 1000.0);
+    let redactor_metrics = LatencyMetrics::compute(
+        redactor_samples,
+        t_redactor_start.elapsed().as_secs_f64() * 1000.0,
+    );
 
     // 4. Spatial Action Grounding & Resolution Stress (25k spatial groundings)
     let t_spatial_start = Instant::now();
@@ -174,15 +183,27 @@ pub fn run_stress_benchmarks() -> Value {
         }
         spatial_samples.push((t_sub.elapsed().as_micros() as f64) / 100.0);
     }
-    let spatial_metrics = LatencyMetrics::compute(spatial_samples, t_spatial_start.elapsed().as_secs_f64() * 1000.0);
+    let spatial_metrics = LatencyMetrics::compute(
+        spatial_samples,
+        t_spatial_start.elapsed().as_secs_f64() * 1000.0,
+    );
 
     // 5. Session Compactor Scalability Stress (1,000 compaction cycles)
     let t_compact_start = Instant::now();
     let compactor = SessionCompactor::default();
-    let mut msgs = vec![SessionMessage::new(Role::System, "System Prompt with architecture rules")];
+    let mut msgs = vec![SessionMessage::new(
+        Role::System,
+        "System Prompt with architecture rules",
+    )];
     for i in 0..40 {
-        msgs.push(SessionMessage::new(Role::User, format!("User command {i} with payload")));
-        msgs.push(SessionMessage::new(Role::Assistant, format!("Assistant executed step {i} with status ok")));
+        msgs.push(SessionMessage::new(
+            Role::User,
+            format!("User command {i} with payload"),
+        ));
+        msgs.push(SessionMessage::new(
+            Role::Assistant,
+            format!("Assistant executed step {i} with status ok"),
+        ));
     }
     let policy = CompactionPolicy {
         max_messages: Some(15),
@@ -197,17 +218,28 @@ pub fn run_stress_benchmarks() -> Value {
         }
         compact_samples.push((t_sub.elapsed().as_micros() as f64) / 10.0);
     }
-    let compact_metrics = LatencyMetrics::compute(compact_samples, t_compact_start.elapsed().as_secs_f64() * 1000.0);
+    let compact_metrics = LatencyMetrics::compute(
+        compact_samples,
+        t_compact_start.elapsed().as_secs_f64() * 1000.0,
+    );
 
     // 6. Wave Scheduler DAG Partitioning Stress (1,000 partition evaluations)
     let t_wave_start = Instant::now();
-    let mem_store = std::sync::Arc::new(std::sync::Mutex::new(crate::domain::memory::MemoryStore::new()));
+    let mem_store = std::sync::Arc::new(std::sync::Mutex::new(
+        crate::domain::memory::MemoryStore::new(),
+    ));
     let reg = ToolRegistry::new(mem_store);
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let calls: Vec<ScheduledToolCall> = (0..30)
         .map(|i| ScheduledToolCall {
             id: format!("call-{}", i),
-            name: if i % 3 == 0 { "read_file".into() } else if i % 3 == 1 { "edit_file".into() } else { "run_command".into() },
+            name: if i % 3 == 0 {
+                "read_file".into()
+            } else if i % 3 == 1 {
+                "edit_file".into()
+            } else {
+                "run_command".into()
+            },
             args: json!({ "path": format!("src/file_{}.rs", i % 10) }),
         })
         .collect();
@@ -219,7 +251,8 @@ pub fn run_stress_benchmarks() -> Value {
         }
         wave_samples.push((t_sub.elapsed().as_micros() as f64) / 10.0);
     }
-    let wave_metrics = LatencyMetrics::compute(wave_samples, t_wave_start.elapsed().as_secs_f64() * 1000.0);
+    let wave_metrics =
+        LatencyMetrics::compute(wave_samples, t_wave_start.elapsed().as_secs_f64() * 1000.0);
 
     json!({
         "arenaAllocationStress": {
@@ -264,13 +297,19 @@ pub async fn run_workspace_benchmarks(tests_dir: &Path) -> Vec<WorkspaceTaskBenc
         // Step 1: Read and inspect
         let core_content = fs::read_to_string(py_dir.join("calc/core.py")).unwrap_or_default();
         let has_calc_class = core_content.contains("class Calculator");
-        steps.push(format!("Inspect AST/Class Calculator: {}", if has_calc_class { "FOUND" } else { "MISSING" }));
+        steps.push(format!(
+            "Inspect AST/Class Calculator: {}",
+            if has_calc_class { "FOUND" } else { "MISSING" }
+        ));
 
         // Step 2: Run unit tests via shell runner
         let test_res = execute_shell_command("python3 run_tests.py", &py_dir, 10_000, None).await;
         let (passed, output, exit_code, test_duration_ms) = match test_res {
             Ok((payload, _)) => {
-                let code = payload.get("exitCode").and_then(|v| v.as_i64()).unwrap_or(-1);
+                let code = payload
+                    .get("exitCode")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(-1);
                 let out = payload.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
                 let err = payload.get("stderr").and_then(|v| v.as_str()).unwrap_or("");
                 let combined = format!("{out}\n{err}");
@@ -285,7 +324,9 @@ pub async fn run_workspace_benchmarks(tests_dir: &Path) -> Vec<WorkspaceTaskBenc
         let bench_script = py_dir.join("calc/benchmark.py");
         let mut bench_metrics = json!({});
         if bench_script.exists() {
-            if let Ok((payload, _)) = execute_shell_command("python3 calc/benchmark.py", &py_dir, 10_000, None).await {
+            if let Ok((payload, _)) =
+                execute_shell_command("python3 calc/benchmark.py", &py_dir, 10_000, None).await
+            {
                 let out = payload.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
                 if let Ok(parsed) = serde_json::from_str::<Value>(out) {
                     bench_metrics = parsed;
@@ -335,15 +376,22 @@ pub async fn run_workspace_benchmarks(tests_dir: &Path) -> Vec<WorkspaceTaskBenc
         } else {
             false
         };
-        steps.push(format!("Fuzzy patch engine simulation: {}", if patch_applied { "APPLIED" } else { "SKIPPED" }));
+        steps.push(format!(
+            "Fuzzy patch engine simulation: {}",
+            if patch_applied { "APPLIED" } else { "SKIPPED" }
+        ));
 
         // Step 3: Run cargo test
         let test_res = execute_shell_command("cargo test", &rust_dir, 15_000, None).await;
         let (passed, exit_code) = match test_res {
             Ok((payload, _)) => {
-                let code = payload.get("exitCode").and_then(|v| v.as_i64()).unwrap_or(-1);
+                let code = payload
+                    .get("exitCode")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(-1);
                 let out = payload.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
-                let success = code == 0 && (out.contains("test result: ok") || out.contains("passed"));
+                let success =
+                    code == 0 && (out.contains("test result: ok") || out.contains("passed"));
                 (success, code)
             }
             Err(_) => (false, -1),
@@ -355,7 +403,10 @@ pub async fn run_workspace_benchmarks(tests_dir: &Path) -> Vec<WorkspaceTaskBenc
         let payload = vec![0x5Au8; 1024 * 1024];
         let h = crate::plumbing::hash_and_math::fnv1a_32(&payload);
         let hash_us = t_hash.elapsed().as_micros();
-        steps.push(format!("Substrate FNV-1a 1MB buffer hashed in {}us (checksum=0x{:08x})", hash_us, h));
+        steps.push(format!(
+            "Substrate FNV-1a 1MB buffer hashed in {}us (checksum=0x{:08x})",
+            hash_us, h
+        ));
 
         let duration_ms = t_start.elapsed().as_millis() as u64;
         results.push(WorkspaceTaskBenchmarkResult {
@@ -385,15 +436,27 @@ pub async fn run_workspace_benchmarks(tests_dir: &Path) -> Vec<WorkspaceTaskBenc
         // Step 1: Read and verify package.json
         let pkg_content = fs::read_to_string(node_dir.join("package.json")).unwrap_or_default();
         let has_node_web = pkg_content.contains("node-web");
-        steps.push(format!("Read package.json: {}", if has_node_web { "OK" } else { "FAIL" }));
+        steps.push(format!(
+            "Read package.json: {}",
+            if has_node_web { "OK" } else { "FAIL" }
+        ));
 
         // Step 2: Run npm test
         let test_res = execute_shell_command("npm test", &node_dir, 10_000, None).await;
         let (passed, exit_code, stdout) = match test_res {
             Ok((payload, _)) => {
-                let code = payload.get("exitCode").and_then(|v| v.as_i64()).unwrap_or(-1);
-                let out = payload.get("stdout").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let success = code == 0 && (out.contains("pass ") || out.contains("tests ")) && (out.contains("fail 0") || !out.contains("fail "));
+                let code = payload
+                    .get("exitCode")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(-1);
+                let out = payload
+                    .get("stdout")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let success = code == 0
+                    && (out.contains("pass ") || out.contains("tests "))
+                    && (out.contains("fail 0") || !out.contains("fail "));
                 (success, code, out)
             }
             Err(e) => (false, -1, e),
@@ -425,22 +488,42 @@ pub async fn run_workspace_benchmarks(tests_dir: &Path) -> Vec<WorkspaceTaskBenc
         // Step 1: Snapshot HTML DOM & Extract UI targets
         let html_content = fs::read_to_string(kanban_dir.join("index.html")).unwrap_or_default();
         let dom_snap = snapshot_html_dom(&html_content, "file://index.html", 100);
-        let interactive_elements = dom_snap.get("interactiveElements").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-        steps.push(format!("DOM snapshot extracted {} interactive elements", interactive_elements.len()));
+        let interactive_elements = dom_snap
+            .get("interactiveElements")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        steps.push(format!(
+            "DOM snapshot extracted {} interactive elements",
+            interactive_elements.len()
+        ));
 
         // Step 2: Spatial Grounding of Add Card and Column Targets
         let mut mediator = SpatialActionMediator::new(1440, 900, "kanban-window");
         let mut scene = SpatialScene::new(1440, 900, "kanban-window");
         for (idx, elem) in interactive_elements.iter().enumerate() {
-            let target_id = elem.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let target_id = elem
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let tag = elem.get("tag").and_then(|v| v.as_str()).unwrap_or("div");
             let label = elem.get("label").and_then(|v| v.as_str()).unwrap_or("");
             scene.targets.push(SpatialTarget::new(
-                if target_id.is_empty() { format!("elem-{}", idx) } else { target_id },
+                if target_id.is_empty() {
+                    format!("elem-{}", idx)
+                } else {
+                    target_id
+                },
                 Some(idx as u32),
                 tag,
                 label,
-                [100 + (idx as i32 % 4) * 300, 150 + (idx as i32 / 4) * 80, 240, 60],
+                [
+                    100 + (idx as i32 % 4) * 300,
+                    150 + (idx as i32 / 4) * 80,
+                    240,
+                    60,
+                ],
             ));
         }
         mediator.update_scene(scene);
@@ -452,15 +535,23 @@ pub async fn run_workspace_benchmarks(tests_dir: &Path) -> Vec<WorkspaceTaskBenc
         };
         let ground_res = mediator.ground_action(&contract_add);
         let grounded = ground_res.success;
-        steps.push(format!("Spatial grounding 'btn-add-card': {}", if grounded { "GROUNDED" } else { "NOT FOUND" }));
+        steps.push(format!(
+            "Spatial grounding 'btn-add-card': {}",
+            if grounded { "GROUNDED" } else { "NOT FOUND" }
+        ));
 
         // Step 3: Run Kanban unit & stress tests
         let test_res = execute_shell_command("npm test", &kanban_dir, 10_000, None).await;
         let (npm_passed, exit_code) = match test_res {
             Ok((payload, _)) => {
-                let code = payload.get("exitCode").and_then(|v| v.as_i64()).unwrap_or(-1);
+                let code = payload
+                    .get("exitCode")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(-1);
                 let out = payload.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
-                let success = code == 0 && (out.contains("pass ") || out.contains("tests ")) && (out.contains("fail 0") || !out.contains("fail "));
+                let success = code == 0
+                    && (out.contains("pass ") || out.contains("tests "))
+                    && (out.contains("fail 0") || !out.contains("fail "));
                 (success, code)
             }
             Err(_) => (false, -1),
@@ -490,14 +581,12 @@ pub async fn run_full_benchmark_suite(tests_dir: Option<&Path>) -> Value {
     let t_total = Instant::now();
     let stress = run_stress_benchmarks();
 
-    let resolved_tests_dir = tests_dir
-        .map(|p| p.to_path_buf())
-        .or_else(|| {
-            std::env::var("HEAV3NS_BENCH_TESTS_DIR")
-                .ok()
-                .map(PathBuf::from)
-                .filter(|p| p.exists())
-        });
+    let resolved_tests_dir = tests_dir.map(|p| p.to_path_buf()).or_else(|| {
+        std::env::var("HEAV3NS_BENCH_TESTS_DIR")
+            .ok()
+            .map(PathBuf::from)
+            .filter(|p| p.exists())
+    });
 
     let workspace_tasks = if let Some(ref dir) = resolved_tests_dir {
         run_workspace_benchmarks(dir).await

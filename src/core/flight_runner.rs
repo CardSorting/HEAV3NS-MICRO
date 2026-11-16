@@ -6,8 +6,12 @@ use crate::domain::compaction::CompactionPolicy;
 use crate::domain::spatial_mediator::SpatialActionMediator;
 use crate::domain::tool_parser::ToolCallArgParser;
 use crate::domain::types::messages::{Role, SessionMessage};
-use crate::domain::types::progress::{EngineProgressEvent, EngineProgressPhase, EngineProgressStatus};
-use crate::domain::types::runtime::{AgentConfig, CancellationToken, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel};
+use crate::domain::types::progress::{
+    EngineProgressEvent, EngineProgressPhase, EngineProgressStatus,
+};
+use crate::domain::types::runtime::{
+    AgentConfig, CancellationToken, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel,
+};
 use crate::domain::types::spatial_types::{SpatialActionContract, SpatialScene, SpatialTarget};
 use crate::infrastructure::scripted_provider::{ProviderStep, ScriptedProvider};
 use crate::plumbing::hash_and_math::now_ms;
@@ -168,7 +172,11 @@ async fn run_ft01() -> FlightTestScenarioResult {
         check(
             "read_file executed once",
             tool_names == vec!["read_file".to_string()]
-                && result.tool_results.first().map(|r| r.success).unwrap_or(false),
+                && result
+                    .tool_results
+                    .first()
+                    .map(|r| r.success)
+                    .unwrap_or(false),
             format!("{:?}", tool_names),
         ),
         check(
@@ -192,7 +200,8 @@ async fn run_ft01() -> FlightTestScenarioResult {
     FlightTestScenarioResult {
         id: "FT-01".to_string(),
         title: "Read tool result reaches next model turn".to_string(),
-        focus: "Provider tool_calls -> ToolRegistry -> tool role message -> final answer".to_string(),
+        focus: "Provider tool_calls -> ToolRegistry -> tool role message -> final answer"
+            .to_string(),
         passed,
         duration_ms: started.elapsed().as_millis() as u64,
         provider_requests: provider.request_count(),
@@ -237,7 +246,8 @@ async fn run_ft02() -> FlightTestScenarioResult {
     ]);
 
     let engine = AgentEngine::new(&ws.path, test_config(), provider.clone());
-    let mut input = EngineTickInput::new("Fix the Celsius-to-Fahrenheit conversion in src/temperature.ts.");
+    let mut input =
+        EngineTickInput::new("Fix the Celsius-to-Fahrenheit conversion in src/temperature.ts.");
     input.execution_authority = Some(ExecutionAuthorityLevel::Autonomous);
     let result = engine.tick(input).await;
 
@@ -278,7 +288,8 @@ async fn run_ft02() -> FlightTestScenarioResult {
     FlightTestScenarioResult {
         id: "FT-02".to_string(),
         title: "Read, edit, and verify file across multiple tool rounds".to_string(),
-        focus: "Multi-round tool loop, file mutation, and read-after-write verification".to_string(),
+        focus: "Multi-round tool loop, file mutation, and read-after-write verification"
+            .to_string(),
         passed,
         duration_ms: started.elapsed().as_millis() as u64,
         provider_requests: provider.request_count(),
@@ -310,7 +321,8 @@ async fn run_ft03() -> FlightTestScenarioResult {
     ]);
 
     let engine = AgentEngine::new(&ws.path, test_config(), provider.clone());
-    let mut input = EngineTickInput::new("Read src/note.txt even if the first tool call is malformed.");
+    let mut input =
+        EngineTickInput::new("Read src/note.txt even if the first tool call is malformed.");
     input.execution_authority = Some(ExecutionAuthorityLevel::Autonomous);
     let result = engine.tick(input).await;
 
@@ -321,7 +333,11 @@ async fn run_ft03() -> FlightTestScenarioResult {
         .map(|m| m.content.clone())
         .unwrap_or_default();
     let parsed_error: Value = serde_json::from_str(&first_error_msg).unwrap_or(Value::Null);
-    let call_ids: Vec<String> = result.tool_results.iter().filter_map(|r| r.call_id.clone()).collect();
+    let call_ids: Vec<String> = result
+        .tool_results
+        .iter()
+        .filter_map(|r| r.call_id.clone())
+        .collect();
     let successes: Vec<bool> = result.tool_results.iter().map(|r| r.success).collect();
 
     let checks = vec![
@@ -437,10 +453,14 @@ async fn run_ft05() -> FlightTestScenarioResult {
 
     let result = engine_task.await.expect("FT-05 task panicked");
     let events = progress_events.lock().unwrap().clone();
-    let has_completed_event = events.iter().any(|e| e.status == EngineProgressStatus::Completed);
+    let has_completed_event = events
+        .iter()
+        .any(|e| e.status == EngineProgressStatus::Completed);
     let cancelled_events: Vec<&EngineProgressEvent> = events
         .iter()
-        .filter(|e| e.phase == EngineProgressPhase::Cancelled && e.status == EngineProgressStatus::Cancelled)
+        .filter(|e| {
+            e.phase == EngineProgressPhase::Cancelled && e.status == EngineProgressStatus::Cancelled
+        })
         .collect();
 
     let checks = vec![
@@ -493,7 +513,11 @@ pub async fn run_agent_flight_test() -> FlightTestReport {
     let total = scenarios.len();
     let passed = scenarios.iter().filter(|s| s.passed).count();
     let failed = total.saturating_sub(passed);
-    let pass_rate = if total == 0 { 1.0 } else { passed as f64 / total as f64 };
+    let pass_rate = if total == 0 {
+        1.0
+    } else {
+        passed as f64 / total as f64
+    };
     FlightTestReport {
         suite: "agent-flight-test-v1".to_string(),
         started_at,
@@ -553,8 +577,9 @@ pub fn run_micro_benchmarks() -> Value {
     let t_parser = Instant::now();
     let parser = ToolCallArgParser::new();
     for _ in 0..10_000 {
-        let _ =
-            parser.parse_raw_arguments("```json\n{'file_path': 'src/main.rs', 'start_line': '10', trailing: True,}\n```");
+        let _ = parser.parse_raw_arguments(
+            "```json\n{'file_path': 'src/main.rs', 'start_line': '10', trailing: True,}\n```",
+        );
     }
     let parser_us = t_parser.elapsed().as_micros() as u64;
 

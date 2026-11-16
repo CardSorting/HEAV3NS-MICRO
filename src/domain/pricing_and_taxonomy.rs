@@ -34,8 +34,12 @@ impl ProviderTokenUsage {
             && self.cached_prompt_tokens == 0
             && !self.is_exact;
         self.prompt_tokens = self.prompt_tokens.saturating_add(other.prompt_tokens);
-        self.completion_tokens = self.completion_tokens.saturating_add(other.completion_tokens);
-        self.cached_prompt_tokens = self.cached_prompt_tokens.saturating_add(other.cached_prompt_tokens);
+        self.completion_tokens = self
+            .completion_tokens
+            .saturating_add(other.completion_tokens);
+        self.cached_prompt_tokens = self
+            .cached_prompt_tokens
+            .saturating_add(other.cached_prompt_tokens);
         self.is_exact = if was_empty {
             other.is_exact
         } else {
@@ -61,7 +65,12 @@ pub enum BillingMetering {
 
 impl BillingMetering {
     /// Evaluates token billing against the embedded 2026 frontier baseline (pure zero-I/O entrypoint).
-    pub fn evaluate(provider: &str, model: &str, endpoint: &str, usage: &ProviderTokenUsage) -> Self {
+    pub fn evaluate(
+        provider: &str,
+        model: &str,
+        endpoint: &str,
+        usage: &ProviderTokenUsage,
+    ) -> Self {
         let baseline = ModelPricingCatalog::embedded_baseline();
         Self::evaluate_with_catalog(provider, model, endpoint, usage, &baseline)
     }
@@ -107,11 +116,17 @@ impl BillingMetering {
         let out_rate = entry.output_per_million;
         let cache_rate = entry.cached_per_million;
 
-        let uncached_in = usage.prompt_tokens.saturating_sub(usage.cached_prompt_tokens);
+        let uncached_in = usage
+            .prompt_tokens
+            .saturating_sub(usage.cached_prompt_tokens);
         let raw_usd = (uncached_in as f64 * in_rate / 1_000_000.0)
             + (usage.cached_prompt_tokens as f64 * cache_rate / 1_000_000.0)
             + (usage.completion_tokens as f64 * out_rate / 1_000_000.0);
-        let usd_cost = if raw_usd.is_finite() && raw_usd >= 0.0 { raw_usd } else { 0.0 };
+        let usd_cost = if raw_usd.is_finite() && raw_usd >= 0.0 {
+            raw_usd
+        } else {
+            0.0
+        };
 
         Self::Metered {
             usd_cost,
@@ -184,7 +199,9 @@ impl ErrorEnvelope {
                 recoverable: false,
                 code: Some("spent_balance_or_quota".to_string()),
                 message: format!("HTTP {status}: Account quota or credit balance exhausted."),
-                remediation: "Top up provider billing credits or switch provider/model via `/model` (`F3`).".to_string(),
+                remediation:
+                    "Top up provider billing credits or switch provider/model via `/model` (`F3`)."
+                        .to_string(),
             };
         }
 
@@ -287,7 +304,12 @@ pub fn resolve_compatible_fallback_model(
     configured_fallback: Option<&str>,
 ) -> Option<String> {
     let baseline = ModelPricingCatalog::embedded_baseline();
-    resolve_compatible_fallback_model_with_catalog(provider, primary_model, configured_fallback, &baseline)
+    resolve_compatible_fallback_model_with_catalog(
+        provider,
+        primary_model,
+        configured_fallback,
+        &baseline,
+    )
 }
 
 /// Resolves a safe fallback model strictly compatible with the active provider using the live/cached [`ModelPricingCatalog`].
@@ -309,16 +331,40 @@ pub fn resolve_compatible_fallback_model_with_catalog(
     if let Some(fb) = configured_fallback {
         let fb_low = fb.to_ascii_lowercase();
         let vendor = ModelPricingCatalog::canonical_vendor_prefix(provider);
-        let is_gateway = matches!(p.as_str(), "openrouter" | "orcarouter" | "edenai" | "zenmux" | "codewhale" | "cline-pass" | "bedrock" | "azure");
-        let cross_provider_mismatch = !is_gateway && match vendor {
-            "anthropic" => !fb_low.contains("claude"),
-            "google" => !fb_low.contains("gemini"),
-            "deepseek" => !fb_low.contains("deepseek"),
-            "x-ai" => !fb_low.contains("grok"),
-            "openai" => fb_low.contains("claude") || fb_low.contains("gemini") || fb_low.contains("grok") || fb_low.contains("deepseek"),
-            v if !v.is_empty() => fb_low.contains("claude") || fb_low.contains("gemini") || fb_low.contains("grok") || fb_low.starts_with("gpt-") || fb_low.starts_with("o1") || fb_low.starts_with("o3") || fb_low.starts_with("o4"),
-            _ => false,
-        };
+        let is_gateway = matches!(
+            p.as_str(),
+            "openrouter"
+                | "orcarouter"
+                | "edenai"
+                | "zenmux"
+                | "codewhale"
+                | "cline-pass"
+                | "bedrock"
+                | "azure"
+        );
+        let cross_provider_mismatch = !is_gateway
+            && match vendor {
+                "anthropic" => !fb_low.contains("claude"),
+                "google" => !fb_low.contains("gemini"),
+                "deepseek" => !fb_low.contains("deepseek"),
+                "x-ai" => !fb_low.contains("grok"),
+                "openai" => {
+                    fb_low.contains("claude")
+                        || fb_low.contains("gemini")
+                        || fb_low.contains("grok")
+                        || fb_low.contains("deepseek")
+                }
+                v if !v.is_empty() => {
+                    fb_low.contains("claude")
+                        || fb_low.contains("gemini")
+                        || fb_low.contains("grok")
+                        || fb_low.starts_with("gpt-")
+                        || fb_low.starts_with("o1")
+                        || fb_low.starts_with("o3")
+                        || fb_low.starts_with("o4")
+                }
+                _ => false,
+            };
         if !cross_provider_mismatch && fb != primary_model {
             return Some(fb.to_string());
         }
@@ -334,7 +380,11 @@ pub fn resolve_compatible_fallback_model_with_catalog(
 }
 
 /// Evaluates `/model auto` routing within the active provider family using the embedded baseline.
-pub fn select_auto_routed_model(provider: &str, configured_model: &str, prompt: &str) -> AutoRouteDecision {
+pub fn select_auto_routed_model(
+    provider: &str,
+    configured_model: &str,
+    prompt: &str,
+) -> AutoRouteDecision {
     let baseline = ModelPricingCatalog::embedded_baseline();
     select_auto_routed_model_with_catalog(provider, configured_model, prompt, &baseline)
 }
@@ -369,13 +419,19 @@ pub fn select_auto_routed_model_with_catalog(
         AutoRouteDecision {
             selected_model: strong,
             tier: "strong".to_string(),
-            reason: format!("Multi-step engineering/audit complexity routed via {}", catalog.source),
+            reason: format!(
+                "Multi-step engineering/audit complexity routed via {}",
+                catalog.source
+            ),
         }
     } else {
         AutoRouteDecision {
             selected_model: fast,
             tier: "fast".to_string(),
-            reason: format!("Direct lightweight query routed to fast tier via {}", catalog.source),
+            reason: format!(
+                "Direct lightweight query routed to fast tier via {}",
+                catalog.source
+            ),
         }
     }
 }

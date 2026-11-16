@@ -9,8 +9,16 @@ pub fn encode_base64url(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
         let b0 = chunk[0] as usize;
-        let b1 = if chunk.len() > 1 { chunk[1] as usize } else { 0 };
-        let b2 = if chunk.len() > 2 { chunk[2] as usize } else { 0 };
+        let b1 = if chunk.len() > 1 {
+            chunk[1] as usize
+        } else {
+            0
+        };
+        let b2 = if chunk.len() > 2 {
+            chunk[2] as usize
+        } else {
+            0
+        };
         let n = (b0 << 16) | (b1 << 8) | b2;
         out.push(TABLE[(n >> 18) & 0x3f] as char);
         out.push(TABLE[(n >> 12) & 0x3f] as char);
@@ -185,7 +193,10 @@ pub fn parse_jwt_claims(token: &str) -> Option<Value> {
 /// Extracts the ChatGPT account/workspace ID from an OpenAI ID or access token.
 pub fn extract_openai_account_id(token: &str) -> Option<String> {
     let claims = parse_jwt_claims(token)?;
-    if let Some(id) = claims.get("https://api.openai.com/auth.chatgpt_account_id").and_then(Value::as_str) {
+    if let Some(id) = claims
+        .get("https://api.openai.com/auth.chatgpt_account_id")
+        .and_then(Value::as_str)
+    {
         if !id.is_empty() {
             return Some(id.to_string());
         }
@@ -281,9 +292,18 @@ mod tests {
         assert!(url.starts_with("https://auth.openai.com/oauth/authorize?"));
         let query = url.split_once('?').unwrap().1;
         let parsed = parse_query_params(query);
-        assert_eq!(parsed.get("client_id").map(String::as_str), Some("app_test"));
-        assert_eq!(parsed.get("redirect_uri").map(String::as_str), Some("http://localhost:1455/auth/callback"));
-        assert_eq!(parsed.get("code_challenge").map(String::as_str), Some("chal123"));
+        assert_eq!(
+            parsed.get("client_id").map(String::as_str),
+            Some("app_test")
+        );
+        assert_eq!(
+            parsed.get("redirect_uri").map(String::as_str),
+            Some("http://localhost:1455/auth/callback")
+        );
+        assert_eq!(
+            parsed.get("code_challenge").map(String::as_str),
+            Some("chal123")
+        );
         assert_eq!(parsed.get("state").map(String::as_str), Some("state456"));
     }
 
@@ -301,7 +321,10 @@ mod tests {
         let body = encode_base64url(payload.to_string().as_bytes());
         let jwt = format!("{header}.{body}.sig");
         assert_eq!(extract_openai_account_id(&jwt).as_deref(), Some("acct_123"));
-        assert_eq!(extract_openai_email(&jwt).as_deref(), Some("pilot@example.com"));
+        assert_eq!(
+            extract_openai_email(&jwt).as_deref(),
+            Some("pilot@example.com")
+        );
         assert_eq!(extract_openai_plan_type(&jwt).as_deref(), Some("pro"));
         assert_eq!(extract_jwt_expiry_ms(&jwt), Some(1_900_000_000_000));
     }

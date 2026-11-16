@@ -2,12 +2,20 @@
 use crate::core::engine::AgentEngine;
 use crate::domain::pricing_and_taxonomy::CREDENTIAL_REJECTED_UNSENT_CODE;
 use crate::domain::types::messages::{Role, SessionMessage};
-use crate::domain::types::progress::{EngineProgressEvent, EngineProgressPhase, EngineProgressStatus};
+use crate::domain::types::progress::{
+    EngineProgressEvent, EngineProgressPhase, EngineProgressStatus,
+};
 use crate::domain::types::provider_registry::canonicalize_provider_id;
-use crate::domain::types::runtime::{AgentConfig, CancellationToken, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel, ExecutionPosture, UserApprovalChoice};
+use crate::domain::types::runtime::{
+    AgentConfig, CancellationToken, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel,
+    ExecutionPosture, UserApprovalChoice,
+};
 use crate::plumbing::hash_and_math::{lock_unpoison, now_ms};
 use crate::ui::cli_presenter::Heav3nsUserConfig;
-pub use crate::ui::provider_rpc::{build_sovereign_model_catalog, build_sovereign_model_catalog_with_recent, build_sovereign_model_discovery, handle_provider_credential_rpc};
+pub use crate::ui::provider_rpc::{
+    build_sovereign_model_catalog, build_sovereign_model_catalog_with_recent,
+    build_sovereign_model_discovery, handle_provider_credential_rpc,
+};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Write};
@@ -92,9 +100,15 @@ impl WorkerSharedState {
         if canon.is_empty() || canon == "scripted" || m.is_empty() {
             return;
         }
-        let r = if reasoning.trim().is_empty() { "default" } else { reasoning.trim() };
-        self.recent_selections.retain(|(p, em, _)| !(p == &canon && em == m));
-        self.recent_selections.insert(0, (canon, m.to_string(), r.to_string()));
+        let r = if reasoning.trim().is_empty() {
+            "default"
+        } else {
+            reasoning.trim()
+        };
+        self.recent_selections
+            .retain(|(p, em, _)| !(p == &canon && em == m));
+        self.recent_selections
+            .insert(0, (canon, m.to_string(), r.to_string()));
         self.recent_selections.truncate(8);
     }
 }
@@ -106,7 +120,11 @@ pub fn emit_jsonl_line(stdout_lock: &Arc<Mutex<io::Stdout>>, payload: &Value) {
 }
 
 /// Allocates `event_seq` while holding `stdout_lock` so concurrent JSONL events emit in monotonic `seq` order.
-pub fn emit_seq_event(stdout_lock: &Arc<Mutex<io::Stdout>>, event_seq: &AtomicI64, mut event: Value) {
+pub fn emit_seq_event(
+    stdout_lock: &Arc<Mutex<io::Stdout>>,
+    event_seq: &AtomicI64,
+    mut event: Value,
+) {
     let mut out = lock_unpoison(stdout_lock);
     let seq = event_seq.fetch_add(1, Ordering::SeqCst) + 1;
     event["seq"] = json!(seq);
@@ -116,7 +134,10 @@ pub fn emit_seq_event(stdout_lock: &Arc<Mutex<io::Stdout>>, event_seq: &AtomicI6
 
 /// Resolves a recorded worker run by exact `id` or by the 64-hex `state.inspect` digest (`sha256("<id>:<rev_idx>")`).
 pub fn resolve_worker_run<'a>(runs: &'a [Value], id_or_hash: &str) -> Option<&'a Value> {
-    if let Some(found) = runs.iter().find(|r| r.get("id").and_then(|s| s.as_str()) == Some(id_or_hash)) {
+    if let Some(found) = runs
+        .iter()
+        .find(|r| r.get("id").and_then(|s| s.as_str()) == Some(id_or_hash))
+    {
         return Some(found);
     }
     if id_or_hash.len() == 64 && id_or_hash.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -166,36 +187,56 @@ pub fn paginate_text_response(text: &str, rev_prefix: &str, offset: usize, limit
     })
 }
 
-pub async fn read_bounded_stdin_line<R: tokio::io::AsyncBufRead + Unpin>(reader: &mut R, max_bytes: usize) -> std::io::Result<Option<String>> {
+pub async fn read_bounded_stdin_line<R: tokio::io::AsyncBufRead + Unpin>(
+    reader: &mut R,
+    max_bytes: usize,
+) -> std::io::Result<Option<String>> {
     use tokio::io::AsyncBufReadExt;
     let mut buf = Vec::new();
     loop {
         let chunk = reader.fill_buf().await?;
         if chunk.is_empty() {
-            return if buf.is_empty() { Ok(None) } else {
-                String::from_utf8(buf).map(Some).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            return if buf.is_empty() {
+                Ok(None)
+            } else {
+                String::from_utf8(buf)
+                    .map(Some)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
             };
         }
         if let Some(pos) = chunk.iter().position(|&b| b == b'\n') {
             let take = pos + 1;
             if buf.len().saturating_add(take) > max_bytes {
                 reader.consume(take);
-                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("JSONL frame exceeds {max_bytes} byte cap")));
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("JSONL frame exceeds {max_bytes} byte cap"),
+                ));
             }
             buf.extend_from_slice(&chunk[..take]);
             reader.consume(take);
-            return String::from_utf8(buf).map(Some).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e));
+            return String::from_utf8(buf)
+                .map(Some)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e));
         }
         let n = chunk.len();
         if buf.len().saturating_add(n) > max_bytes {
             reader.consume(n);
             while let Ok(more) = reader.fill_buf().await {
-                if more.is_empty() { break; }
-                if let Some(p) = more.iter().position(|&b| b == b'\n') { reader.consume(p + 1); break; }
+                if more.is_empty() {
+                    break;
+                }
+                if let Some(p) = more.iter().position(|&b| b == b'\n') {
+                    reader.consume(p + 1);
+                    break;
+                }
                 let m = more.len();
                 reader.consume(m);
             }
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("JSONL frame exceeds {max_bytes} byte cap")));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("JSONL frame exceeds {max_bytes} byte cap"),
+            ));
         }
         buf.extend_from_slice(chunk);
         reader.consume(n);
@@ -206,15 +247,28 @@ pub async fn read_bounded_stdin_line<R: tokio::io::AsyncBufRead + Unpin>(reader:
 pub fn build_artifact_run_response(runs: &[Value], params: &Value) -> Option<Value> {
     let run_id = params.get("run").and_then(|v| v.as_str())?;
     let text = resolve_worker_run(runs, run_id)
-        .and_then(|r| r.get("response").or_else(|| r.get("error")).or_else(|| r.get("text")).and_then(|v| v.as_str()))
+        .and_then(|r| {
+            r.get("response")
+                .or_else(|| r.get("error"))
+                .or_else(|| r.get("text"))
+                .and_then(|v| v.as_str())
+        })
         .unwrap_or("");
     let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-    let limit = (params.get("limit").and_then(|v| v.as_u64()).unwrap_or(65536) as usize).clamp(1, 512 * 1024);
+    let limit = (params
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(65536) as usize)
+        .clamp(1, 512 * 1024);
     Some(paginate_text_response(text, "artifact", offset, limit))
 }
 
 /// Switches the active conversation thread while snapshotting and restoring per-thread `SessionStore` history.
-pub fn switch_worker_conversation(state: &mut WorkerSharedState, engine: &AgentEngine, next_id: &str) {
+pub fn switch_worker_conversation(
+    state: &mut WorkerSharedState,
+    engine: &AgentEngine,
+    next_id: &str,
+) {
     let prev_id = state.current_conversation.clone();
     if prev_id == next_id {
         return;
@@ -232,7 +286,11 @@ pub fn switch_worker_conversation(state: &mut WorkerSharedState, engine: &AgentE
                 .insert(prev_id, sess.messages().to_vec());
         }
         sess.clear();
-        if let Some(saved) = state.conversation_messages.get(next_id).filter(|m| !m.is_empty()) {
+        if let Some(saved) = state
+            .conversation_messages
+            .get(next_id)
+            .filter(|m| !m.is_empty())
+        {
             for msg in saved {
                 sess.add_message(msg.clone());
             }
@@ -245,7 +303,12 @@ pub fn switch_worker_conversation(state: &mut WorkerSharedState, engine: &AgentE
 
 /// Discovers runnable workspace targets (`Cargo.toml`, `Package.swift`, `package.json`) with both `title` and `name`.
 /// Handles `computer.*`, `browser.*`, `spatial.*`, `skills.*`, and `soul.status` RPCs.
-pub async fn handle_automation_rpc(method: &str, req_id: &str, params: &Value, engine: &AgentEngine) -> Value {
+pub async fn handle_automation_rpc(
+    method: &str,
+    req_id: &str,
+    params: &Value,
+    engine: &AgentEngine,
+) -> Value {
     match method {
         "computer.action" | "computer.capture" | "computer.health" => {
             let mut req = params.clone();
@@ -261,10 +324,24 @@ pub async fn handle_automation_rpc(method: &str, req_id: &str, params: &Value, e
                     name: "computer_use".into(),
                     args: req,
                 };
-                let res = engine.tools().execute_single(&call, engine.workspace_root(), ExecutionAuthorityLevel::Autonomous, None).await;
-                if res.success { res.output } else { json!({"error": res.error}) }
+                let res = engine
+                    .tools()
+                    .execute_single(
+                        &call,
+                        engine.workspace_root(),
+                        ExecutionAuthorityLevel::Autonomous,
+                        None,
+                    )
+                    .await;
+                if res.success {
+                    res.output
+                } else {
+                    json!({"error": res.error})
+                }
             } else {
-                lock_unpoison(&engine.tools().display_state).execute_action(&req).unwrap_or_else(|e| json!({"error": e}))
+                lock_unpoison(&engine.tools().display_state)
+                    .execute_action(&req)
+                    .unwrap_or_else(|e| json!({"error": e}))
             }
         }
         "computer.observe" | "computer.interpret" | "computer.consult" | "computer.orchestrate" => {
@@ -281,8 +358,20 @@ pub async fn handle_automation_rpc(method: &str, req_id: &str, params: &Value, e
                 name: "computer_use".into(),
                 args: req,
             };
-            let res = engine.tools().execute_single(&call, engine.workspace_root(), ExecutionAuthorityLevel::Autonomous, None).await;
-            if res.success { res.output } else { json!({"error": res.error}) }
+            let res = engine
+                .tools()
+                .execute_single(
+                    &call,
+                    engine.workspace_root(),
+                    ExecutionAuthorityLevel::Autonomous,
+                    None,
+                )
+                .await;
+            if res.success {
+                res.output
+            } else {
+                json!({"error": res.error})
+            }
         }
         "computer.patterns" => {
             let kstore = lock_unpoison(&engine.tools().computer_orchestrator.knowledge_store);
@@ -297,15 +386,29 @@ pub async fn handle_automation_rpc(method: &str, req_id: &str, params: &Value, e
                 req["action"] = json!("navigate");
             }
             if method == "browser.snapshot" {
-                lock_unpoison(&engine.tools().display_state).execute_browser_action(&req).unwrap_or_else(|e| json!({"error": e}))
+                lock_unpoison(&engine.tools().display_state)
+                    .execute_browser_action(&req)
+                    .unwrap_or_else(|e| json!({"error": e}))
             } else {
                 let call = crate::domain::types::tool_schedule::ScheduledToolCall {
                     id: format!("req-{req_id}"),
                     name: "browser_use".into(),
                     args: req,
                 };
-                let res = engine.tools().execute_single(&call, engine.workspace_root(), ExecutionAuthorityLevel::Autonomous, None).await;
-                if res.success { res.output } else { json!({"error": res.error}) }
+                let res = engine
+                    .tools()
+                    .execute_single(
+                        &call,
+                        engine.workspace_root(),
+                        ExecutionAuthorityLevel::Autonomous,
+                        None,
+                    )
+                    .await;
+                if res.success {
+                    res.output
+                } else {
+                    json!({"error": res.error})
+                }
             }
         }
         "spatial.ground" | "spatial.execute" | "spatial.health" | "spatial.query" => {
@@ -322,23 +425,53 @@ pub async fn handle_automation_rpc(method: &str, req_id: &str, params: &Value, e
                 name: "spatial_interact".into(),
                 args: req,
             };
-            let res = engine.tools().execute_single(&call, engine.workspace_root(), ExecutionAuthorityLevel::Autonomous, None).await;
-            if res.success { res.output } else { json!({"error": res.error}) }
+            let res = engine
+                .tools()
+                .execute_single(
+                    &call,
+                    engine.workspace_root(),
+                    ExecutionAuthorityLevel::Autonomous,
+                    None,
+                )
+                .await;
+            if res.success {
+                res.output
+            } else {
+                json!({"error": res.error})
+            }
         }
         _ => {
             let mutating = method == "skills.forge"
-                || (method == "skills.lint" && params.get("autofix").and_then(|v| v.as_bool()).unwrap_or(false));
+                || (method == "skills.lint"
+                    && params
+                        .get("autofix")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false));
             if mutating && engine.current_posture() == ExecutionPosture::Plan {
                 return json!({ "error": "ExecutionPosture::Plan forbids skill mutations." });
             }
             let mut cat = lock_unpoison(&engine.tools().skill_catalog);
             match method {
-                "skills.forge" => cat.forge_skill(params).unwrap_or_else(|e| json!({"error": e})),
+                "skills.forge" => cat
+                    .forge_skill(params)
+                    .unwrap_or_else(|e| json!({"error": e})),
                 "skills.lint" => {
-                    let id = params.get("id").and_then(|v| v.as_str()).unwrap_or("computer-use-operator");
-                    cat.lint_and_autofix_skill(id, params.get("autofix").and_then(|v| v.as_bool()).unwrap_or(false)).unwrap_or_else(|e| json!({"error": e}))
+                    let id = params
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("computer-use-operator");
+                    cat.lint_and_autofix_skill(
+                        id,
+                        params
+                            .get("autofix")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                    )
+                    .unwrap_or_else(|e| json!({"error": e}))
                 }
-                "soul.status" => json!({ "activeSoul": cat.active_soul, "competencies": cat.competency_scores }),
+                "soul.status" => {
+                    json!({ "activeSoul": cat.active_soul, "competencies": cat.competency_scores })
+                }
                 _ => cat.evaluate_dag(),
             }
         }
@@ -346,7 +479,11 @@ pub async fn handle_automation_rpc(method: &str, req_id: &str, params: &Value, e
 }
 
 /// Handles `posture.{get,set,step}`, `receipts.list`, `turn.undo`, and `request.preview` RPCs.
-pub fn handle_posture_and_receipts_rpc(method: &str, params: &Value, engine: &AgentEngine) -> Value {
+pub fn handle_posture_and_receipts_rpc(
+    method: &str,
+    params: &Value,
+    engine: &AgentEngine,
+) -> Value {
     match method {
         "posture.get" => {
             let p = engine.current_posture();
@@ -358,7 +495,11 @@ pub fn handle_posture_and_receipts_rpc(method: &str, params: &Value, engine: &Ag
             })
         }
         "posture.set" => {
-            if let Some(raw) = params.get("posture").or_else(|| params.get("mode")).and_then(Value::as_str) {
+            if let Some(raw) = params
+                .get("posture")
+                .or_else(|| params.get("mode"))
+                .and_then(Value::as_str)
+            {
                 if let Some(parsed) = ExecutionPosture::parse_label(raw) {
                     engine.set_posture(parsed);
                 }
@@ -389,7 +530,10 @@ pub fn handle_posture_and_receipts_rpc(method: &str, params: &Value, engine: &Ag
             })
         }
         "turn.undo" => {
-            let force = params.get("force").and_then(Value::as_bool).unwrap_or(false);
+            let force = params
+                .get("force")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             match engine.undo_last_turn(force) {
                 Ok(v) => v,
                 Err(e) => json!({ "restoredCount": 0, "error": e, "wouldBlock": true }),
@@ -427,9 +571,21 @@ pub fn progress_to_walkthrough_activity(ev: &EngineProgressEvent) -> Value {
         EngineProgressStatus::Failed => "failed",
     };
     let seq = (ev.sequence as i64).max(1);
-    let scope = ev.metadata.as_ref().and_then(|m| m.scope.as_deref()).unwrap_or("activity");
-    let source = ev.metadata.as_ref().and_then(|m| m.source.as_deref()).unwrap_or("engine");
-    let item_type = ev.metadata.as_ref().and_then(|m| m.item_type.as_deref()).unwrap_or("tool");
+    let scope = ev
+        .metadata
+        .as_ref()
+        .and_then(|m| m.scope.as_deref())
+        .unwrap_or("activity");
+    let source = ev
+        .metadata
+        .as_ref()
+        .and_then(|m| m.source.as_deref())
+        .unwrap_or("engine");
+    let item_type = ev
+        .metadata
+        .as_ref()
+        .and_then(|m| m.item_type.as_deref())
+        .unwrap_or("tool");
     json!({
         "activityId": ev.activity_id,
         "sequence": seq,
@@ -500,7 +656,9 @@ pub async fn execute_multiplexed_submit(
 
     {
         let mut guard = lock_unpoison(&state);
-        guard.session_runs.retain(|r| r.get("id").and_then(|v| v.as_str()) != Some(&run_id));
+        guard
+            .session_runs
+            .retain(|r| r.get("id").and_then(|v| v.as_str()) != Some(&run_id));
         guard.session_runs.push(run_obj.clone());
         while guard.session_runs.len() > 64 {
             guard.session_runs.remove(0);
@@ -508,8 +666,15 @@ pub async fn execute_multiplexed_submit(
     }
 
     if is_rpc {
-        emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "accepted": true, "run": run_obj } }));
-        emit_seq_event(&stdout_lock, &event_seq, json!({ "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id, "runtime": "heav3ns-micro", "type": "run.state", "payload": run_obj }));
+        emit_jsonl_line(
+            &stdout_lock,
+            &json!({ "v": 1, "kind": "response", "id": req_id, "result": { "accepted": true, "run": run_obj } }),
+        );
+        emit_seq_event(
+            &stdout_lock,
+            &event_seq,
+            json!({ "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id, "runtime": "heav3ns-micro", "type": "run.state", "payload": run_obj }),
+        );
     }
 
     let mut input = EngineTickInput::new(prompt.clone());
@@ -526,113 +691,143 @@ pub async fn execute_multiplexed_submit(
         let ws_scope = engine.workspace_root().to_string_lossy().to_string();
         let base_run = run_obj.clone();
         let tok_a = token.clone();
-        input.approval_callback = Some(Arc::new(move |tool_name: &str, summary: &str, risk_reason: &str| {
-            let approval_id = format!("apr_{}_{}", now_ms(), seq_approve.fetch_add(1, Ordering::SeqCst) + 1);
-            let (tx, rx) = mpsc::channel();
-            let waiting_rev = rev_approve.fetch_add(1, Ordering::SeqCst) + 1;
-            let mut waiting_run = base_run.clone();
-            waiting_run["state"] = json!("awaiting_approval");
-            waiting_run["revision"] = json!(waiting_rev);
-            waiting_run["approval"] = json!({
-                "id": approval_id,
-                "operation": approval_id,
-                "tool": tool_name,
-                "args": summary,
-                "scope": ws_scope,
-                "reason": risk_reason,
-                "choices": ["allow_once", "allow_session", "deny"]
-            });
-            {
-                let mut guard = lock_unpoison(&st_approve);
-                guard.pending_approvals.insert(approval_id.clone(), tx);
-                if let Some(existing) = guard.session_runs.iter_mut().find(|r| r.get("id").and_then(|v| v.as_str()) == Some(&run_a)) {
-                    *existing = waiting_run.clone();
+        input.approval_callback = Some(Arc::new(
+            move |tool_name: &str, summary: &str, risk_reason: &str| {
+                let approval_id = format!(
+                    "apr_{}_{}",
+                    now_ms(),
+                    seq_approve.fetch_add(1, Ordering::SeqCst) + 1
+                );
+                let (tx, rx) = mpsc::channel();
+                let waiting_rev = rev_approve.fetch_add(1, Ordering::SeqCst) + 1;
+                let mut waiting_run = base_run.clone();
+                waiting_run["state"] = json!("awaiting_approval");
+                waiting_run["revision"] = json!(waiting_rev);
+                waiting_run["approval"] = json!({
+                    "id": approval_id,
+                    "operation": approval_id,
+                    "tool": tool_name,
+                    "args": summary,
+                    "scope": ws_scope,
+                    "reason": risk_reason,
+                    "choices": ["allow_once", "allow_session", "deny"]
+                });
+                {
+                    let mut guard = lock_unpoison(&st_approve);
+                    guard.pending_approvals.insert(approval_id.clone(), tx);
+                    if let Some(existing) = guard
+                        .session_runs
+                        .iter_mut()
+                        .find(|r| r.get("id").and_then(|v| v.as_str()) == Some(&run_a))
+                    {
+                        *existing = waiting_run.clone();
+                    }
                 }
-            }
-            emit_seq_event(
-                &out_approve,
-                &seq_approve,
-                json!({
-                    "v": 1,
-                    "kind": "event",
-                    "workspace": ws_a,
-                    "session": sess_a,
-                    "runtime": "heav3ns-micro",
-                    "type": "approval.requested",
-                    "run": run_a,
-                    "payload": waiting_run
-                }),
-            );
-            let deadline = Instant::now() + Duration::from_secs(120);
-            let tok_wait = tok_a.clone();
-            let wait_decision = move || loop {
-                if tok_wait.is_cancelled() || Instant::now() >= deadline {
-                    break UserApprovalChoice::Deny;
+                emit_seq_event(
+                    &out_approve,
+                    &seq_approve,
+                    json!({
+                        "v": 1,
+                        "kind": "event",
+                        "workspace": ws_a,
+                        "session": sess_a,
+                        "runtime": "heav3ns-micro",
+                        "type": "approval.requested",
+                        "run": run_a,
+                        "payload": waiting_run
+                    }),
+                );
+                let deadline = Instant::now() + Duration::from_secs(120);
+                let tok_wait = tok_a.clone();
+                let wait_decision = move || loop {
+                    if tok_wait.is_cancelled() || Instant::now() >= deadline {
+                        break UserApprovalChoice::Deny;
+                    }
+                    match rx.recv_timeout(Duration::from_millis(100)) {
+                        Ok(choice) => break choice,
+                        Err(RecvTimeoutError::Timeout) => continue,
+                        Err(RecvTimeoutError::Disconnected) => break UserApprovalChoice::Deny,
+                    }
+                };
+                let decision = if tokio::runtime::Handle::try_current()
+                    .is_ok_and(|h| h.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread)
+                {
+                    tokio::task::block_in_place(wait_decision)
+                } else {
+                    std::thread::spawn(wait_decision)
+                        .join()
+                        .unwrap_or(UserApprovalChoice::Deny)
+                };
+                let resumed_rev = rev_approve.fetch_add(1, Ordering::SeqCst) + 1;
+                let mut resumed_run = waiting_run;
+                resumed_run["state"] = json!("running");
+                resumed_run["revision"] = json!(resumed_rev);
+                resumed_run["approval"]["decision"] =
+                    json!(format!("{decision:?}").to_ascii_lowercase());
+                {
+                    let mut guard = lock_unpoison(&st_approve);
+                    guard.pending_approvals.remove(&approval_id);
+                    if let Some(existing) = guard
+                        .session_runs
+                        .iter_mut()
+                        .find(|r| r.get("id").and_then(|v| v.as_str()) == Some(&run_a))
+                    {
+                        *existing = resumed_run.clone();
+                    }
                 }
-                match rx.recv_timeout(Duration::from_millis(100)) {
-                    Ok(choice) => break choice,
-                    Err(RecvTimeoutError::Timeout) => continue,
-                    Err(RecvTimeoutError::Disconnected) => break UserApprovalChoice::Deny,
-                }
-            };
-            let decision = if tokio::runtime::Handle::try_current()
-                .is_ok_and(|h| h.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread)
-            {
-                tokio::task::block_in_place(wait_decision)
-            } else {
-                std::thread::spawn(wait_decision)
-                    .join()
-                    .unwrap_or(UserApprovalChoice::Deny)
-            };
-            let resumed_rev = rev_approve.fetch_add(1, Ordering::SeqCst) + 1;
-            let mut resumed_run = waiting_run;
-            resumed_run["state"] = json!("running");
-            resumed_run["revision"] = json!(resumed_rev);
-            resumed_run["approval"]["decision"] = json!(format!("{decision:?}").to_ascii_lowercase());
-            {
-                let mut guard = lock_unpoison(&st_approve);
-                guard.pending_approvals.remove(&approval_id);
-                if let Some(existing) = guard.session_runs.iter_mut().find(|r| r.get("id").and_then(|v| v.as_str()) == Some(&run_a)) {
-                    *existing = resumed_run.clone();
-                }
-            }
-            emit_seq_event(
-                &out_approve,
-                &seq_approve,
-                json!({
-                    "v": 1,
-                    "kind": "event",
-                    "workspace": ws_a,
-                    "session": sess_a,
-                    "runtime": "heav3ns-micro",
-                    "type": "approval.resolved",
-                    "run": run_a,
-                    "payload": resumed_run
-                }),
-            );
-            decision
-        }));
+                emit_seq_event(
+                    &out_approve,
+                    &seq_approve,
+                    json!({
+                        "v": 1,
+                        "kind": "event",
+                        "workspace": ws_a,
+                        "session": sess_a,
+                        "runtime": "heav3ns-micro",
+                        "type": "approval.resolved",
+                        "run": run_a,
+                        "payload": resumed_run
+                    }),
+                );
+                decision
+            },
+        ));
     }
 
     let live_acts = Arc::new(Mutex::new(Vec::<Value>::new()));
     let live_acts_cb = Arc::clone(&live_acts);
     let seq_cb = Arc::clone(&event_seq);
     let out_prog = Arc::clone(&stdout_lock);
-    let (req_id_prog, ws_p, sess_p, run_p) = (req_id.clone(), ws_id.clone(), sess_id.clone(), run_id.clone());
+    let (req_id_prog, ws_p, sess_p, run_p) = (
+        req_id.clone(),
+        ws_id.clone(),
+        sess_id.clone(),
+        run_id.clone(),
+    );
     input.on_progress = Some(Arc::new(move |ev| {
         let act = progress_to_walkthrough_activity(&ev);
         {
             let mut guard = lock_unpoison(&live_acts_cb);
-            if let Some(existing) = guard.iter_mut().find(|a| a.get("activityId") == act.get("activityId")) {
+            if let Some(existing) = guard
+                .iter_mut()
+                .find(|a| a.get("activityId") == act.get("activityId"))
+            {
                 *existing = act.clone();
             } else if guard.len() < 120 {
                 guard.push(act.clone());
             }
         }
         if is_rpc {
-            emit_seq_event(&out_prog, &seq_cb, json!({ "v": 1, "kind": "event", "workspace": ws_p, "session": sess_p, "runtime": "heav3ns-micro", "type": "activity", "run": run_p, "payload": act }));
+            emit_seq_event(
+                &out_prog,
+                &seq_cb,
+                json!({ "v": 1, "kind": "event", "workspace": ws_p, "session": sess_p, "runtime": "heav3ns-micro", "type": "activity", "run": run_p, "payload": act }),
+            );
         } else {
-            emit_jsonl_line(&out_prog, &json!({ "v": 1, "id": req_id_prog, "type": "progress", "event": ev }));
+            emit_jsonl_line(
+                &out_prog,
+                &json!({ "v": 1, "id": req_id_prog, "type": "progress", "event": ev }),
+            );
         }
     }));
 
@@ -648,12 +843,20 @@ pub async fn execute_multiplexed_submit(
     let (final_state, resp_txt, err_txt) = match result.outcome {
         EngineTickOutcome::Completed => ("completed", Some(result.response.clone()), None),
         EngineTickOutcome::Deferred => ("awaiting_approval", Some(result.response.clone()), None),
-        EngineTickOutcome::Cancelled => ("cancelled", None, Some("Execution was cancelled".to_string())),
+        EngineTickOutcome::Cancelled => (
+            "cancelled",
+            None,
+            Some("Execution was cancelled".to_string()),
+        ),
         EngineTickOutcome::Failed => ("failed", None, Some(result.response.clone())),
     };
 
     let acts = lock_unpoison(&live_acts).clone();
-    let max_act_seq = acts.iter().filter_map(|a| a.get("sequence").and_then(|v| v.as_i64())).max().unwrap_or(0);
+    let max_act_seq = acts
+        .iter()
+        .filter_map(|a| a.get("sequence").and_then(|v| v.as_i64()))
+        .max()
+        .unwrap_or(0);
     let final_rev = run_rev.fetch_add(1, Ordering::SeqCst) + 1;
     run_obj["state"] = json!(final_state);
     run_obj["revision"] = json!(final_rev);
@@ -663,7 +866,8 @@ pub async fn execute_multiplexed_submit(
     run_obj["activitySequence"] = json!(max_act_seq);
     run_obj["activityCount"] = json!(acts.len());
     run_obj["unsentAuthRejected"] = json!(unsent_auth);
-    if final_state == "awaiting_approval" && !run_obj.get("approval").is_some_and(Value::is_object) {
+    if final_state == "awaiting_approval" && !run_obj.get("approval").is_some_and(Value::is_object)
+    {
         run_obj["approval"] = json!({
             "operation": format!("defer_{run_id}"),
             "tool": "approval_gate",
@@ -689,8 +893,12 @@ pub async fn execute_multiplexed_submit(
         if result.is_slash_command {
             let snap = engine.config_snapshot();
             let next_prov = canonicalize_provider_id(&snap.provider);
-            let next_reas = snap.reasoning_effort.unwrap_or_else(|| "default".to_string());
-            if (!next_prov.is_empty() && next_prov != "scripted" && next_prov != guard.active_provider)
+            let next_reas = snap
+                .reasoning_effort
+                .unwrap_or_else(|| "default".to_string());
+            if (!next_prov.is_empty()
+                && next_prov != "scripted"
+                && next_prov != guard.active_provider)
                 || snap.model_name != guard.active_model
                 || next_reas != guard.active_reasoning
             {
@@ -714,7 +922,11 @@ pub async fn execute_multiplexed_submit(
                 ));
             }
         }
-        if let Some(existing) = guard.session_runs.iter_mut().find(|r| r.get("id").and_then(|v| v.as_str()) == Some(&run_id)) {
+        if let Some(existing) = guard
+            .session_runs
+            .iter_mut()
+            .find(|r| r.get("id").and_then(|v| v.as_str()) == Some(&run_id))
+        {
             *existing = run_obj.clone();
         } else {
             guard.session_runs.push(run_obj.clone());
@@ -727,11 +939,22 @@ pub async fn execute_multiplexed_submit(
 
     if is_rpc {
         if let Some(cat_payload) = changed_catalog {
-            emit_seq_event(&stdout_lock, &event_seq, json!({ "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id, "runtime": "heav3ns-micro", "type": "models.changed", "payload": cat_payload }));
+            emit_seq_event(
+                &stdout_lock,
+                &event_seq,
+                json!({ "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id, "runtime": "heav3ns-micro", "type": "models.changed", "payload": cat_payload }),
+            );
         }
-        emit_seq_event(&stdout_lock, &event_seq, json!({ "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id, "runtime": "heav3ns-micro", "type": "run.state", "payload": run_obj }));
+        emit_seq_event(
+            &stdout_lock,
+            &event_seq,
+            json!({ "v": 1, "kind": "event", "workspace": ws_id, "session": sess_id, "runtime": "heav3ns-micro", "type": "run.state", "payload": run_obj }),
+        );
     } else {
-        emit_jsonl_line(&stdout_lock, &json!({ "v": 1, "id": req_id, "type": "result", "result": result }));
+        emit_jsonl_line(
+            &stdout_lock,
+            &json!({ "v": 1, "id": req_id, "type": "result", "result": result }),
+        );
     }
 }
 
@@ -743,20 +966,33 @@ mod tests {
     fn test_wave10_worker_artifact_read_and_hash_run_resolution() {
         let runs = vec![json!({ "id": "run_abc", "response": "artifact-body-123" })];
         let hash_id = sha256_hex_ui("run_abc:0");
-        assert_eq!(resolve_worker_run(&runs, &hash_id).and_then(|r| r["id"].as_str()), Some("run_abc"));
-        let art = build_artifact_run_response(&runs, &json!({ "run": "run_abc", "offset": 0 })).unwrap();
+        assert_eq!(
+            resolve_worker_run(&runs, &hash_id).and_then(|r| r["id"].as_str()),
+            Some("run_abc")
+        );
+        let art =
+            build_artifact_run_response(&runs, &json!({ "run": "run_abc", "offset": 0 })).unwrap();
         assert_eq!(art["text"], json!("artifact-body-123"));
     }
 
     #[tokio::test]
     async fn test_wave18_artifact_limit_clamp_and_bounded_stdin() {
         let runs = vec![json!({ "id": "r1", "response": "abcdef" })];
-        let resp = build_artifact_run_response(&runs, &json!({ "run": "r1", "offset": 0, "limit": 0 })).unwrap();
+        let resp =
+            build_artifact_run_response(&runs, &json!({ "run": "r1", "offset": 0, "limit": 0 }))
+                .unwrap();
         assert_eq!(resp["nextOffset"], 1);
 
-        let mut cursor = tokio::io::BufReader::new(std::io::Cursor::new(b"oversized_frame\nok\n".as_slice()));
+        let mut cursor =
+            tokio::io::BufReader::new(std::io::Cursor::new(b"oversized_frame\nok\n".as_slice()));
         let err = read_bounded_stdin_line(&mut cursor, 8).await.unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
-        assert_eq!(read_bounded_stdin_line(&mut cursor, 8).await.unwrap().as_deref(), Some("ok\n"));
+        assert_eq!(
+            read_bounded_stdin_line(&mut cursor, 8)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("ok\n")
+        );
     }
 }

@@ -29,7 +29,12 @@ pub struct LearnedInteractionPattern {
 }
 
 impl LearnedInteractionPattern {
-    pub fn new(id: impl Into<String>, app: impl Into<String>, trigger: impl Into<String>, affordance: impl Into<String>) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        app: impl Into<String>,
+        trigger: impl Into<String>,
+        affordance: impl Into<String>,
+    ) -> Self {
         let aff = affordance.into();
         let default_modality = if aff.contains("input") || aff.contains("search") {
             "type"
@@ -89,7 +94,13 @@ pub struct LearnedWorkflowProcedure {
 }
 
 impl LearnedWorkflowProcedure {
-    pub fn new(id: impl Into<String>, app: impl Into<String>, goal: impl Into<String>, steps: Vec<String>, epoch: u64) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        app: impl Into<String>,
+        goal: impl Into<String>,
+        steps: Vec<String>,
+        epoch: u64,
+    ) -> Self {
         Self {
             procedure_id: id.into(),
             app: app.into(),
@@ -125,7 +136,13 @@ impl EnvironmentalReconciliationReport {
         }
     }
 
-    pub fn diverged(ckpt: u64, cur: u64, drift: bool, reasons: Vec<String>, recovery: impl Into<String>) -> Self {
+    pub fn diverged(
+        ckpt: u64,
+        cur: u64,
+        drift: bool,
+        reasons: Vec<String>,
+        recovery: impl Into<String>,
+    ) -> Self {
         Self {
             checkpoint_epoch: ckpt,
             current_epoch: cur,
@@ -146,4 +163,3 @@ impl IReconciliationReport for EnvironmentalReconciliationReport {
         self.external_drift_detected
     }
 }
-

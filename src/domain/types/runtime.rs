@@ -61,7 +61,9 @@ impl ExecutionPosture {
             "accept-edits" | "acceptedits" | "balanced" | "work" => Some(Self::AcceptEdits),
             "plan" | "read-only" | "readonly" | "strict" => Some(Self::Plan),
             "auto-review" | "autoreview" | "review" | "guardian" => Some(Self::AutoReview),
-            "full-access" | "fullaccess" | "auto" | "autonomous" | "bypass" => Some(Self::FullAccess),
+            "full-access" | "fullaccess" | "auto" | "autonomous" | "bypass" => {
+                Some(Self::FullAccess)
+            }
             _ => None,
         }
     }
@@ -114,7 +116,11 @@ impl ExecutionPosture {
     pub const fn sandbox_mode(self) -> SeatbeltSandboxMode {
         match self {
             Self::Plan => SeatbeltSandboxMode::ReadOnly,
-            Self::Ask | Self::AcceptEdits | Self::AutoReview => SeatbeltSandboxMode::WorkspaceWrite { allow_network: true },
+            Self::Ask | Self::AcceptEdits | Self::AutoReview => {
+                SeatbeltSandboxMode::WorkspaceWrite {
+                    allow_network: true,
+                }
+            }
             Self::FullAccess => SeatbeltSandboxMode::Unrestricted,
         }
     }
@@ -135,7 +141,10 @@ impl Default for CancellationToken {
 impl CancellationToken {
     pub fn new() -> Self {
         let (tx, rx) = watch::channel(false);
-        Self { tx: Arc::new(tx), rx }
+        Self {
+            tx: Arc::new(tx),
+            rx,
+        }
     }
 
     pub fn cancel(&self) {
@@ -254,7 +263,9 @@ impl Default for AgentConfig {
             temperature: 0.0,
             provider_timeout_ms: 120_000,
             api_endpoint: "https://api.openai.com/v1".to_string(),
-            api_key: std::env::var("OPENAI_API_KEY").ok().filter(|s| !s.is_empty()),
+            api_key: std::env::var("OPENAI_API_KEY")
+                .ok()
+                .filter(|s| !s.is_empty()),
             reasoning_effort: None,
             wire_dialect: None,
             fallback_providers: Vec::new(),
