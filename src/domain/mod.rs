@@ -2,11 +2,14 @@
 pub mod arena;
 pub mod compaction;
 pub mod computer_use;
+pub mod computer_use_browser;
+pub mod computer_use_ops;
 pub mod interfaces;
 pub mod memory;
 pub mod prefix_and_manifest;
 pub mod pricing_and_taxonomy;
 pub mod prompt_spec;
+pub mod skill_nodes;
 pub mod skill_tree;
 pub mod spatial_action;
 pub mod spatial_mediator;

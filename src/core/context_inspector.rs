@@ -761,15 +761,11 @@ impl AgentEngine {
         match ReasoningEffortLevel::parse_flexible(trimmed) {
             Ok(Some(ReasoningEffortLevel::None)) => {
                 self.set_reasoning_effort(Some("none".to_string()));
-                "Reasoning effort set to 'none' (thinking disabled) for subsequent turns."
-                    .to_string()
+                "Reasoning effort set to 'none' (thinking disabled) for subsequent turns.".to_string()
             }
             Ok(Some(level)) => {
                 self.set_reasoning_effort(Some(level.as_str().to_string()));
-                format!(
-                    "Reasoning effort set to '{}' for subsequent turns.",
-                    level.as_str()
-                )
+                format!("Reasoning effort set to '{}' for subsequent turns.", level.as_str())
             }
             Ok(None) => {
                 self.set_reasoning_effort(None);
@@ -782,22 +778,10 @@ impl AgentEngine {
     pub(crate) fn format_snapshots_list(&self) -> String {
         let snaps = self.snapshots_list();
         if snaps.is_empty() {
-            "No snapshots recorded.".to_string()
-        } else {
-            snaps
-                .iter()
-                .enumerate()
-                .map(|(i, s)| {
-                    format!(
-                        "#{i}: id={} frame={} msgs={} arena={}B",
-                        s.snapshot_id,
-                        s.frame_index,
-                        s.messages.len(),
-                        s.slab_snapshot.allocated_bytes
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
+            return "No snapshots recorded.".to_string();
         }
+        snaps.iter().enumerate().map(|(i, s)| {
+            format!("#{i}: id={} frame={} msgs={} arena={}B", s.snapshot_id, s.frame_index, s.messages.len(), s.slab_snapshot.allocated_bytes)
+        }).collect::<Vec<_>>().join("\n")
     }
 }

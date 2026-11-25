@@ -41,7 +41,7 @@ final class LauncherWindow: NSWindowController, NSTableViewDataSource, NSTableVi
         sort = ProjectSort(rawValue: defaults.string(forKey: "projectLibrary.sort") ?? "") ?? .recentlyOpened
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 740), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "HEAV3NS-CODE"; window.minSize = NSSize(width: 720, height: 480); window.isReleasedWhenClosed = false
-        super.init(window: window); window.delegate = self; window.center()
+        super.init(window: window); window.delegate = self; JourneyStyle.fitWindow(window, center: true)
         search.placeholderString = "Find a project"; search.delegate = self; search.setAccessibilityLabel("Find a project")
         search.target = self; search.action = #selector(searchPerformed)
         table.addTableColumn(NSTableColumn(identifier: .init("project"))); table.headerView = nil
@@ -74,6 +74,7 @@ final class LauncherWindow: NSWindowController, NSTableViewDataSource, NSTableVi
     func present(account: Bool = false) {
         accountPage = account
         if account { showSignIn() } else if probe?.launcherPass != true && (defaults.bool(forKey: "journeyWelcomeCompleted") || !library.projects.isEmpty) { showProjects() }
+        if let window { JourneyStyle.fitWindow(window, center: false) }
         window?.makeKeyAndOrderFront(nil)
     }
     func suspend() {
@@ -85,11 +86,27 @@ final class LauncherWindow: NSWindowController, NSTableViewDataSource, NSTableVi
     func refresh() { if !accountPage { showProjects() } }
     private func install(_ view: NSView) { content = view; window?.contentView = view }
     private func centered(_ views: [NSView]) {
-        let root = NSView(), stack = JourneyStyle.stack(views, spacing: 20)
+        let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false
+        let root = NSView(); root.translatesAutoresizingMaskIntoConstraints = false
+        let stack = JourneyStyle.stack(views, spacing: 20)
         root.addSubview(stack)
-        NSLayoutConstraint.activate([stack.centerXAnchor.constraint(equalTo: root.centerXAnchor), stack.centerYAnchor.constraint(equalTo: root.centerYAnchor), stack.widthAnchor.constraint(equalToConstant: 490)])
+        scroll.documentView = root
+        let preferredWidth = stack.widthAnchor.constraint(equalToConstant: 490)
+        preferredWidth.priority = .defaultHigh
+        let centerY = stack.centerYAnchor.constraint(equalTo: root.centerYAnchor)
+        centerY.priority = .defaultLow
+        NSLayoutConstraint.activate([
+            root.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            root.heightAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.heightAnchor),
+            stack.centerXAnchor.constraint(equalTo: root.centerXAnchor),
+            centerY,
+            preferredWidth,
+            stack.widthAnchor.constraint(lessThanOrEqualTo: root.widthAnchor, constant: -48),
+            stack.topAnchor.constraint(greaterThanOrEqualTo: root.topAnchor, constant: 24),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -24)
+        ])
         for view in views { view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
-        install(root)
+        install(scroll)
     }
     private func showWelcome(checking: Bool = false) {
         showingProjects = false; activityScan?.cancel(); activityScan = nil

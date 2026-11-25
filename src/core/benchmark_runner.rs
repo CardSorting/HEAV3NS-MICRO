@@ -644,4 +644,41 @@ mod tests {
         assert_eq!(suite["runtime"], "heav3ns-micro");
         assert!(suite["stressBenchmarks"].is_object());
     }
+
+    #[test]
+    fn test_workspace_revision_warm_cache_speedup() {
+        let root = std::env::current_dir().unwrap();
+        let t_cold = Instant::now();
+        let rev1 = crate::infrastructure::vfs_store::workspace_revision(&root);
+        let cold_us = t_cold.elapsed().as_micros();
+
+        let t_warm = Instant::now();
+        let rev2 = crate::infrastructure::vfs_store::workspace_revision(&root);
+        let warm_us = t_warm.elapsed().as_micros();
+
+        assert_eq!(rev1, rev2);
+        assert_eq!(rev1.len(), 16);
+        eprintln!(
+            "workspace_revision benchmark: cold={} us, warm={} us",
+            cold_us, warm_us
+        );
+    }
+
+    #[test]
+    fn test_tool_registry_cached_schemas_throughput() {
+        let reg = ToolRegistry::new(std::sync::Arc::new(std::sync::Mutex::new(
+            crate::domain::memory::MemoryStore::new(),
+        )));
+        let t0 = Instant::now();
+        let mut count = 0usize;
+        for _ in 0..500 {
+            count += reg.select_tool_schemas_for("", false).len();
+        }
+        let elapsed_us = t0.elapsed().as_micros();
+        assert!(count > 0);
+        eprintln!(
+            "ToolRegistry cached schema benchmark: 500 full selections ({} schemas) in {} us",
+            count, elapsed_us
+        );
+    }
 }

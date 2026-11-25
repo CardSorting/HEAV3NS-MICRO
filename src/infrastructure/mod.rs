@@ -1,11 +1,18 @@
 // [LAYER: INFRASTRUCTURE]
 pub mod behavioral_store;
 pub mod codex_oauth;
+pub mod codex_oauth_http;
+#[cfg(test)]
+pub mod codex_oauth_tests;
 pub mod fs_tools;
 pub mod http_provider;
+pub(crate) mod http_provider_helpers;
+#[cfg(test)]
+pub mod http_provider_tests;
 pub mod pricing_updater;
 pub mod project_runner;
 pub(crate) mod reasoning_shaper;
+pub(crate) mod response_json_parsers;
 pub mod scripted_provider;
 pub mod search_tools;
 pub mod shell_runner;

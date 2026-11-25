@@ -5,6 +5,8 @@ pub mod environmental_types;
 pub mod learned_knowledge_types;
 pub mod messages;
 pub mod model_catalog;
+pub mod model_catalog_entry;
+pub mod posture_eval;
 pub mod posture_types;
 pub mod progress;
 pub mod provider_catalog_data;
@@ -39,8 +41,9 @@ pub use crate::domain::types::messages::{
 pub use crate::domain::types::model_catalog::{
     IModelCatalog, IModelTierRecommender, ModelCatalogEntry, ModelPricingCatalog,
 };
+pub use crate::domain::types::posture_eval::{evaluate_tool_posture, PostureEvaluation};
 pub use crate::domain::types::posture_types::{
-    evaluate_tool_posture, AuthorizationVerdict, ExecutionPosture, PostureEvaluation,
+    AuthorizationVerdict, ExecutionPosture,
     RepoConstitution, RepoConstitutionRule, UserApprovalChoice,
 };
 pub use crate::domain::types::progress::{

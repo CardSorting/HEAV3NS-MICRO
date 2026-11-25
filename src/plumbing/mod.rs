@@ -1,5 +1,6 @@
 // [LAYER: PLUMBING]
 pub mod display_telemetry;
+pub mod dom_and_cua;
 pub mod environmental_diff;
 pub mod fuzzy_patch;
 pub mod hash_and_math;

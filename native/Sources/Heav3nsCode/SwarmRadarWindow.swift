@@ -40,7 +40,7 @@ final class SwarmRadarWindow: NSWindowController, NSWindowDelegate {
         win.isReleasedWhenClosed = false
         super.init(window: win)
         win.delegate = self
-        win.center()
+        JourneyStyle.fitWindow(win, center: true)
 
         buildUI()
         setupListeners()

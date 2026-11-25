@@ -8,10 +8,11 @@ use crate::plumbing::text_tokens::{render_unified_diff, truncate_text_to_token_b
 use crate::plumbing::vision_and_dom::{decode_image_metadata, sanitize_trojan_unicode};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use std::time::UNIX_EPOCH;
 
 impl VfsDiskBaseline {
     pub fn capture_checked(path: &Path) -> Result<Self, String> {
@@ -448,10 +449,22 @@ impl SkillsIngestor {
     }
 }
 
-/// Computes a fast deterministic SHA-256 fingerprint of workspace source files and manifests.
+/// Computes a fast deterministic SHA-256 fingerprint of workspace source files and manifests,
+/// using `(len, mtime_nanos)` metadata memoization to skip re-reading unchanged files.
 pub fn workspace_revision(workspace_root: &Path) -> String {
+    static FILE_DIGEST_CACHE: OnceLock<Mutex<HashMap<PathBuf, (u64, u128, String)>>> =
+        OnceLock::new();
+    let cache = FILE_DIGEST_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let mut files: Vec<(String, String)> = Vec::new();
-    fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, String)>) {
+    let mut pending_cache_updates: Vec<(PathBuf, u64, u128, String)> = Vec::new();
+
+    fn walk(
+        root: &Path,
+        dir: &Path,
+        out: &mut Vec<(String, String)>,
+        cache: &Mutex<HashMap<PathBuf, (u64, u128, String)>>,
+        pending: &mut Vec<(PathBuf, u64, u128, String)>,
+    ) {
         if out.len() >= 2_000 {
             return;
         }
@@ -466,35 +479,67 @@ pub fn workspace_revision(workspace_root: &Path) -> String {
             {
                 continue;
             }
-            if entry.file_type().map(|t| t.is_symlink()).unwrap_or(true) {
+            let Ok(ft) = entry.file_type() else { continue };
+            if ft.is_symlink() {
                 continue;
             }
             let p = entry.path();
-            if p.is_dir() {
-                walk(root, &p, out);
-            } else if p.is_file() {
-                if entry
-                    .metadata()
-                    .map(|m| m.len() <= 512 * 1024)
-                    .unwrap_or(false)
-                {
-                    if let Ok(bytes) = fs::read(&p) {
-                        if bytes.len() <= 512 * 1024 {
-                            let rel = p
-                                .strip_prefix(root)
-                                .unwrap_or(&p)
-                                .to_string_lossy()
-                                .into_owned();
-                            let mut h = Sha256::new();
-                            h.update(&bytes);
-                            out.push((rel, format!("{:x}", h.finalize())));
+            if ft.is_dir() {
+                walk(root, &p, out, cache, pending);
+            } else if ft.is_file() {
+                let Ok(meta) = entry.metadata() else { continue };
+                let len = meta.len();
+                if len > 512 * 1024 {
+                    continue;
+                }
+                let mtime_nanos = meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0);
+                let rel = p
+                    .strip_prefix(root)
+                    .unwrap_or(&p)
+                    .to_string_lossy()
+                    .into_owned();
+                if let Ok(guard) = cache.lock() {
+                    if let Some((c_len, c_mtime, c_hex)) = guard.get(&p) {
+                        if *c_len == len && *c_mtime == mtime_nanos {
+                            out.push((rel, c_hex.clone()));
+                            continue;
                         }
+                    }
+                }
+                if let Ok(bytes) = fs::read(&p) {
+                    if bytes.len() <= 512 * 1024 {
+                        let mut h = Sha256::new();
+                        h.update(&bytes);
+                        let hex = format!("{:x}", h.finalize());
+                        pending.push((p, len, mtime_nanos, hex.clone()));
+                        out.push((rel, hex));
                     }
                 }
             }
         }
     }
-    walk(workspace_root, workspace_root, &mut files);
+    walk(
+        workspace_root,
+        workspace_root,
+        &mut files,
+        cache,
+        &mut pending_cache_updates,
+    );
+    if !pending_cache_updates.is_empty() {
+        if let Ok(mut guard) = cache.lock() {
+            if guard.len().saturating_add(pending_cache_updates.len()) > 16_384 {
+                guard.clear();
+            }
+            for (p, len, mtime, hex) in pending_cache_updates {
+                guard.insert(p, (len, mtime, hex));
+            }
+        }
+    }
     files.sort_by(|a, b| a.0.cmp(&b.0));
     let mut root_hasher = Sha256::new();
     for (rel, digest) in files {

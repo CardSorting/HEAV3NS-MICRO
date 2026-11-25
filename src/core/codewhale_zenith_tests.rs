@@ -16,9 +16,8 @@ mod tests {
     };
     use crate::domain::types::messages::{Role, SessionMessage, ToolCall, ToolCallFunction};
     use crate::domain::types::model_catalog::ModelPricingCatalog;
-    use crate::domain::types::posture_types::{
-        evaluate_tool_posture, AuthorizationVerdict, RepoConstitution,
-    };
+    use crate::domain::types::posture_eval::evaluate_tool_posture;
+    use crate::domain::types::posture_types::{AuthorizationVerdict, RepoConstitution};
     use crate::domain::types::runtime::{
         AgentConfig, EngineTickInput, EngineTickOutcome, ExecutionAuthorityLevel, ExecutionPosture,
     };

@@ -1,7 +1,7 @@
 // [LAYER: INFRASTRUCTURE]
 use crate::domain::types::messages::{ToolCall, ToolCallFunction};
 use crate::domain::types::tick_result::{
-    finalize_provider_response, is_retryable_http_status, ProviderError, ProviderResponse,
+    finalize_provider_response, ProviderError, ProviderResponse,
     ProviderTokenUsage,
 };
 use crate::plumbing::json_repair::{
@@ -12,185 +12,9 @@ use serde::de::IgnoredAny;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-pub(crate) fn classify_stream_or_response_error(
-    chunk: &Value,
-    ev_type: &str,
-    raw_body: &str,
-) -> Option<ProviderError> {
-    let err_obj = chunk.get("error").filter(|v| !v.is_null()).or_else(|| {
-        chunk
-            .get("response")
-            .and_then(|r| r.get("error"))
-            .filter(|v| !v.is_null())
-    });
+pub(crate) use crate::infrastructure::response_json_parsers::{classify_stream_or_response_error, extract_responses_usage, parse_responses_json, ToolSlot};
+use crate::infrastructure::response_json_parsers::{FastDelta, SseFastFrame};
 
-    let is_explicit_error_event = ev_type == "error"
-        || ev_type == "response.failed"
-        || chunk.get("status").and_then(Value::as_str) == Some("failed");
-    let is_top_level_error_chunk =
-        err_obj.is_some() && chunk.get("choices").is_none() && chunk.get("candidates").is_none();
-
-    if !is_explicit_error_event && !is_top_level_error_chunk {
-        return None;
-    }
-
-    let explicit_status = err_obj
-        .and_then(|e| e.get("status").or_else(|| e.get("code")))
-        .and_then(|v| {
-            v.as_u64()
-                .or_else(|| v.as_str().and_then(|s| s.parse::<u64>().ok()))
-        })
-        .filter(|s| (400..=599).contains(s))
-        .map(|s| s as u16);
-
-    let code_or_type = err_obj
-        .and_then(|e| {
-            e.get("type")
-                .or_else(|| e.get("code"))
-                .and_then(Value::as_str)
-                .or_else(|| e.as_str())
-        })
-        .unwrap_or("")
-        .to_ascii_lowercase();
-
-    let status = explicit_status.unwrap_or_else(|| {
-        if code_or_type.contains("overloaded") {
-            529
-        } else if code_or_type.contains("rate_limit") || code_or_type.contains("too_many_requests")
-        {
-            429
-        } else if code_or_type.contains("insufficient_quota")
-            || code_or_type.contains("billing")
-            || code_or_type.contains("credit_balance")
-        {
-            402
-        } else if code_or_type.contains("authentication")
-            || code_or_type.contains("invalid_api_key")
-        {
-            401
-        } else if code_or_type.contains("permission") || code_or_type.contains("forbidden") {
-            403
-        } else if code_or_type.contains("invalid_request") || code_or_type.contains("bad_request") {
-            400
-        } else {
-            502
-        }
-    });
-
-    Some(ProviderError::HttpStatus {
-        status,
-        body: raw_body.to_string(),
-        retryable: is_retryable_http_status(status),
-        retry_after_ms: None,
-    })
-}
-
-/// Parses a non-streaming OpenAI `/v1/responses` JSON payload.
-pub(crate) fn parse_responses_json(
-    body: &Value,
-    provider_label: &str,
-) -> Result<ProviderResponse, ProviderError> {
-    let root = body.get("response").unwrap_or(body);
-    if let Some(err) = classify_stream_or_response_error(root, "", &body.to_string()) {
-        return Err(err);
-    }
-    let mut text_parts = Vec::new();
-    let mut tool_calls = Vec::new();
-
-    if let Some(output) = root.get("output").and_then(Value::as_array) {
-        for (idx, item) in output.iter().enumerate() {
-            match item.get("type").and_then(Value::as_str) {
-                Some("message") => {
-                    if let Some(content_arr) = item.get("content").and_then(Value::as_array) {
-                        for part in content_arr {
-                            if let Some(t) = part
-                                .get("text")
-                                .and_then(Value::as_str)
-                                .filter(|s| !s.is_empty())
-                            {
-                                text_parts.push(t.to_string());
-                            }
-                        }
-                    }
-                }
-                Some("function_call") => {
-                    let id = item
-                        .get("call_id")
-                        .or_else(|| item.get("id"))
-                        .and_then(Value::as_str)
-                        .map(String::from)
-                        .unwrap_or_else(|| format!("call_{}", idx + 1));
-                    let name = item
-                        .get("name")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .trim()
-                        .to_string();
-                    let arguments = match item.get("arguments") {
-                        Some(Value::String(s)) => s.clone(),
-                        Some(other) if !other.is_null() => other.to_string(),
-                        _ => "{}".to_string(),
-                    };
-                    if !name.is_empty() {
-                        tool_calls.push(ToolCall {
-                            id,
-                            r#type: "function".to_string(),
-                            function: ToolCallFunction { name, arguments },
-                            thought_signature: None,
-                        });
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    if text_parts.is_empty() {
-        if let Some(ot) = root
-            .get("output_text")
-            .and_then(Value::as_str)
-            .filter(|s| !s.is_empty())
-        {
-            text_parts.push(ot.to_string());
-        }
-    }
-
-    let mut resp =
-        finalize_provider_response(Some(text_parts.join("")), tool_calls, provider_label);
-    resp.usage = extract_responses_usage(root);
-    Ok(resp)
-}
-
-pub(crate) fn extract_responses_usage(root: &Value) -> Option<ProviderTokenUsage> {
-    let u = root.get("usage")?;
-    let prompt_tokens = u
-        .get("input_tokens")
-        .or_else(|| u.get("prompt_tokens"))
-        .and_then(Value::as_u64)? as usize;
-    let completion_tokens = u
-        .get("output_tokens")
-        .or_else(|| u.get("completion_tokens"))
-        .and_then(Value::as_u64)
-        .unwrap_or(0) as usize;
-    let cached_prompt_tokens = u
-        .get("input_tokens_details")
-        .and_then(|d| d.get("cached_tokens"))
-        .or_else(|| {
-            u.get("prompt_tokens_details")
-                .and_then(|d| d.get("cached_tokens"))
-        })
-        .and_then(Value::as_u64)
-        .unwrap_or(0) as usize;
-    Some(ProviderTokenUsage {
-        prompt_tokens,
-        completion_tokens,
-        cached_prompt_tokens,
-        is_exact: true,
-    })
-}
-
-type ToolSlot = (String, String, String, Option<String>);
-
-/// Incremental byte-framed SSE state machine supporting OpenAI Chat Completions, OpenAI `/v1/responses`,
 /// Anthropic `/v1/messages`, and Google Gemini SSE streams without buffering the full HTTP body first.
 /// Frames raw bytes on `0x0A` (`\n`) so multi-byte UTF-8 codepoints split across TCP chunks never corrupt.
 pub(crate) struct IncrementalSseAggregator {
@@ -215,6 +39,7 @@ pub(crate) struct IncrementalSseAggregator {
     completed_override: Option<ProviderResponse>,
 }
 
+
 impl IncrementalSseAggregator {
     pub(crate) fn new(
         provider_label: &str,
@@ -226,12 +51,12 @@ impl IncrementalSseAggregator {
             extract_openai_usage_fn,
             max_total_bytes,
             total_bytes: 0,
-            line_buf: Vec::new(),
+            line_buf: Vec::with_capacity(512),
             current_event: None,
-            data_buf: String::new(),
+            data_buf: String::with_capacity(1024),
             has_data: false,
             overflowed: false,
-            text_acc: String::new(),
+            text_acc: String::with_capacity(2048),
             thought_fallback: String::new(),
             tool_map: BTreeMap::new(),
             item_id_to_index: BTreeMap::new(),
@@ -254,18 +79,42 @@ impl IncrementalSseAggregator {
         }
 
         let mut start = 0usize;
-        for (idx, &b) in bytes.iter().enumerate() {
-            if b == b'\n' {
-                let slice = &bytes[start..idx];
-                if self.line_buf.is_empty() {
-                    self.process_raw_line(slice)?;
-                } else {
-                    self.line_buf.extend_from_slice(slice);
-                    let taken = std::mem::take(&mut self.line_buf);
-                    self.process_raw_line(&taken)?;
+        while let Some(rel_idx) = bytes[start..].iter().position(|&b| b == b'\n') {
+            let idx = start + rel_idx;
+            let slice = &bytes[start..idx];
+            if self.line_buf.is_empty() {
+                if !self.has_data
+                    && !self.overflowed
+                    && self.current_event.is_none()
+                    && slice.starts_with(b"data:")
+                {
+                    let next = &bytes[idx + 1..];
+                    if next.starts_with(b"\n") || next.starts_with(b"\r\n") {
+                        let skip = if next.starts_with(b"\r\n") { 2 } else { 1 };
+                        let payload = slice[5..].strip_prefix(b" ").unwrap_or(&slice[5..]);
+                        let payload = payload.strip_suffix(b"\r").unwrap_or(payload);
+                        if payload.len() <= MAX_SSE_EVENT_DATA_BYTES {
+                            if let Ok(s) = std::str::from_utf8(payload) {
+                                let trimmed = s.trim();
+                                if !trimmed.is_empty() && trimmed != "[DONE]" {
+                                    self.ingest_frame(None, trimmed)?;
+                                }
+                                start = idx + 1 + skip;
+                                continue;
+                            }
+                        }
+                    }
                 }
-                start = idx + 1;
+                self.process_raw_line(slice)?;
+            } else {
+                self.line_buf.extend_from_slice(slice);
+                let mut taken = std::mem::take(&mut self.line_buf);
+                let res = self.process_raw_line(&taken);
+                taken.clear();
+                self.line_buf = taken;
+                res?;
             }
+            start = idx + 1;
         }
         if start < bytes.len() {
             self.line_buf.extend_from_slice(&bytes[start..]);
@@ -352,12 +201,95 @@ impl IncrementalSseAggregator {
             self.data_buf.clear();
             return Ok(());
         }
-        let raw_data = std::mem::take(&mut self.data_buf);
+        let mut raw_data = std::mem::take(&mut self.data_buf);
         let trimmed = raw_data.trim();
-        if trimmed.is_empty() || trimmed == "[DONE]" {
-            return Ok(());
+        let res = if trimmed.is_empty() || trimmed == "[DONE]" {
+            Ok(())
+        } else {
+            self.ingest_frame(event.as_deref(), trimmed)
+        };
+        raw_data.clear();
+        self.data_buf = raw_data;
+        res
+    }
+
+    fn try_ingest_fast_delta(&mut self, frame_event: Option<&str>, raw_data: &str) -> bool {
+        let Ok(fast) = serde_json::from_str::<SseFastFrame<'_>>(raw_data) else {
+            return false;
+        };
+        if fast.error.is_some() || fast.usage.is_some() || fast.candidates.is_some() {
+            return false;
         }
-        self.ingest_frame(event.as_deref(), &raw_data)
+        let ev_type = fast
+            .ev_type
+            .as_deref()
+            .or(frame_event)
+            .unwrap_or("");
+        match ev_type {
+            "content_block_delta" => {
+                let idx = fast.index.unwrap_or(0);
+                if let Some(FastDelta::Anthropic { kind: Some(k), text, partial_json }) = fast.delta {
+                    match k.as_ref() {
+                        "text_delta" => {
+                            if let Some(t) = text {
+                                self.text_acc.push_str(&t);
+                            }
+                            return true;
+                        }
+                        "input_json_delta" => {
+                            if let Some(pj) = partial_json {
+                                let entry = self.tool_map.entry(idx).or_insert_with(|| {
+                                    (format!("toolu_{}", idx + 1), String::new(), String::new(), None)
+                                });
+                                entry.2.push_str(&pj);
+                            }
+                            return true;
+                        }
+                        _ => return false,
+                    }
+                }
+                false
+            }
+            "response.output_text.delta" => {
+                if let Some(FastDelta::Str(d)) = fast.delta {
+                    self.text_acc.push_str(&d);
+                    return true;
+                }
+                false
+            }
+            "response.function_call_arguments.delta" => {
+                if let Some(FastDelta::Str(d)) = fast.delta {
+                    let idx = fast
+                        .output_index
+                        .or_else(|| fast.item_id.as_deref().and_then(|id| self.item_id_to_index.get(id).copied()))
+                        .unwrap_or(0);
+                    let entry = self.tool_map.entry(idx).or_insert_with(|| {
+                        (format!("call_{}", idx + 1), String::new(), String::new(), None)
+                    });
+                    entry.2.push_str(&d);
+                    return true;
+                }
+                false
+            }
+            "" => {
+                if let Some(Some(choice)) = fast.choices.map(|c| c.0) {
+                    if choice.message.is_some() {
+                        return false;
+                    }
+                    if let Some(delta) = choice.delta {
+                        if delta.tool_calls.is_some() {
+                            return false;
+                        }
+                        if let Some(txt) = delta.content {
+                            self.text_acc.push_str(&txt);
+                        }
+                        return true;
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
     }
 
     fn ingest_frame(
@@ -366,6 +298,9 @@ impl IncrementalSseAggregator {
         raw_data: &str,
     ) -> Result<(), ProviderError> {
         if self.completed_override.is_some() {
+            return Ok(());
+        }
+        if self.try_ingest_fast_delta(frame_event, raw_data) {
             return Ok(());
         }
         let Ok(chunk) = serde_json::from_str::<Value>(raw_data) else {

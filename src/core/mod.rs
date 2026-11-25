@@ -6,11 +6,17 @@ pub mod codewhale_zenith_tests;
 #[cfg(test)]
 pub mod codex_oauth_e2e_tests;
 pub mod computer_use_orchestrator;
+pub mod computer_use_traits;
 #[cfg(test)]
 pub mod computer_use_tests;
 pub mod context_inspector;
 pub mod engine;
+pub mod engine_loop;
+pub mod engine_provider_ops;
+pub mod engine_state;
 pub mod flight_runner;
+#[cfg(test)]
+pub mod provider_parity_more_tests;
 #[cfg(test)]
 pub mod provider_parity_tests;
 pub mod request_queue;
@@ -20,13 +26,20 @@ pub mod spatial_engine;
 #[cfg(test)]
 pub mod spatial_tests;
 #[cfg(test)]
+pub mod substrate_more_tests;
+#[cfg(test)]
 pub mod substrate_tests;
+pub mod tool_dispatch;
 pub mod tool_governor;
 pub mod tool_registry;
 pub mod tool_specs;
 pub mod turn_orchestrator;
 #[cfg(test)]
+pub mod zenith_hardening_more_tests;
+#[cfg(test)]
 pub mod zenith_hardening_tests;
+#[cfg(test)]
+pub mod zenith_more_tests;
 #[cfg(test)]
 pub mod zenith_tests;
 

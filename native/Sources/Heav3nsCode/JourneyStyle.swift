@@ -26,6 +26,28 @@ enum JourneyStyle {
             view.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -inset),
         ])
     }
+    /// Clamps a window's size and origin to the active screen's `visibleFrame` so it never extends past screen edges.
+    static func fitWindow(_ window: NSWindow, desiredSize: NSSize? = nil, margin: CGFloat = 24, center: Bool = true) {
+        guard let visible = (window.screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame else { return }
+        let maxW = max(320, visible.width - margin)
+        let maxH = max(240, visible.height - margin)
+        if window.minSize.width > maxW || window.minSize.height > maxH {
+            window.minSize = NSSize(width: min(window.minSize.width, maxW), height: min(window.minSize.height, maxH))
+        }
+        var frame = window.frame
+        if let desiredSize {
+            frame.size = NSSize(width: min(desiredSize.width, maxW), height: min(desiredSize.height, maxH))
+        } else {
+            frame.size = NSSize(width: min(frame.width, maxW), height: min(frame.height, maxH))
+        }
+        if center {
+            frame.origin = NSPoint(x: visible.midX - frame.width / 2, y: visible.midY - frame.height / 2)
+        } else {
+            frame.origin.x = max(visible.minX, min(frame.origin.x, visible.maxX - frame.width))
+            frame.origin.y = max(visible.minY, min(frame.origin.y, visible.maxY - frame.height))
+        }
+        window.setFrame(frame, display: true)
+    }
 }
 
 final class JourneyButton: NSButton {

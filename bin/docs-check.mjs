@@ -100,12 +100,20 @@ function scanAllFiles(dir, baseDir = "") {
   let results = [];
   const entries = fs.readdirSync(dir, { withFileTypes: true });
   for (const entry of entries) {
-    if (entry.name.startsWith(".") || entry.name === "target" || entry.name === "node_modules") continue;
+    if (
+      entry.name.startsWith(".") ||
+      entry.name === "target" ||
+      entry.name === "node_modules" ||
+      entry.name === "build" ||
+      entry.isSymbolicLink()
+    ) {
+      continue;
+    }
     const rel = baseDir ? `${baseDir}/${entry.name}` : entry.name;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       results = results.concat(scanAllFiles(full, rel));
-    } else {
+    } else if (entry.isFile()) {
       results.push({
         relativePath: normalizeSlashes(rel),
         fullPath: full,

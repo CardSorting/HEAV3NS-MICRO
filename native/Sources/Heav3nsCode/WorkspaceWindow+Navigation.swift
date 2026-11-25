@@ -3,6 +3,44 @@ import AppKit
 import Foundation
 
 extension WorkspaceWindow {
+    func adapt() {
+        let previewOpen = !centerPreview.isHidden
+        work.isHidden = previewOpen
+        for view in chatChromeViews { view.isHidden = previewOpen }
+        let narrow = (window?.frame.width ?? 1280) < 1000
+        let short = (window?.frame.height ?? 800) < 640
+        navigation.previewsSelection = !short
+        leftSidebar.isHidden = previewOpen || (narrow ? !compactSidebarRevealed : !sidebarPreferred)
+        let showNav = navigatorTabs.selectedSegment != 0 || navigation.destination == .sessions
+        conversations.isHidden = leftSidebar.isHidden || showNav
+        navigation.isHidden = leftSidebar.isHidden || !showNav
+        surfaces.isHidden = previewOpen || !narrow
+        contextPanel.isHidden = previewOpen || !showingInspector || (narrow && (surfaces.selectedSegment == 0 || compactSidebarRevealed))
+        contextSeparator.isHidden = contextPanel.isHidden
+        let isPreviewActive = contextTabs.selectedSegment == 3 && projectRun.isInAppPreviewVisible
+        let frameWidth = window?.frame.width ?? 1280.0
+        let maxContextWidth = max(300.0, frameWidth - (leftSidebar.isHidden ? 0.0 : 250.0) - 340.0)
+        let defaultContextWidth = narrow ? 300.0 : min(400.0, max(320.0, frameWidth * 0.27))
+        let targetWidth: CGFloat
+        if isContextMaximized {
+            targetWidth = min(maxContextWidth, max(480.0, frameWidth - (narrow ? 20.0 : 280.0)))
+        } else if isPreviewActive {
+            targetWidth = min(maxContextWidth, max(480.0, min(800.0, frameWidth * 0.52)))
+        } else {
+            targetWidth = min(maxContextWidth, defaultContextWidth)
+        }
+        contextWidth?.constant = targetWidth
+        walkthrough.isHidden = contextTabs.selectedSegment != 0
+        walkthrough.setCompact(short)
+        inspector.isHidden = ![1, 2].contains(contextTabs.selectedSegment)
+        projectRunScroll.isHidden = contextTabs.selectedSegment != 3
+        projectRun.setVisible(!contextPanel.isHidden && !projectRunScroll.isHidden)
+        transcriptScroll.isHidden = false
+        updateWalkthroughVisibility()
+        if transcriptScroll.isHidden || runs.isEmpty { jumpButton.isHidden = true }
+        transcript.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<rows.count))
+    }
+
     func loadConversations(next: Bool = false) {
         guard client.isReady, client.capabilities.contains("conversations") else { return }
         conversationGeneration += 1; let generation = conversationGeneration

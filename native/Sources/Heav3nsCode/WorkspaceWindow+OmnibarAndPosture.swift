@@ -38,6 +38,28 @@ extension WorkspaceWindow {
             self?.checkpointWindow?.refreshAvailability()
             self?.adapt()
         }
+        projectRun.onInAppPreviewChanged = { [weak self] url in
+            guard let self else { return }
+            if let url {
+                if self.centerPreview.currentURL != url {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                        guard let self, !self.centerPreview.isHidden else { return }
+                        self.centerPreview.load(url: url)
+                    }
+                }
+                self.centerPreview.isHidden = false
+                self.work.isHidden = true
+                self.adapt()
+            } else {
+                self.centerPreview.isHidden = true
+                self.centerPreview.clear()
+                self.work.isHidden = false
+                self.adapt()
+            }
+        }
+        centerPreview.onStop = { [weak self] in self?.projectRun.stopFromPreview() }
+        centerPreview.onClose = { [weak self] in self?.projectRun.closeInAppPreview() }
+        centerPreview.onOpenExternal = { url in NSWorkspace.shared.open(url) }
         projectRun.onRepair = { [weak self] launch in self?.repairProject(launch) }
         projectRun.onShowRepair = { [weak self] run in self?.showProjectRepair(run) }
         projectRunScroll.documentView = projectRun; projectRunScroll.hasVerticalScroller = true; projectRunScroll.drawsBackground = false

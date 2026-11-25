@@ -18,8 +18,10 @@ use heav3ns_micro::ui::cli_presenter::{
 };
 use heav3ns_micro::ui::onboarding::{
     create_cli_progress_listener, format_auth_error_card, format_turn_summary,
-    print_onboarding_notice, print_tool_catalog, print_welcome_banner, render_color_diff,
-    run_doctor_cli, run_guided_demo, run_init_wizard, suggest_command,
+    print_onboarding_notice, print_welcome_banner, render_color_diff, suggest_command,
+};
+use heav3ns_micro::ui::onboarding_cli::{
+    print_tool_catalog, run_doctor_cli, run_guided_demo, run_init_wizard,
 };
 use heav3ns_micro::ui::stdio_worker::run_stdio_worker;
 use serde_json::{json, Value};

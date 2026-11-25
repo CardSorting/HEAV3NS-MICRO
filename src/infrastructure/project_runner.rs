@@ -21,6 +21,8 @@ struct CustomRunTarget {
 struct ProjectRunState {
     state: String,
     output: String,
+    output_limited: bool,
+    exit_code: Option<i32>,
     revision: u64,
     launch_id: String,
     child_pid: Option<u32>,
@@ -33,6 +35,8 @@ impl Default for ProjectRunState {
         Self {
             state: "idle".to_string(),
             output: String::new(),
+            output_limited: false,
+            exit_code: None,
             revision: 1,
             launch_id: String::new(),
             child_pid: None,
@@ -75,6 +79,13 @@ impl ProjectRunner {
         }
         if workspace_root.join("Cargo.toml").exists() {
             targets.push(make_target(
+                "cargo-run",
+                "Run Rust App (cargo run)",
+                "cargo run",
+                ".",
+                None,
+            ));
+            targets.push(make_target(
                 "cargo-test",
                 "Rust Test Suite (cargo test)",
                 "cargo test",
@@ -107,12 +118,33 @@ impl ProjectRunner {
             ));
         }
         if workspace_root.join("package.json").exists() {
+            if let Ok(raw) = std::fs::read_to_string(workspace_root.join("package.json")) {
+                if let Ok(pkg) = serde_json::from_str::<Value>(&raw) {
+                    if let Some(scripts) = pkg.get("scripts").and_then(Value::as_object) {
+                        if scripts.contains_key("dev") {
+                            targets.push(make_target("npm-dev", "Development Server (npm run dev)", "npm run dev", ".", Some("http://localhost:3000")));
+                        }
+                        if scripts.contains_key("start") {
+                            targets.push(make_target("npm-start", "Start App (npm start)", "npm start", ".", Some("http://localhost:3000")));
+                        }
+                    }
+                }
+            }
             targets.push(make_target(
                 "npm-test",
                 "Node Test Suite (npm test)",
                 "npm test",
                 ".",
                 None,
+            ));
+        }
+        if workspace_root.join("index.html").exists() {
+            targets.push(make_target(
+                "web-preview",
+                "Local Web Server (index.html)",
+                "python3 -m http.server 4173",
+                ".",
+                Some("http://localhost:4173"),
             ));
         }
         if targets.is_empty() {
@@ -131,10 +163,14 @@ impl ProjectRunner {
         let mut obj = json!({
             "state": st.state,
             "output": st.output,
+            "outputLimited": st.output_limited,
             "revision": st.revision,
             "launch": st.launch_id,
             "healing": { "enabled": true }
         });
+        if let Some(code) = st.exit_code {
+            obj["exitCode"] = json!(code);
+        }
         if let Some(ref target) = st.active_target {
             obj["target"] = target.clone();
             if let Some(preview) = target.get("preview").and_then(Value::as_str) {
@@ -238,8 +274,12 @@ impl IProjectRunner for ProjectRunner {
             }
             st.state = "running".to_string();
             st.output.clear();
+            st.output_limited = false;
+            st.exit_code = None;
             st.revision = st.revision.saturating_add(1);
-            st.launch_id = format!("launch-{}", now_ms());
+            let ts = now_ms();
+            let h = fnv1a_32(format!("{ts}:{}", st.revision).as_bytes());
+            st.launch_id = format!("{:08x}-{:04x}-4{:03x}-8{:03x}-{:012x}", (ts >> 16) as u32, (ts & 0xffff) as u16, (h >> 16) & 0x0fff, h & 0x0fff, ts & 0xffff_ffff_ffff);
             st.child_pid = pid;
             st.active_target = Some(target);
             Self::status_json(&st)
@@ -270,6 +310,7 @@ impl IProjectRunner for ProjectRunner {
             }
             let mut st = lock_unpoison(&inner_wait);
             let was_stopping = st.state == "stopping";
+            st.exit_code = status.as_ref().ok().and_then(|s| s.code());
             st.state = if was_stopping {
                 "stopped".to_string()
             } else if status.as_ref().is_ok_and(|s| s.success()) {

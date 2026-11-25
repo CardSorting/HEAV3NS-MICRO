@@ -194,6 +194,15 @@ pub trait ILlmProvider: Send + Sync {
         req: ProviderRequest,
         cancel: Option<CancellationToken>,
     ) -> BoxFuture<'a, Result<ProviderResponse, ProviderError>>;
+
+    fn complete_with_progress<'a>(
+        &'a self,
+        req: ProviderRequest,
+        cancel: Option<CancellationToken>,
+        _on_progress: Option<ProgressCallback>,
+    ) -> BoxFuture<'a, Result<ProviderResponse, ProviderError>> {
+        self.complete(req, cancel)
+    }
 }
 
 pub type StaticProviderId = &'static str;

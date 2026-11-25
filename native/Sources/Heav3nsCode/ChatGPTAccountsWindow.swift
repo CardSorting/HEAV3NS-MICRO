@@ -28,7 +28,7 @@ final class ChatGPTAccountsWindow: NSWindowController, NSWindowDelegate {
         self.client = client
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 420), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "ChatGPT Accounts"; window.minSize = NSSize(width: 520, height: 300); window.isReleasedWhenClosed = false
-        super.init(window: window); window.delegate = self; window.center()
+        super.init(window: window); window.delegate = self; JourneyStyle.fitWindow(window, center: true)
         let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.drawsBackground = false
         let document = FlippedView(); document.translatesAutoresizingMaskIntoConstraints = false
         scroll.documentView = document
@@ -58,6 +58,7 @@ final class ChatGPTAccountsWindow: NSWindowController, NSWindowDelegate {
     required init?(coder: NSCoder) { fatalError("init(coder:) unavailable") }
 
     func present() {
+        if let window { JourneyStyle.fitWindow(window, center: false) }
         showWindow(nil); window?.makeKeyAndOrderFront(nil)
         refresh()
         // Limit countdowns and "back in" times stay honest while the window is open.
@@ -210,9 +211,11 @@ final class ChatGPTAccountsWindow: NSWindowController, NSWindowDelegate {
         if !message.isEmpty {
             let box = NSBox(); box.boxType = .custom; box.cornerRadius = 10
             box.fillColor = .controlBackgroundColor; box.borderColor = .separatorColor; box.borderWidth = 1
-            box.contentViewMargins = NSSize(width: 12, height: 10)
+            box.contentViewMargins = .zero
             let notice = JourneyStyle.label(message, size: 13); notice.isSelectable = true
-            box.addSubview(notice); JourneyStyle.pin(notice, to: box, inset: 10)
+            notice.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            let container = box.contentView ?? box
+            container.addSubview(notice); JourneyStyle.pin(notice, to: container, inset: 12)
             views.append(box)
         }
         for view in views { root.addArrangedSubview(view); if view is NSBox || view is NSStackView { view.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true } }

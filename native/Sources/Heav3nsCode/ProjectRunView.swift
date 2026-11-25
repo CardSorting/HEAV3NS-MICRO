@@ -3,10 +3,14 @@ import AppKit
 import WebKit
 
 final class NativeAppPreviewView: NSStackView, WKNavigationDelegate {
+    private var fitWork: DispatchWorkItem?
     func dispose() {
+        fitWork?.cancel(); fitWork = nil
         webView.stopLoading()
         webView.navigationDelegate = nil
         onOpenExternal = nil
+        onStop = nil
+        onClose = nil
         currentURL = nil
         urlLabel.stringValue = ""
         urlLabel.toolTip = ""
@@ -14,8 +18,28 @@ final class NativeAppPreviewView: NSStackView, WKNavigationDelegate {
     let webView: WKWebView
     private let urlLabel = JourneyStyle.label("", size: 11, secondary: true)
     private lazy var reloadButton = JourneyButton("Reload", symbol: "arrow.clockwise") { [weak self] in self?.reload() }
+    private lazy var stopButton: JourneyButton = {
+        let b = JourneyButton("Stop App", symbol: "stop.fill") { [weak self] in self?.onStop?() }
+        b.toolTip = "Stop the running app and close preview"
+        b.setAccessibilityLabel("Stop running app")
+        b.isHidden = true
+        return b
+    }()
     private lazy var breakoutButton = JourneyButton("Open in Browser", symbol: "arrow.up.right.square") { [weak self] in self?.openExternal() }
+    private lazy var closeButton: JourneyButton = {
+        let b = JourneyButton("", symbol: "xmark") { [weak self] in self?.onClose?() }
+        b.toolTip = "Close preview and return to chat (Esc)"
+        b.setAccessibilityLabel("Close in-app preview")
+        b.isHidden = true
+        return b
+    }()
     var onOpenExternal: ((URL) -> Void)?
+    var onStop: (() -> Void)? {
+        didSet { stopButton.isHidden = onStop == nil }
+    }
+    var onClose: (() -> Void)? {
+        didSet { closeButton.isHidden = onClose == nil }
+    }
     private(set) var currentURL: URL?
 
     override init(frame frameRect: NSRect) {
@@ -27,11 +51,13 @@ final class NativeAppPreviewView: NSStackView, WKNavigationDelegate {
         urlLabel.isSelectable = true; urlLabel.maximumNumberOfLines = 1; urlLabel.lineBreakMode = .byTruncatingMiddle
         urlLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let bar = JourneyStyle.stack([reloadButton, urlLabel, NSView(), breakoutButton], vertical: false, spacing: 6)
+        let bar = JourneyStyle.stack([reloadButton, urlLabel, NSView(), stopButton, breakoutButton, closeButton], vertical: false, spacing: 6)
         bar.alignment = .centerY
 
         webView.navigationDelegate = self
         webView.translatesAutoresizingMaskIntoConstraints = false
+        webView.setContentHuggingPriority(.init(1), for: .vertical)
+        webView.setContentCompressionResistancePriority(.init(1), for: .vertical)
         let minHeight = webView.heightAnchor.constraint(greaterThanOrEqualToConstant: 240)
         minHeight.priority = .defaultHigh
         minHeight.isActive = true
@@ -68,11 +94,46 @@ final class NativeAppPreviewView: NSStackView, WKNavigationDelegate {
         onOpenExternal?(currentURL)
     }
 
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        guard currentURL != nil, !isHidden else { return }
+        fitWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.fitPageToViewport() }
+        fitWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
+    }
+
+    private func fitPageToViewport() {
+        guard currentURL != nil, !isHidden, webView.bounds.width > 40, webView.bounds.height > 40 else { return }
+        webView.pageZoom = 1.0
+        let js = """
+        (() => {
+          const de = document.documentElement, b = document.body;
+          const cw = Math.max(de ? de.scrollWidth : 0, b ? b.scrollWidth : 0);
+          const ch = Math.max(de ? de.scrollHeight : 0, b ? b.scrollHeight : 0);
+          return [cw, ch, window.innerWidth || 0, window.innerHeight || 0];
+        })()
+        """
+        webView.evaluateJavaScript(js) { [weak self] value, _ in
+            guard let self, self.currentURL != nil, let arr = value as? [NSNumber], arr.count == 4 else { return }
+            let cw = arr[0].doubleValue, ch = arr[1].doubleValue
+            let vw = arr[2].doubleValue, vh = arr[3].doubleValue
+            guard cw > 0, ch > 0, vw > 0, vh > 0 else { return }
+            if cw > vw || ch > vh {
+                let scale = max(0.35, min(1.0, min(vw / cw, vh / ch) * 0.98))
+                self.webView.pageZoom = scale
+            } else {
+                self.webView.pageZoom = 1.0
+            }
+        }
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         if let url = webView.url {
             urlLabel.stringValue = url.absoluteString
             urlLabel.toolTip = url.absoluteString
         }
+        fitPageToViewport()
     }
 }
 
@@ -108,7 +169,8 @@ final class ProjectRunView: NSStackView, NSTextFieldDelegate {
     private let inAppPreview = NativeAppPreviewView()
     private lazy var inAppPreviewButton = JourneyButton("In-App Preview", symbol: "macwindow") { [weak self] in self?.toggleInAppPreview() }
     private var inAppPreviewEnabled = false
-    var isInAppPreviewVisible: Bool { inAppPreviewEnabled && !inAppPreview.isHidden && inAppPreview.currentURL != nil }
+    var onInAppPreviewChanged: ((URL?) -> Void)?
+    var isInAppPreviewVisible: Bool { inAppPreviewEnabled && ((!inAppPreview.isHidden && inAppPreview.currentURL != nil) || onInAppPreviewChanged != nil) }
     private let previewAddress = JourneyStyle.label("", size: 11, secondary: true)
     private lazy var repairButton = JourneyButton("Fix with LUMI", symbol: "wrench.and.screwdriver") { [weak self] in self?.repair() }
     private let details = NSStackView()
@@ -122,7 +184,11 @@ final class ProjectRunView: NSStackView, NSTextFieldDelegate {
     var onShowRepair: ((String) -> Void)?
     private let console = NSTextView()
     private let configuration = NSStackView()
-    private lazy var configureButton = JourneyButton("Set Run Command…", symbol: "slider.horizontal.3") { [weak self] in self?.configuration.isHidden.toggle() }
+    private lazy var configureButton = JourneyButton("Set Run Command…", symbol: "slider.horizontal.3") { [weak self] in
+        guard let self else { return }
+        if self.details.isHidden { self.toggleDetails(); self.configuration.isHidden = false }
+        else { self.configuration.isHidden.toggle() }
+    }
     private let draftNote = JourneyStyle.label("Changes are saved only when you choose Save Command.", size: 11, secondary: true)
     private lazy var discardButton = JourneyButton("Discard Edits") { [weak self] in self?.discardDraft() }
     private lazy var saveButton = JourneyButton("Save Command") { [weak self] in self?.save() }
@@ -146,15 +212,16 @@ final class ProjectRunView: NSStackView, NSTextFieldDelegate {
         inAppPreview.onOpenExternal = { [weak self] url in self?.openBrowser(url) }
         let browserControls = JourneyStyle.stack([previewButton, inAppPreviewButton, copyButton], vertical: false, spacing: 8)
         runButton.image = NSImage(systemSymbolName: "play.fill", accessibilityDescription: nil); runButton.imagePosition = .imageLeading
+        runButton.bezelColor = .controlAccentColor
+        stopButton.image = NSImage(systemSymbolName: "stop.fill", accessibilityDescription: nil); stopButton.imagePosition = .imageLeading
         let refresh = JourneyButton("Refresh", symbol: "arrow.clockwise") { [weak self] in self?.load() }
         refresh.toolTip = "Look for runnable apps and refresh their status."
-        let controls = JourneyStyle.stack([runButton, stopButton, NSView()], vertical: false, spacing: 8)
+        let controls = JourneyStyle.stack([runButton, stopButton, configureButton, NSView()], vertical: false, spacing: 8)
         let selection = JourneyStyle.stack([targets, refresh], vertical: false, spacing: 8); selection.distribution = .fill
         targets.setContentHuggingPriority(.defaultLow, for: .horizontal)
         targets.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         targets.cell?.lineBreakMode = .byTruncatingMiddle
         refresh.setContentCompressionResistancePriority(.required, for: .horizontal)
-        let tools = JourneyStyle.stack([configureButton, NSView()], vertical: false, spacing: 8)
         commandInput.placeholderString = "npm run dev"; commandInput.setAccessibilityLabel("Run command")
         directoryInput.placeholderString = "."; directoryInput.setAccessibilityLabel("Directory relative to workspace")
         previewInput.placeholderString = "http://localhost:3000 (optional)"; previewInput.setAccessibilityLabel("Local preview URL")
@@ -166,9 +233,9 @@ final class ProjectRunView: NSStackView, NSTextFieldDelegate {
         console.setAccessibilityLabel("Project console output")
         let scroll = NSScrollView(); scroll.documentView = console; scroll.hasVerticalScroller = true; scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 60).isActive = true; scroll.setContentHuggingPriority(.init(1), for: .vertical)
         details.orientation = .vertical; details.alignment = .leading; details.spacing = 9; details.isHidden = true
-        for view in [command, tools, configuration, note, outputStatus, scroll] { details.addArrangedSubview(view); view.widthAnchor.constraint(equalTo: details.widthAnchor).isActive = true }
+        for view in [command, configuration, note, scroll] { details.addArrangedSubview(view); view.widthAnchor.constraint(equalTo: details.widthAnchor).isActive = true }
         let spacer = NSView(); spacer.setContentHuggingPriority(.init(1), for: .vertical)
-        for view in [selection, controls, status, repairButton, browserControls, previewAddress, inAppPreview, automaticRepair, detailsButton, details, spacer] { addArrangedSubview(view); view.widthAnchor.constraint(equalTo: widthAnchor).isActive = true }
+        for view in [selection, controls, status, outputStatus, repairButton, browserControls, previewAddress, inAppPreview, automaticRepair, detailsButton, details, spacer] { addArrangedSubview(view); view.widthAnchor.constraint(equalTo: widthAnchor).isActive = true }
         automaticRepair.toolTip = "LUMI repairs unexpected app stops, runs project checks, and relaunches the app. Stop ends the current recovery cycle."
         detailsButton.setAccessibilityLabel("Show app details")
         updateControls()
@@ -193,6 +260,10 @@ final class ProjectRunView: NSStackView, NSTextFieldDelegate {
     @objc private func toggleAutomaticRepair() {
         guard automaticSupported, connected, statusKnown, !busy else { return }
         perform("project.healing", params: ["enabled": automaticRepair.state == .on])
+    }
+    func stopFromPreview() {
+        closeInAppPreview()
+        stop()
     }
     func receiveProjectState(_ data: [String: Any]) {
         guard connected, automaticSupported else { return }; render(data)
@@ -237,7 +308,7 @@ final class ProjectRunView: NSStackView, NSTextFieldDelegate {
         visible = false; generation += 1
         current = [:]; client = nil
         inAppPreview.dispose()
-        onState = nil; onRepair = nil; onShowRepair = nil
+        onState = nil; onRepair = nil; onShowRepair = nil; onInAppPreviewChanged = nil
     }
     private func load(select requestedID: String? = nil, notice: String? = nil) {
         guard connected, !busy else { return }
@@ -284,14 +355,19 @@ final class ProjectRunView: NSStackView, NSTextFieldDelegate {
     @objc private func run() {
         guard connected, statusKnown, discoveryKnown, !busy, !running, !repairInProgress, !healingActive, options.indices.contains(targets.indexOfSelectedItem) else { return }
         let target = options[targets.indexOfSelectedItem]
-        perform("project.start", params: ["id": target["id"] ?? "", "revision": target["revision"] ?? ""], openWhenReady: target["kind"] as? String == "static")
+        let isStatic = target["kind"] as? String == "static"
+        let hasPreview = Self.previewURL(target["preview"] as? String) != nil
+        perform("project.start", params: ["id": target["id"] ?? "", "revision": target["revision"] ?? ""], openWhenReady: isStatic, openCenterPreview: !isStatic && hasPreview)
     }
     @objc private func stop() { guard connected, !busy, running || healingActive, current["state"] as? String != "stopping" else { return }; perform("project.stop") }
-    private func perform(_ method: String, params: [String: Any] = [:], openWhenReady: Bool = false) {
+    private func perform(_ method: String, params: [String: Any] = [:], openWhenReady: Bool = false, openCenterPreview: Bool = false) {
         guard connected else { return }; generation += 1; polling = false; busy = true; failure = nil; notice = nil; pendingAction = method; updateControls(); let ticket = generation
         request(method, params: params) { [weak self] result in
             guard let self, ticket == self.generation else { return }; self.busy = false; self.pendingAction = nil
             if case .success(let data) = result {
+                if openCenterPreview, data["state"] as? String == "running", Self.previewURL(data["preview"] as? String) != nil {
+                    self.inAppPreviewEnabled = true
+                }
                 self.render(data)
                 // Only the user's successful Preview App action opens a browser.
                 // Polling, reconnecting, and automatic recovery never steal focus.
@@ -397,7 +473,20 @@ final class ProjectRunView: NSStackView, NSTextFieldDelegate {
             if repairInProgress { summary = "LUMI is working on the app. Open the repair to follow progress." }
             else if recordedRepair?["state"] as? String == "completed" { summary = "LUMI finished the repair. Run the app to check startup." }
             else if recordedRepair != nil { summary = "The repair needs more work. Open it to continue with LUMI." }
-            else { summary = repairSupported ? "The app stopped unexpectedly. LUMI can investigate and repair it." : "The app stopped unexpectedly. Ask LUMI to investigate." }
+            else {
+                let codeNote = (current["exitCode"] as? Int).map { " (exit code \($0))" } ?? ""
+                let base = repairSupported ? "The app stopped unexpectedly\(codeNote). LUMI can investigate and repair it." : "The app stopped unexpectedly\(codeNote). Ask LUMI to investigate."
+                let lastLine = ((current["output"] as? String) ?? "")
+                    .split(whereSeparator: \.isNewline)
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .last { !$0.isEmpty }
+                if let lastLine {
+                    let clipped = lastLine.count > 110 ? String(lastLine.prefix(109)) + "…" : lastLine
+                    summary = "\(base)\nLast output: \(clipped)"
+                } else {
+                    summary = base
+                }
+            }
         case "completed": summary = "App finished"
         case "stopped": summary = staticPreview ? "Preview stopped" : "App stopped"
         default: summary = state == "running" && staticPreview ? "Preview is running. Reload the browser to see saved changes." : state == "running" && healing["enabled"] as? Bool == true ? "Running · Automatic repair on" : state.capitalized
@@ -420,6 +509,12 @@ final class ProjectRunView: NSStackView, NSTextFieldDelegate {
         else { failure = nil }
         updateControls()
     }
+    func closeInAppPreview() {
+        guard inAppPreviewEnabled else { return }
+        inAppPreviewEnabled = false
+        updateControls()
+        onState?()
+    }
     @objc private func toggleInAppPreview() {
         inAppPreviewEnabled.toggle()
         updateControls()
@@ -431,16 +526,21 @@ final class ProjectRunView: NSStackView, NSTextFieldDelegate {
             inAppPreview.isHidden = true
             inAppPreview.clear()
             inAppPreviewButton.title = "In-App Preview"
+            onInAppPreviewChanged?(nil)
             return
         }
         inAppPreviewButton.title = inAppPreviewEnabled ? "Hide Preview" : "In-App Preview"
-        inAppPreview.isHidden = !inAppPreviewEnabled
-        if inAppPreviewEnabled {
-            if inAppPreview.currentURL != url {
-                inAppPreview.load(url: url)
-            }
-        } else {
+        if let onInAppPreviewChanged {
+            inAppPreview.isHidden = true
             inAppPreview.clear()
+            onInAppPreviewChanged(inAppPreviewEnabled ? url : nil)
+        } else {
+            inAppPreview.isHidden = !inAppPreviewEnabled
+            if inAppPreviewEnabled {
+                if inAppPreview.currentURL != url { inAppPreview.load(url: url) }
+            } else {
+                inAppPreview.clear()
+            }
         }
     }
     @objc private func openPreview() { if connected, statusKnown, !busy, current["state"] as? String == "running", let url = Self.previewURL(current["preview"] as? String) { openBrowser(url) } }

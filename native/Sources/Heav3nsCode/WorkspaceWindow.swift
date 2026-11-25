@@ -63,6 +63,9 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
     let projectRun = ProjectRunView()
     let projectRunScroll = NSScrollView()
     var checkpointWindow: CheckpointWindow?
+    var work = NSStackView()
+    let centerPreview = NativeAppPreviewView()
+    var chatChromeViews = [NSView]()
     let checkpointsButton = NSButton(title: "Checkpoints", target: nil, action: nil)
     let walkthrough = WalkthroughView()
     var walkthroughLoaded: String?
@@ -243,10 +246,16 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
             guard let self, self.window?.isVisible == true, self.window?.isMiniaturized == false, !self.closing else { return }
             self.checkViewportBranch()
         }
-        window.center()
+        JourneyStyle.fitWindow(window, center: true)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) unavailable") }
+
+    override func showWindow(_ sender: Any?) {
+        if let window { JourneyStyle.fitWindow(window, center: false) }
+        adapt()
+        super.showWindow(sender)
+    }
 
     deinit {
         dispose()
@@ -284,9 +293,18 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         documentView.dispose()
         projectRun.setVisible(false)
         projectRun.dispose()
+        centerPreview.dispose()
         modelPicker?.dispose(); modelPicker?.dismiss(restoreFocus: false); modelPicker = nil
         checkpointWindow?.dispose(); checkpointWindow = nil
         onProjects = nil; onAccount = nil
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        if !centerPreview.isHidden {
+            projectRun.closeInAppPreview()
+            return
+        }
+        super.cancelOperation(sender)
     }
 
     func button(_ title: String, _ action: Selector, symbol: String? = nil) -> NSButton {
@@ -474,7 +492,7 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         surfaces.selectedSegment = 0; surfaces.target = self; surfaces.action = #selector(switchSurface); surfaces.isHidden = true
         let transcriptNavigation = stack([NSView(), jumpButton], spacing: 8)
         transcriptNavigation.heightAnchor.constraint(equalToConstant: 28).isActive = true
-        let work = stack([transcriptArea, transcriptNavigation], vertical: true, spacing: 0)
+        work = stack([transcriptArea, transcriptNavigation], vertical: true, spacing: 0)
         transcriptArea.widthAnchor.constraint(equalTo: work.widthAnchor).isActive = true
         transcriptNavigation.widthAnchor.constraint(equalTo: work.widthAnchor).isActive = true
 
@@ -587,7 +605,12 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         checkpointsButton.image = NSImage(systemSymbolName: "clock.arrow.circlepath", accessibilityDescription: nil); checkpointsButton.imagePosition = .imageLeading
         checkpointsButton.toolTip = "Restore project files before or after a message"
         let titleLine = stack([chatTitle, checkpointsButton], spacing: 8)
-        chatTitle.setContentHuggingPriority(.init(1), for: .horizontal); checkpointsButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        chatTitle.maximumNumberOfLines = 1; chatTitle.lineBreakMode = .byTruncatingTail
+        chatTitle.setContentHuggingPriority(.init(1), for: .horizontal)
+        chatTitle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        chatState.maximumNumberOfLines = 1; chatState.lineBreakMode = .byTruncatingTail
+        chatState.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        checkpointsButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         let header = stack([titleLine, chatState], vertical: true, spacing: 5)
         let rule = JourneyStyle.rule()
         reasoningPicker.request = { [weak self] method, params, completion in
@@ -606,20 +629,27 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         reasoningPicker.onError = { [weak self] in self?.showNotice($0) }
         postureButton.target = self; postureButton.action = #selector(stepPosture); postureButton.bezelStyle = .rounded
         postureButton.setContentHuggingPriority(.required, for: .horizontal)
+        postureButton.setContentCompressionResistancePriority(.init(500), for: .horizontal)
         refreshPostureControl()
         receiptBar.onOpenChanges = { [weak self] in self?.showChanges() }
         receiptBar.onOpenReceipts = { [weak self] in self?.showTurnReceipts() }
         receiptBar.onUndoTurn = { [weak self] in self?.undoLastTurn() }
+        hint.maximumNumberOfLines = 1; hint.lineBreakMode = .byTruncatingTail
+        hint.setContentHuggingPriority(.init(1), for: .horizontal)
+        hint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let modelBar = stack([modelButton, reasoningPicker, postureButton, hint], spacing: 8)
         hint.toolTip = "Enter to send · Shift–Enter for a new line · Shift–Tab to cycle execution posture · ⌘K for Command Palette."
         modelButton.widthAnchor.constraint(lessThanOrEqualTo: modelBar.widthAnchor, multiplier: 0.40).isActive = true
         modelButton.widthAnchor.constraint(lessThanOrEqualToConstant: 240).isActive = true
         modelButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 80).isActive = true
-        let center = stack([surfaces, header, rule, work, approval, noticeBar, receiptBar, composerSurface, modelBar], vertical: true, spacing: 10)
+        chatChromeViews = [header, rule, composerSurface, modelBar]
+        let center = stack([surfaces, header, rule, work, centerPreview, approval, noticeBar, receiptBar, composerSurface, modelBar], vertical: true, spacing: 10)
         center.setContentHuggingPriority(.init(1), for: .horizontal)
         work.setContentHuggingPriority(.init(1), for: .vertical)
+        centerPreview.isHidden = true
+        centerPreview.setContentHuggingPriority(.init(1), for: .vertical)
         center.edgeInsets = NSEdgeInsets(top: 20, left: 22, bottom: 16, right: 22)
-        for view in [header, rule, work, approval, noticeBar, receiptBar, composerSurface, modelBar] { view.widthAnchor.constraint(equalTo: center.widthAnchor, constant: -44).isActive = true }
+        for view in [header, rule, work, centerPreview, approval, noticeBar, receiptBar, composerSurface, modelBar] { view.widthAnchor.constraint(equalTo: center.widthAnchor, constant: -44).isActive = true }
         titleLine.widthAnchor.constraint(equalTo: header.widthAnchor).isActive = true
         chatState.widthAnchor.constraint(equalTo: header.widthAnchor).isActive = true
         work.heightAnchor.constraint(greaterThanOrEqualToConstant: 60).isActive = true
@@ -671,39 +701,6 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
             compactSidebarRevealed = false; showingInspector = true
         }
         adapt()
-    }
-
-    func adapt() {
-        let narrow = (window?.frame.width ?? 1280) < 1000
-        let short = (window?.frame.height ?? 800) < 640
-        navigation.previewsSelection = !short
-        leftSidebar.isHidden = narrow ? !compactSidebarRevealed : !sidebarPreferred
-        let showNav = navigatorTabs.selectedSegment != 0 || navigation.destination == .sessions
-        conversations.isHidden = leftSidebar.isHidden || showNav
-        navigation.isHidden = leftSidebar.isHidden || !showNav
-        surfaces.isHidden = !narrow
-        contextPanel.isHidden = !showingInspector || (narrow && (surfaces.selectedSegment == 0 || compactSidebarRevealed))
-        contextSeparator.isHidden = contextPanel.isHidden
-        let isPreviewActive = contextTabs.selectedSegment == 3 && projectRun.isInAppPreviewVisible
-        let defaultContextWidth = narrow ? 300.0 : min(400.0, max(330.0, (window?.frame.width ?? 1280.0) * 0.27))
-        let targetWidth: CGFloat
-        if isContextMaximized {
-            targetWidth = max(680.0, (window?.frame.width ?? 1280.0) - (narrow ? 20.0 : 280.0))
-        } else if isPreviewActive {
-            targetWidth = max(680.0, min(800.0, (window?.frame.width ?? 1280.0) * 0.52))
-        } else {
-            targetWidth = defaultContextWidth
-        }
-        contextWidth?.constant = targetWidth
-        walkthrough.isHidden = contextTabs.selectedSegment != 0
-        walkthrough.setCompact(short)
-        inspector.isHidden = ![1, 2].contains(contextTabs.selectedSegment)
-        projectRunScroll.isHidden = contextTabs.selectedSegment != 3
-        projectRun.setVisible(!contextPanel.isHidden && !projectRunScroll.isHidden)
-        transcriptScroll.isHidden = false
-        updateWalkthroughVisibility()
-        if transcriptScroll.isHidden || runs.isEmpty { jumpButton.isHidden = true }
-        transcript.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<rows.count))
     }
 
     func restoreTranscriptAfterResize() {

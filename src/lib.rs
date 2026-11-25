@@ -167,7 +167,9 @@ pub mod onboarding {
     pub use crate::ui::cli_presenter::{Heav3nsUserConfig, RunMode};
     pub use crate::ui::onboarding::{
         create_cli_progress_listener, format_auth_error_card, format_turn_summary,
-        print_onboarding_notice, print_tool_catalog, print_welcome_banner, render_color_diff,
-        run_doctor_cli, run_guided_demo, run_init_wizard,
+        print_onboarding_notice, print_welcome_banner, render_color_diff,
+    };
+    pub use crate::ui::onboarding_cli::{
+        print_tool_catalog, run_doctor_cli, run_guided_demo, run_init_wizard,
     };
 }
