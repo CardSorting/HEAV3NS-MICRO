@@ -143,7 +143,7 @@ Before any pointer or keyboard event is authorized:
 - **DAG Wave Scheduler ([`ToolRegistry`](../../src/core/tool_registry.rs))**: Executes read-only tools in parallel waves and mutating tools behind exclusive barriers across 29 built-in tools.
 - **Token-Budget Governor & Loop Breaker ([`tool_governor.rs`](../../src/core/tool_governor.rs))**: Enforces 65%/35% head/tail output budgeting with disk spill recovery (`retrieve_spill_content`) and breaks repetitive tool loops.
 - **Zero-Trust Security & Ergonomic Defenses ([`secret_redactor.rs`](../../src/plumbing/secret_redactor.rs), [`shell_guard.rs`](../../src/plumbing/shell_guard.rs), [`vision_and_dom.rs`](../../src/plumbing/vision_and_dom.rs))**: Blocks SSRF/IMDSv2/IPv4-mapped-IPv6 navigation, sanitizes Trojan Source bidirectional Unicode, redacts 8 families of credentials, and enforces `ADR-0015`/`ADR-0016` VFS tool ergonomics.
-- **Native macOS AppKit Command Station ([`native/`](../../native/))**: Pure AppKit desktop IDE (`HEAV3NS-CODE`) with turn scrubbers, docked non-blocking approvals, Unicode-safe intra-line diffing, Swarm Radar, and Multi-Project Pods.
+- **Native macOS AppKit Command Station ([`native/`](../../native/))**: Pure AppKit desktop IDE (`HEAV3NS-CODE`) with turn scrubbers, docked non-blocking approvals, Unicode-safe intra-line diffing, Swarm Radar, and Full-Width In-App Project Preview.
 
 ---
 

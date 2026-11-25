@@ -50,7 +50,7 @@ flowchart TD
   subgraph Surface4 ["Surface 4: AppKit Native Desktop IDE (HEAV3NS-CODE)"]
     WINDOW["Modular WorkspaceWindow Architecture (native/Sources/Heav3nsCode/)"]
     POSTURE["5-Stop Posture Dial (Shift+Tab), Omnibar Badges & TurnReceiptSummaryBar"]
-    PODS["Multi-Project Pods Command Station & Unicode-Safe Intra-Line Diffs"]
+    PREVIEW["Full-Width In-App Preview (`Stop App` / `Esc`) & Intra-Line Diffs"]
   end
 
   Surface1 --> Surface2 --> Surface3 --> Surface4
@@ -80,7 +80,7 @@ cargo test
 # 2. Run the 5-scenario Agent Flight suite (FT-01..FT-05, 19 assertion checks)
 cargo run -- --flight
 
-# 3. Verify all native macOS AppKit tests (323 executed, 6 skipped)
+# 3. Verify all native macOS AppKit tests (304 executed, 4 opt-in skipped)
 cd native && swift test && cd ..
 
 # 4. Run strict Joyzoning architectural audit & documentation check

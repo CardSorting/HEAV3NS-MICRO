@@ -20,7 +20,7 @@ HEAV3NS-MICRO enforces an uncompromising 5-pillar continuous integration pipelin
 flowchart LR
   PR["Pull Request / Commit"] --> TEST["1. Cargo Test (119 unit suites)"]
   PR --> FLIGHT["2. Agent Flight (5 benchmark scenarios)"]
-  PR --> SWIFT["3. Native Swift Test (323 AppKit tests)"]
+  PR --> SWIFT["3. Native Swift Test (304 AppKit tests)"]
   PR --> JOY["4. Joyzoning Strict Audit (0 violations)"]
   PR --> DOCS["5. Docs Check (0 broken links)"]
   TEST --> GATE["Pass All Gates -> Merge Approved"]

@@ -1,7 +1,7 @@
 <!-- [LAYER: UI] -->
 # Architecture (Current) — `HEAV3NS-MICRO` & The Seven Sovereign Pillars
 
-This document describes the unified architecture of **HEAV3NS-MICRO** (`v0.1.0`), the distilled intelligence runtime of **[`HEAV3NS — The Sovereign Intelligence Architecture`](../../doc.md)**, encompassing the 96-module Rust substrate and the AppKit Native Desktop IDE client (`HEAV3NS-CODE`) across all five Joyzoning zones (`PLUMBING`, `DOMAIN`, `INFRASTRUCTURE`, `CORE`, `UI`).
+This document describes the unified architecture of **HEAV3NS-MICRO** (`v0.1.0`), the distilled intelligence runtime of **[`HEAV3NS — The Sovereign Intelligence Architecture`](../../doc.md)**, encompassing the 120-module Rust substrate and the AppKit Native Desktop IDE client (`HEAV3NS-CODE`) across all five Joyzoning zones (`PLUMBING`, `DOMAIN`, `INFRASTRUCTURE`, `CORE`, `UI`).
 
 ---
 
@@ -27,7 +27,7 @@ The system operates across two tightly interlaced layers uniting the seven sover
 │  │  - 5-Stop Posture Pill (Shift+Tab) & 3-Choice Approval Bar│  │
 │  │  - Omnibar Shortcut Badges (F3, ⌥⌘Z, ⇧⌘I, ⇧⌘K)            │  │
 │  │  - Live TurnReceiptSummaryBar & Scrubber Rail             │  │
-│  │  - Swarm Radar & Multi-Project Pods Command Station       │  │
+│  │  - Swarm Radar & Full-Width In-App Preview (`Esc` / Stop)   │  │
 │  └─────────────────────────────┬─────────────────────────────┘  │
 │                                │                                │
 │                                ▼                                │
@@ -39,7 +39,7 @@ The system operates across two tightly interlaced layers uniting the seven sover
                                  │ stdio JSON-RPC (v: 1 framing)
                                  │
 ┌────────────────────────────────▼────────────────────────────────┐
-│          Rust Sovereign Substrate (heav3ns-micro · 96 Modules)  │
+│          Rust Sovereign Substrate (heav3ns-micro · 120 Modules) │
 │                                                                 │
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │ UI: stdio_worker.rs · rpc_dispatch.rs · cli_presenter.rs  │  │
@@ -72,7 +72,7 @@ The system operates across two tightly interlaced layers uniting the seven sover
 
 ## 2. Complete Module Inventory
 
-### Rust Substrate Modules (`src/` — 96 Modules, All `< 800` Lines Tier 1 Optimal)
+### Rust Substrate Modules (`src/` — 120 Modules, All `< 800` Lines Tier 1 Optimal)
 
 | Module | Zone | Sovereign Pillar & Architectural Responsibility |
 | :--- | :--- | :--- |
@@ -154,10 +154,10 @@ The system operates across two tightly interlaced layers uniting the seven sover
 | `WorkspaceWindow+Navigation.swift` | Unified left navigator (`[Chats \| Files \| Changes]`), file tree browser, and Git change navigator | Tier 1 Optimal (`< 800` lines) |
 | `WorkspaceWindow+Inspection.swift` | File, diff, saved-state, spider check, request preview, and context report viewports with bounds-clamped declaration jumps | Tier 1 Optimal (`< 800` lines) |
 | `WorkspaceWindow+Execution.swift` | Instruction submission, queue reordering, draft preservation, side-question/restore state recovery, and checkpoint restoration | Tier 1 Optimal (`< 800` lines) |
-| `WorkspaceWindow+Events.swift` | JSON-RPC event routing, action palette (`Cmd+K`), toolbar delegate, and Pod snapshots | Tier 1 Optimal (`< 800` lines) |
+| `WorkspaceWindow+Events.swift` | JSON-RPC event routing, action palette (`Cmd+K`), and toolbar delegate | Tier 1 Optimal (`< 800` lines) |
 | `CodeOutline.swift` & `InspectionNavigation.swift` | Unicode-safe UTF-16 intra-line diff highlighter, lexical outline, `jump(to:)`, and `recentFiles(limit:)` | Tier 1 Optimal (`< 800` lines) |
 | `RuntimeClient.swift`, `AccountClient.swift` & `ControlFrameReader.swift` | Child process lifecycle management, `"v": 1` IPC stream transport, 64-bit retention accounting, structured RPC error parsing, and promise resolution | Tier 1 Optimal (`< 800` lines) |
-| `WalkthroughView.swift` & `PodsWindow.swift` | Live turn-by-turn agent activity inspector (Timeline/List/Kanban) and Multi-Project Pods command station | Tier 1 Optimal (`< 800` lines) |
+| `WalkthroughView.swift` & `ProjectRunView.swift` | Live turn-by-turn agent activity inspector (Timeline/List/Kanban) and Run tab + full-width `NativeAppPreviewView` (`Stop App`, `Esc`, aspect-ratio `pageZoom`, last-line failure excerpt) | Tier 1 Optimal (`< 800` lines) |
 
 ---
 
@@ -167,5 +167,5 @@ The system operates across two tightly interlaced layers uniting the seven sover
 2. **Rule 2 (Geographic Alignment)**: Physical disk layout strictly matches architectural zone boundaries (`SPI-208`).
 3. **Rule 3 (Import Discipline)**: Single-line `use` and `import` declarations; zero cyclic dependency loops (`SPI-201`).
 4. **Rule 4 (Contractual Sovereignty)**: All concrete infrastructure adapters and domain entities adhere to `64` formal `I<Name>` traits (`SPI-107`).
-5. **Rule 5 (Simplicity Caps)**: All `343` workspace files remain in **Tier 1 Optimal (`< 800` lines, `SPI-203`)**; domain files contain `<= 3` structs (`<= 1` struct if `> 500` lines).
+5. **Rule 5 (Simplicity Caps)**: All `361` workspace files remain in **Tier 1 Optimal (`< 800` lines, `SPI-203`)**; domain files contain `<= 3` structs (`<= 1` struct if `> 500` lines).
 6. **Rule 6 (Resource Lifecycle Hygiene)**: Every Swift class in `native/` implements explicit `dispose()` teardown (`0` `SPI-603` advisories).

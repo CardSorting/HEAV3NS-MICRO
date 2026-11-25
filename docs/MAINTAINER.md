@@ -24,7 +24,7 @@ cargo test
 # Gate 2: 5-scenario Agent Flight suite (19 checks)
 cargo run -- --flight
 
-# Gate 3: Native macOS AppKit suite (323 executed, 6 skipped)
+# Gate 3: Native macOS AppKit suite (304 executed, 4 opt-in skipped)
 cd native && swift test && cd ..
 
 # Gate 4: Joyzoning spatial sovereignty audit (100% SI, Grade A+)

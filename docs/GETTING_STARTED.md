@@ -101,7 +101,7 @@ cd ..
 Expected output:
 ```text
 Test Suite 'All tests' passed at ...
-	 Executed 323 tests, with 6 tests skipped and 0 failures (0 unexpected)
+	 Executed 304 tests, with 4 tests skipped and 0 failures (0 unexpected)
 ```
 
 ---

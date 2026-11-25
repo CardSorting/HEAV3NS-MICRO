@@ -58,6 +58,16 @@ To evaluate resilience under sustained load, the runtime was evaluated across si
 | **Session Tree Compactor** | $1,000$ compactions | $144.22\ \text{ms}$ | **$693$** | $144.14$ | $143.20$ | $152.00$ | $156.90$ |
 
 ![HEAV3NS-MICRO Substrate Throughput & Latency Profile](./assets/benchmark-substrate-throughput.jpg)
+
+### 3.2 Verified Same-Profile A/B Micro-Benchmarks (`rustc 1.88.0`, `--release`, Apple M1 Pro)
+
+To validate streaming, filesystem fingerprinting, and tool-schema caching optimizations without cross-profile bias, A/B benchmarks were executed in the same `--release` build with `5` warmup iterations, `std::hint::black_box`, and repeated sampling:
+
+| Subsystem A/B Benchmark | Workload | Baseline Median | Optimized Median | Verified Speedup |
+| :--- | :--- | :---: | :---: | :---: |
+| **SSE Parser (`Value` vs `SseFastFrame`)** | `2,000` mixed events (text, escapes, tool calls, malformed JSON, `n=30`) | $1,160.2\ \mu\text{s}$ | **$735.0\ \mu\text{s}$** | **`1.58x` (`36.7%` faster)** |
+| **Workspace Revision Cache** | `HEAV3NS-MICRO` repo walk (`use_cache=false` vs `true`, warm OS cache, `n=10`) | $23,593.5\ \mu\text{s}$ | **$1,786.5\ \mu\text{s}$** | **`13.21x` (`92.4%` faster)** |
+| **ToolRegistry Schema Selection** | `100` full selections across `31` tools (`n=30`, `ctor = 1,069 us`) | $8,055.3\ \mu\text{s}$ | **$4,069.8\ \mu\text{s}$** | **`1.98x` (`49.5%` faster)** |
 *Figure 1: Substrate throughput (ops/sec) and p50 latency profile across core HEAV3NS-MICRO primitives.*
 
 ### 3.2 Analysis of Subsystem Behaviors
