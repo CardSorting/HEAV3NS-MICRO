@@ -37,6 +37,7 @@ pub(crate) struct IncrementalSseAggregator {
     anthropic_out_tokens: usize,
     saw_anthropic_usage: bool,
     completed_override: Option<ProviderResponse>,
+    use_fast_delta: bool,
 }
 
 
@@ -66,6 +67,7 @@ impl IncrementalSseAggregator {
             anthropic_out_tokens: 0,
             saw_anthropic_usage: false,
             completed_override: None,
+            use_fast_delta: true,
         }
     }
 
@@ -300,7 +302,7 @@ impl IncrementalSseAggregator {
         if self.completed_override.is_some() {
             return Ok(());
         }
-        if self.try_ingest_fast_delta(frame_event, raw_data) {
+        if self.use_fast_delta && self.try_ingest_fast_delta(frame_event, raw_data) {
             return Ok(());
         }
         let Ok(chunk) = serde_json::from_str::<Value>(raw_data) else {
@@ -781,13 +783,15 @@ impl IncrementalSseAggregator {
 
 /// Unified multi-dialect SSE stream parser supporting OpenAI Chat Completions,
 /// OpenAI `/v1/responses`, Anthropic `/v1/messages`, and Google Gemini SSE streams.
-pub(crate) fn parse_multidialect_sse_stream(
-    raw_sse: &str,
-    provider_label: &str,
-    extract_openai_usage_fn: fn(&Value) -> Option<ProviderTokenUsage>,
-) -> Result<ProviderResponse, ProviderError> {
-    let mut agg =
-        IncrementalSseAggregator::new(provider_label, extract_openai_usage_fn, usize::MAX);
+pub(crate) fn parse_multidialect_sse_stream(raw_sse: &str, provider_label: &str, extract_openai_usage_fn: fn(&Value) -> Option<ProviderTokenUsage>) -> Result<ProviderResponse, ProviderError> {
+    let mut agg = IncrementalSseAggregator::new(provider_label, extract_openai_usage_fn, usize::MAX);
+    agg.push_bytes(raw_sse.as_bytes())?;
+    agg.finish()
+}
+
+pub(crate) fn parse_multidialect_sse_stream_value_only(raw_sse: &str, provider_label: &str, extract_openai_usage_fn: fn(&Value) -> Option<ProviderTokenUsage>) -> Result<ProviderResponse, ProviderError> {
+    let mut agg = IncrementalSseAggregator::new(provider_label, extract_openai_usage_fn, usize::MAX);
+    agg.use_fast_delta = false;
     agg.push_bytes(raw_sse.as_bytes())?;
     agg.finish()
 }

@@ -681,4 +681,53 @@ mod tests {
             count, elapsed_us
         );
     }
+
+    #[test]
+    fn test_tool_registry_schema_cache_equivalence_and_mutation_isolation_and_ab() {
+        use crate::domain::memory::MemoryStore;
+        use std::hint::black_box;
+        use std::sync::{Arc, Mutex};
+
+        let t_ctor = Instant::now();
+        let reg = ToolRegistry::new(Arc::new(Mutex::new(MemoryStore::new())));
+        let ctor_us = t_ctor.elapsed().as_micros();
+
+        let mut first = reg.select_tool_schemas_for("", false);
+        let expected: Vec<_> = reg.list_specs().into_iter().map(|s| s.to_openai_tool()).collect();
+        assert_eq!(first, expected);
+
+        for item in &mut first {
+            item["type"] = json!("CORRUPTED");
+            item["function"]["name"] = json!("CORRUPTED_FN");
+        }
+        assert_eq!(reg.select_tool_schemas_for("", false), expected);
+
+        for _ in 0..5 {
+            black_box(reg.list_specs().into_iter().map(|s| s.to_openai_tool()).collect::<Vec<_>>());
+            black_box(reg.select_tool_schemas_for("", false));
+        }
+        let mut uncached = Vec::with_capacity(30);
+        let mut cached = Vec::with_capacity(30);
+        for _ in 0..30 {
+            let t0 = Instant::now();
+            for _ in 0..100 {
+                black_box(reg.list_specs().into_iter().map(|s| s.to_openai_tool()).collect::<Vec<_>>());
+            }
+            uncached.push(t0.elapsed().as_nanos() as f64 / 1000.0);
+
+            let t1 = Instant::now();
+            for _ in 0..100 {
+                black_box(reg.select_tool_schemas_for("", false));
+            }
+            cached.push(t1.elapsed().as_nanos() as f64 / 1000.0);
+        }
+        uncached.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        cached.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let med_u = uncached[15];
+        let med_c = cached[15];
+        eprintln!(
+            "ToolRegistry ctor={}us uncached_med={:.1}us cached_med={:.1}us speedup={:.2}x",
+            ctor_us, med_u, med_c, med_u / med_c
+        );
+    }
 }

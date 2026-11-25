@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
-use std::time::UNIX_EPOCH;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 impl VfsDiskBaseline {
     pub fn capture_checked(path: &Path) -> Result<Self, String> {
@@ -449,21 +449,63 @@ impl SkillsIngestor {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FileStamp {
+    len: u64,
+    mtime_nanos: u128,
+    #[cfg(unix)]
+    dev: u64,
+    #[cfg(unix)]
+    ino: u64,
+    #[cfg(unix)]
+    ctime_sec: i64,
+    #[cfg(unix)]
+    ctime_nsec: i64,
+}
+
+impl FileStamp {
+    fn from_meta(meta: &fs::Metadata) -> Self {
+        if let Some(m) = Some(&meta) {
+            let _ = m;
+        }
+        let mtime_nanos = meta.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_nanos()).unwrap_or(0);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            Self { len: meta.len(), mtime_nanos, dev: meta.dev(), ino: meta.ino(), ctime_sec: meta.ctime(), ctime_nsec: meta.ctime_nsec() }
+        }
+        #[cfg(not(unix))]
+        { Self { len: meta.len(), mtime_nanos } }
+    }
+}
+
 /// Computes a fast deterministic SHA-256 fingerprint of workspace source files and manifests,
-/// using `(len, mtime_nanos)` metadata memoization to skip re-reading unchanged files.
+/// using `(dev, ino, len, mtime, ctime)` metadata memoization with a 2-second racily-clean guard
+/// to prevent stale hits on same-length edits, preserved-mtime replacements, or coarse filesystems.
 pub fn workspace_revision(workspace_root: &Path) -> String {
-    static FILE_DIGEST_CACHE: OnceLock<Mutex<HashMap<PathBuf, (u64, u128, String)>>> =
+    workspace_revision_with_cache(workspace_root, true)
+}
+
+pub(crate) fn workspace_revision_with_cache(workspace_root: &Path, use_cache: bool) -> String {
+    const RACY_WINDOW_NANOS: u128 = 2_000_000_000;
+    static FILE_DIGEST_CACHE: OnceLock<Mutex<HashMap<PathBuf, (FileStamp, String)>>> =
         OnceLock::new();
     let cache = FILE_DIGEST_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let now_nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
     let mut files: Vec<(String, String)> = Vec::new();
-    let mut pending_cache_updates: Vec<(PathBuf, u64, u128, String)> = Vec::new();
+    let mut pending_cache_updates: Vec<(PathBuf, FileStamp, String)> = Vec::new();
 
     fn walk(
         root: &Path,
         dir: &Path,
+        use_cache: bool,
+        now_nanos: u128,
         out: &mut Vec<(String, String)>,
-        cache: &Mutex<HashMap<PathBuf, (u64, u128, String)>>,
-        pending: &mut Vec<(PathBuf, u64, u128, String)>,
+        cache: &Mutex<HashMap<PathBuf, (FileStamp, String)>>,
+        pending: &mut Vec<(PathBuf, FileStamp, String)>,
     ) {
         if out.len() >= 2_000 {
             return;
@@ -485,29 +527,26 @@ pub fn workspace_revision(workspace_root: &Path) -> String {
             }
             let p = entry.path();
             if ft.is_dir() {
-                walk(root, &p, out, cache, pending);
+                walk(root, &p, use_cache, now_nanos, out, cache, pending);
             } else if ft.is_file() {
                 let Ok(meta) = entry.metadata() else { continue };
-                let len = meta.len();
-                if len > 512 * 1024 {
+                let stamp = FileStamp::from_meta(&meta);
+                if stamp.len > 512 * 1024 {
                     continue;
                 }
-                let mtime_nanos = meta
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                    .map(|d| d.as_nanos())
-                    .unwrap_or(0);
                 let rel = p
                     .strip_prefix(root)
                     .unwrap_or(&p)
                     .to_string_lossy()
                     .into_owned();
-                if let Ok(guard) = cache.lock() {
-                    if let Some((c_len, c_mtime, c_hex)) = guard.get(&p) {
-                        if *c_len == len && *c_mtime == mtime_nanos {
-                            out.push((rel, c_hex.clone()));
-                            continue;
+                let is_racy = now_nanos.saturating_sub(stamp.mtime_nanos) < RACY_WINDOW_NANOS;
+                if use_cache && !is_racy && stamp.mtime_nanos > 0 {
+                    if let Ok(guard) = cache.lock() {
+                        if let Some((c_stamp, c_hex)) = guard.get(&p) {
+                            if *c_stamp == stamp {
+                                out.push((rel, c_hex.clone()));
+                                continue;
+                            }
                         }
                     }
                 }
@@ -516,7 +555,9 @@ pub fn workspace_revision(workspace_root: &Path) -> String {
                         let mut h = Sha256::new();
                         h.update(&bytes);
                         let hex = format!("{:x}", h.finalize());
-                        pending.push((p, len, mtime_nanos, hex.clone()));
+                        if use_cache && !is_racy && stamp.mtime_nanos > 0 {
+                            pending.push((p, stamp, hex.clone()));
+                        }
                         out.push((rel, hex));
                     }
                 }
@@ -526,17 +567,19 @@ pub fn workspace_revision(workspace_root: &Path) -> String {
     walk(
         workspace_root,
         workspace_root,
+        use_cache,
+        now_nanos,
         &mut files,
         cache,
         &mut pending_cache_updates,
     );
-    if !pending_cache_updates.is_empty() {
+    if use_cache && !pending_cache_updates.is_empty() {
         if let Ok(mut guard) = cache.lock() {
             if guard.len().saturating_add(pending_cache_updates.len()) > 16_384 {
                 guard.clear();
             }
-            for (p, len, mtime, hex) in pending_cache_updates {
-                guard.insert(p, (len, mtime, hex));
+            for (p, stamp, hex) in pending_cache_updates {
+                guard.insert(p, (stamp, hex));
             }
         }
     }
