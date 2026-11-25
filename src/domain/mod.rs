@@ -8,6 +8,7 @@ pub mod interfaces;
 pub mod memory;
 pub mod prefix_and_manifest;
 pub mod pricing_and_taxonomy;
+pub mod profiles;
 pub mod prompt_spec;
 pub mod skill_nodes;
 pub mod skill_tree;
@@ -40,6 +41,10 @@ pub use crate::domain::pricing_and_taxonomy::{
     resolve_compatible_fallback_model_with_catalog, select_auto_routed_model,
     select_auto_routed_model_with_catalog, AutoRouteDecision, BillingMetering, ErrorCategory,
     ErrorEnvelope, ProviderTokenUsage, CREDENTIAL_REJECTED_UNSENT_CODE,
+};
+pub use crate::domain::profiles::{
+    AgentProfile, CiGatePolicy, CiGateReceipt, DEFAULT_AGENT_PROFILE_ID, DEFAULT_JOY_CLI_PATH,
+    DEFAULT_JOY_METHODOLOGY_PATH,
 };
 pub use crate::domain::prompt_spec::{
     format_bounded_handoff_item, ModelPromptFamily, PromptProfile, SwarmSpecialistContext,

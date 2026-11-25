@@ -1,5 +1,6 @@
 // [LAYER: DOMAIN]
 use crate::domain::pricing_and_taxonomy::ProviderTokenUsage;
+use crate::domain::profiles::CiGateReceipt;
 use serde::{Deserialize, Serialize};
 
 /// Abstract contract for prose-free turn verification receipts (`heav3ns.receipt/v1`).
@@ -72,6 +73,8 @@ pub struct TurnReceipt {
     pub not_recorded: Vec<String>,
     #[serde(rename = "claimCeiling")]
     pub claim_ceiling: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "ciGate")]
+    pub ci_gate: Option<CiGateReceipt>,
 }
 
 impl TurnReceipt {
@@ -130,6 +133,17 @@ impl TurnReceipt {
         }
         if !self.approvals.is_empty() {
             lines.push(format!("│ Approvals      : {}", self.approvals.join("; ")));
+        }
+        if let Some(ref gate) = self.ci_gate {
+            lines.push(format!(
+                "│ CI Gate        : {} ({} · theme={} · phase={} · blocking={} · {}ms)",
+                if gate.passed { "PASS" } else { "FAIL" },
+                gate.gate,
+                gate.theme,
+                gate.phase,
+                gate.blocking_count,
+                gate.duration_ms
+            ));
         }
         lines.push(format!(
             "│ Claim Ceiling  : {}",

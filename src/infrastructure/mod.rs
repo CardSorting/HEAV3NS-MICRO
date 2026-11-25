@@ -9,6 +9,7 @@ pub mod http_provider;
 pub(crate) mod http_provider_helpers;
 #[cfg(test)]
 pub mod http_provider_tests;
+pub mod joy_ci_gate;
 pub mod pricing_updater;
 pub mod project_runner;
 pub(crate) mod reasoning_shaper;
@@ -29,6 +30,7 @@ pub use crate::infrastructure::http_provider::{
     parse_sse_stream, probe_local_ollama_model, probe_local_ollama_models,
     probe_openai_compatible_models, HttpProvider,
 };
+pub use crate::infrastructure::joy_ci_gate::JoyCiGateRunner;
 pub use crate::infrastructure::pricing_updater::{
     global_pricing_registry, ModelPricingRegistry, DEFAULT_CATALOG_TTL_MS,
     DEFAULT_OPENROUTER_MODELS_URL,

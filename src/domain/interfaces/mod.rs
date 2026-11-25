@@ -1,4 +1,5 @@
 // [LAYER: DOMAIN]
+use crate::domain::profiles::{AgentProfile, CiGatePolicy, CiGateReceipt};
 use crate::domain::turn_receipt::FileChangeReceipt;
 use crate::domain::types::progress::{EngineProgressEvent, ToolExecutionRecord};
 use crate::domain::types::runtime::{CancellationToken, ExecutionAuthorityLevel};
@@ -246,4 +247,17 @@ pub trait IProjectRunner: Send + Sync {
         cwd: &str,
         preview: Option<&str>,
     ) -> Result<serde_json::Value, String>;
+}
+
+/// Contractual sovereignty interface for running the HEAV3NS-JOY CI gate on development tasks.
+pub trait ICiGateRunner: Send + Sync {
+    fn run_ci_gate(&self, workspace_root: &Path, policy: &CiGatePolicy) -> CiGateReceipt;
+}
+
+/// Contractual sovereignty marker for the concrete `JoyCiGateRunner` adapter.
+pub trait IJoyCiGateRunner: ICiGateRunner {}
+
+/// Contractual sovereignty interface for loading validated workspace agent profiles.
+pub trait IWorkspaceProfileLoader: Send + Sync {
+    fn load_workspace_profiles(&self, workspace_root: &Path) -> Vec<AgentProfile>;
 }

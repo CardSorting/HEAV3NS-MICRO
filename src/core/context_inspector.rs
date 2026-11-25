@@ -28,6 +28,9 @@ use serde_json::Value;
 #[serde(rename_all = "camelCase")]
 pub struct ContextInspectionSnapshot {
     pub profile: String,
+    pub agent_profile: String,
+    pub methodology: String,
+    pub ci_gate_enabled: bool,
     pub model_name: String,
     pub model_family: String,
     pub provider: String,
@@ -88,7 +91,13 @@ impl AgentEngine {
         } else {
             ExecutionAuthorityLevel::Interactive
         };
-        let spec = SystemPromptSpec::for_turn(&cfg, authority, soul);
+        let active_profile = self.active_profile();
+        let spec = SystemPromptSpec::for_turn_with_profile(
+            &cfg,
+            authority,
+            soul,
+            Some(active_profile.clone()),
+        );
         let facts = WorkspacePromptProbe::probe_cached(self.workspace_root());
         let skills = discover_skills_cached(self.workspace_root());
 
@@ -206,6 +215,9 @@ impl AgentEngine {
 
         ContextInspectionSnapshot {
             profile: spec.profile.as_str().to_string(),
+            agent_profile: active_profile.id,
+            methodology: active_profile.methodology,
+            ci_gate_enabled: active_profile.ci_gate.enabled,
             model_name: cfg.model_name,
             model_family,
             provider: cfg.provider,
@@ -267,7 +279,13 @@ impl AgentEngine {
         } else {
             ExecutionAuthorityLevel::Interactive
         };
-        let spec = SystemPromptSpec::for_turn(&cfg, authority, soul);
+        let active_profile = self.active_profile();
+        let spec = SystemPromptSpec::for_turn_with_profile(
+            &cfg,
+            authority,
+            soul,
+            Some(active_profile.clone()),
+        );
 
         // Read-only tool schema projection (does not mutate unlocked_lru)
         let probe = if sample_prompt.trim().is_empty() {
@@ -467,6 +485,7 @@ impl AgentEngine {
                 authority: ExecutionAuthorityLevel::Autonomous,
                 active_soul: soul,
                 swarm_specialist: None,
+                active_profile: Some(self.active_profile()),
             },
             "specialist" | "swarm" => SystemPromptSpec::for_specialist(
                 "Core Implementation Specialist",
@@ -474,7 +493,12 @@ impl AgentEngine {
                 vec!["src/core/engine.rs".to_string()],
             ),
             "side" | "side_question" => SystemPromptSpec::for_side_question(),
-            _ => SystemPromptSpec::for_turn(&cfg, ExecutionAuthorityLevel::Autonomous, soul),
+            _ => SystemPromptSpec::for_turn_with_profile(
+                &cfg,
+                ExecutionAuthorityLevel::Autonomous,
+                soul,
+                Some(self.active_profile()),
+            ),
         };
 
         if trimmed == "prefix" {
@@ -711,41 +735,23 @@ impl AgentEngine {
         if let Some(retired_msg) = retired_provider_remediation(target_prov) {
             return retired_msg.to_string();
         }
-        if lookup_provider_descriptor(target_prov).is_none()
-            && !target_prov.eq_ignore_ascii_case("custom")
-        {
+        if lookup_provider_descriptor(target_prov).is_none() && !target_prov.eq_ignore_ascii_case("custom") {
             let active_count = PROVIDER_DESCRIPTORS.iter().filter(|d| !d.retired).count();
             if let Some(suggested) = suggest_provider_slug(target_prov) {
-                return format!(
-                    "Unknown provider '{target_prov}'. Did you mean '{suggested}'? Run `/provider {suggested}` or `/provider list` ({active_count} supported providers)."
-                );
+                return format!("Unknown provider '{target_prov}'. Did you mean '{suggested}'? Run `/provider {suggested}` or `/provider list` ({active_count} supported providers).");
             }
-            return format!(
-                "Unknown provider '{target_prov}'. Run `/provider list` to inspect all {active_count} supported providers."
-            );
+            return format!("Unknown provider '{target_prov}'. Run `/provider list` to inspect all {active_count} supported providers.");
         }
         self.switch_http_provider(target_prov, target_model, None, None);
         let cfg = self.config_snapshot();
         let base_wire = lookup_provider_descriptor(&cfg.provider)
             .map(|d| d.wire_dialect)
             .unwrap_or_else(|| infer_wire_dialect_from_endpoint(&cfg.api_endpoint));
-        let (wire, _) = resolve_model_aware_wire_and_model(
-            &cfg.provider,
-            &cfg.model_name,
-            &cfg.api_endpoint,
-            base_wire,
-        );
+        let (wire, _) = resolve_model_aware_wire_and_model(&cfg.provider, &cfg.model_name, &cfg.api_endpoint, base_wire);
+        let key_state = if cfg.api_key.is_some() { "configured" } else { "unset" };
         format!(
             "Switched provider -> {} (model: {}, wire: {}, endpoint: {}, key: {})",
-            cfg.provider,
-            cfg.model_name,
-            wire.as_str(),
-            redact_endpoint_for_display(&cfg.api_endpoint),
-            if cfg.api_key.is_some() {
-                "configured"
-            } else {
-                "unset"
-            }
+            cfg.provider, cfg.model_name, wire.as_str(), redact_endpoint_for_display(&cfg.api_endpoint), key_state
         )
     }
 
@@ -780,8 +786,11 @@ impl AgentEngine {
         if snaps.is_empty() {
             return "No snapshots recorded.".to_string();
         }
-        snaps.iter().enumerate().map(|(i, s)| {
-            format!("#{i}: id={} frame={} msgs={} arena={}B", s.snapshot_id, s.frame_index, s.messages.len(), s.slab_snapshot.allocated_bytes)
-        }).collect::<Vec<_>>().join("\n")
+        snaps
+            .iter()
+            .enumerate()
+            .map(|(i, s)| format!("#{i}: id={} frame={} msgs={} arena={}B", s.snapshot_id, s.frame_index, s.messages.len(), s.slab_snapshot.allocated_bytes))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }

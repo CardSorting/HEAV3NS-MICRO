@@ -4,11 +4,12 @@ use crate::core::session_store::{SessionCompactor, SessionStore};
 use crate::core::tool_registry::ToolRegistry;
 use crate::domain::compaction::CompactionPolicy;
 use crate::domain::interfaces::{
-    ILlmProvider, IWorkspaceSnapshotCas,
+    ICiGateRunner, ILlmProvider, IWorkspaceSnapshotCas,
 };
 use crate::domain::memory::{GameStateSnapshot, MemoryStore};
 use crate::domain::prefix_and_manifest::PrefixStabilityTracker;
 use crate::domain::pricing_and_taxonomy::ProviderTokenUsage;
+use crate::domain::profiles::AgentProfile;
 use crate::domain::turn_receipt::TurnReceipt;
 use crate::domain::types::messages::{Role, SessionMessage};
 use crate::domain::types::progress::{
@@ -50,6 +51,9 @@ pub struct AgentEngine {
     pub(crate) pinned_system_prompt: Mutex<Option<String>>,
     pub(crate) last_prefix_status: Mutex<String>,
     pub(crate) active_posture: Mutex<Option<ExecutionPosture>>,
+    pub(crate) active_profile: Mutex<AgentProfile>,
+    pub(crate) ci_gate_runner: Arc<dyn ICiGateRunner>,
+    pub(crate) has_custom_ci_gate: bool,
     pub(crate) turn_receipts: Mutex<Vec<TurnReceipt>>,
     pub(crate) frame_counter: AtomicU64,
     pub(crate) event_seq: AtomicU64,

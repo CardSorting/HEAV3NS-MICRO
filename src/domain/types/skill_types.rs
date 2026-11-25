@@ -35,4 +35,6 @@ pub struct WorkspacePromptFacts {
     pub governance_sources: Vec<String>,
     #[serde(default)]
     pub governance_warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub joy_methodology_path: Option<String>,
 }

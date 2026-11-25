@@ -184,6 +184,13 @@ async fn build_engine(opts: &CliOptions) -> (Arc<AgentEngine>, AgentConfig) {
         .unwrap_or_default();
     cfg.provider_keys = saved_keys;
     cfg.provider_endpoints = saved_endpoints;
+    if let Some(prof) = opts
+        .profile
+        .clone()
+        .or_else(|| user_cfg.as_ref().and_then(|c| c.profile.clone()))
+    {
+        cfg.profile_id = Some(prof);
+    }
     if cfg.provider != "openai" {
         cfg.fallback_model = None;
     }
@@ -409,6 +416,13 @@ async fn main() {
                         }
                     },
                     "wire" | "wire_dialect" => cfg.wire_dialect = Some(value),
+                    "profile" => {
+                        let Some(resolved) = heav3ns_micro::domain::profiles::AgentProfile::resolve(&value) else {
+                            eprintln!("Error: Unknown agent profile '{value}'.");
+                            std::process::exit(1);
+                        };
+                        cfg.profile = Some(resolved.id);
+                    }
                     "fallbacks" | "fallback_providers" => {
                         cfg.fallback_providers = value
                             .split(',')

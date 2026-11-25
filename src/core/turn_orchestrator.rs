@@ -8,6 +8,7 @@ use crate::domain::pricing_and_taxonomy::{
     compute_retry_delay_ms, resolve_compatible_fallback_model_with_catalog, BillingMetering, ErrorCategory,
     ErrorEnvelope, ProviderTokenUsage,
 };
+use crate::domain::profiles::CiGateReceipt;
 use crate::domain::turn_receipt::{CommandRunReceipt, TurnReceipt};
 use crate::domain::types::messages::{Role, SessionMessage};
 use crate::domain::types::posture_types::RepoConstitution;
@@ -439,6 +440,7 @@ impl AgentEngine {
         prefix_status: String,
         snap_before: Option<String>,
         tool_results: &[ToolExecutionRecord],
+        ci_gate: Option<CiGateReceipt>,
     ) -> TurnReceipt {
         let snap_after = self
             .cas
@@ -564,6 +566,7 @@ impl AgentEngine {
                 "files_larger_than_2mib".to_string(),
             ],
             claim_ceiling,
+            ci_gate,
         };
 
         let _ = self

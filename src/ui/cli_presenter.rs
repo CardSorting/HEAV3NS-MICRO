@@ -26,6 +26,8 @@ pub struct Heav3nsUserConfig {
     pub fallback_providers: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent_models: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
 }
 
 impl Heav3nsUserConfig {
@@ -222,6 +224,7 @@ pub struct CliOptions {
     pub endpoint: Option<String>,
     pub reasoning_effort: Option<String>,
     pub wire_dialect: Option<String>,
+    pub profile: Option<String>,
     pub prompt: Option<String>,
     pub stress: bool,
     pub last_only: bool,
@@ -266,6 +269,7 @@ pub fn parse_args_from(args: Vec<String>) -> CliOptions {
         endpoint: None,
         reasoning_effort: None,
         wire_dialect: None,
+        profile: None,
         prompt: None,
         stress: false,
         last_only: false,
@@ -402,6 +406,12 @@ pub fn parse_args_from(args: Vec<String>) -> CliOptions {
                     i += 1;
                 }
             }
+            "--profile" => {
+                if let Some(v) = args.get(i + 1) {
+                    opts.profile = Some(v.clone());
+                    i += 1;
+                }
+            }
             "run" => {
                 if let Some(v) = args.get(i + 1) {
                     opts.prompt = Some(v.clone());
@@ -454,7 +464,7 @@ START HERE:
 CORE COMMANDS:
   run <PROMPT>                   Execute a single agent turn and output the result
   config show                    Display current user settings from ~/.heav3ns/config.json
-  config set <KEY> <VALUE>       Update setting (provider, model, endpoint, api_key)
+  config set <KEY> <VALUE>       Update setting (provider, model, endpoint, api_key, profile)
   flight                         Run the 5-scenario Agent Flight Test suite (FT-01..FT-05)
   bench                          Run substrate micro-benchmarks + flight suite
   smoke                          Run deterministic runtime self-check & smoke verification
@@ -465,6 +475,7 @@ OPTIONS:
   --provider <NAME>              Any of 43+ providers (openai, openai-codex, anthropic, gemini, deepseek, xai, groq, mistral, qwen, moonshot, zai, nvidia-nim, together, openrouter, ollama, ...)
   --reasoning <LEVEL>            Reasoning effort dial: low, medium, high, xhigh, off
   --wire <DIALECT>               Explicit wire override: chat_completions, openai_responses, anthropic_messages, google_gemini
+  --profile <ID>                 Agent profile (joyzoning-architect, strict-ci, fast-patch, research-readonly)
   --endpoint <URL>               Custom API endpoint URL (default depends on provider)
   --cwd <DIR>                    Workspace root directory (default: current directory)
   -p, --prompt <TEXT>            Execute single agent prompt and exit

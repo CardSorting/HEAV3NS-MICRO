@@ -784,6 +784,7 @@ impl IWorkspacePromptProbe for WorkspacePromptProbe {
             governance_digest,
             governance_sources,
             governance_warnings,
+            joy_methodology_path: crate::infrastructure::joy_ci_gate::JoyCiGateRunner::resolve_joy_methodology_dir(),
         }
     }
 }

@@ -10,8 +10,9 @@ use crate::plumbing::hash_and_math::{lock_unpoison, now_ms};
 use crate::ui::cli_presenter::Heav3nsUserConfig;
 use crate::ui::provider_rpc::handle_account_mutation_rpc;
 use crate::ui::rpc_dispatch::{
-    build_context_history_response, build_context_inspect_response, build_prompt_inspect_response, build_spider_check_multi_response,
-    build_state_inspect_response, handle_memory_rpc,
+    build_context_history_response, build_context_inspect_response, build_prompt_inspect_response,
+    build_spider_check_multi_response, build_state_inspect_response, handle_memory_rpc,
+    handle_profile_and_ci_rpc,
 };
 use crate::ui::worker_submit::execute_multiplexed_submit;
 use crate::ui::worker_handlers::{
@@ -409,6 +410,18 @@ pub(crate) async fn dispatch_worker_rpc_extended(
                     &stdout_lock,
                     &json!({ "v": 1, "kind": "response", "id": req_id, "result": build_prompt_inspect_response(mode, &engine) }),
                 );
+            }
+            "profile.list" | "profile.get" | "profile.set" | "ci_gate.run" => {
+                match handle_profile_and_ci_rpc(method, &params, &engine) {
+                    Ok(res) => emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "result": res }),
+                    ),
+                    Err((code, msg)) => emit_jsonl_line(
+                        &stdout_lock,
+                        &json!({ "v": 1, "kind": "response", "id": req_id, "error": { "code": code, "message": msg } }),
+                    ),
+                }
             }
             "context.history" => {
                 let conv = {

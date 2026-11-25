@@ -185,11 +185,14 @@ impl AgentEngine {
                     .collect();
 
                 let mut child_cfg = self.config_snapshot();
-                let spec = SystemPromptSpec::for_specialist(
+                let parent_profile = self.active_profile();
+                let mut spec = SystemPromptSpec::for_specialist(
                     &assign.role,
                     &objective,
                     assign.assigned_files.clone(),
                 );
+                spec.active_profile = Some(parent_profile.clone());
+                child_cfg.profile_id = Some(parent_profile.id.clone());
                 child_cfg.system_prompt = spec.render(
                     &child_cfg,
                     self.workspace_root(),
@@ -201,7 +204,7 @@ impl AgentEngine {
                 let child_tools = Arc::new(crate::core::tool_registry::ToolRegistry::new(
                     Arc::clone(self.memory()),
                 ));
-                let child_engine = AgentEngine::with_shared_substrate(
+                let mut child_engine = AgentEngine::with_shared_substrate(
                     self.workspace_root().to_path_buf(),
                     child_cfg,
                     self.provider_arc(),
@@ -209,6 +212,9 @@ impl AgentEngine {
                     child_tools,
                 )
                 .without_swarm_delegation();
+                if self.has_custom_ci_gate {
+                    child_engine = child_engine.with_ci_gate_runner(Arc::clone(&self.ci_gate_runner));
+                }
                 child_engine.set_posture(parent_posture);
 
                 let prompt =
@@ -664,10 +670,14 @@ impl AgentEngine {
             }
             "/health" => {
                 let q = self.queue().snapshot();
+                let prof = self.active_profile();
                 json!({
                     "status": "ok",
                     "provider": self.provider_arc().provider_name(),
                     "posture": self.current_posture().slug(),
+                    "profile": prof.id,
+                    "methodology": prof.methodology,
+                    "ciGateEnabled": prof.ci_gate.enabled,
                     "prefixStatus": *self.last_prefix_status.lock().unwrap_or_else(|e| e.into_inner()),
                     "workspaceRevision": workspace_revision(self.workspace_root()),
                     "queueActive": q.active,
@@ -675,6 +685,30 @@ impl AgentEngine {
                     "queueBytes": q.pending_bytes,
                 })
                 .to_string()
+            }
+            "/profile" | "/profiles" => {
+                let trimmed = arg.trim();
+                if trimmed.is_empty() || trimmed == "list" {
+                    serde_json::to_string_pretty(&json!({
+                        "activeProfile": self.active_profile(),
+                        "availableProfiles": self.list_profiles(),
+                    }))
+                    .unwrap_or_default()
+                } else {
+                    match self.set_profile(trimmed) {
+                        Ok(p) => serde_json::to_string_pretty(&json!({
+                            "switched": true,
+                            "activeProfile": p,
+                            "posture": self.current_posture().slug(),
+                        }))
+                        .unwrap_or_default(),
+                        Err(e) => e,
+                    }
+                }
+            }
+            "/ci" | "/joy" => {
+                let receipt = self.run_ci_gate_now();
+                serde_json::to_string_pretty(&receipt).unwrap_or_default()
             }
             _ => return None,
         };

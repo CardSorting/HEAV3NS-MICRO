@@ -3,10 +3,12 @@ use crate::core::request_queue::RuntimeRequestQueue;
 use crate::core::session_store::{SessionCompactor, SessionStore};
 use crate::core::tool_registry::ToolRegistry;
 use crate::domain::interfaces::{
-    ICodexAccountStore, ILlmProvider, IWorkspaceSnapshotCas, ProgressCallback,
+    ICiGateRunner, ICodexAccountStore, ILlmProvider, IWorkspaceProfileLoader,
+    IWorkspaceSnapshotCas, ProgressCallback,
 };
 use crate::domain::memory::{GameStateSnapshot, MemoryStore};
 use crate::domain::prefix_and_manifest::PrefixStabilityTracker;
+use crate::domain::profiles::{AgentProfile, CiGateReceipt};
 use crate::domain::types::messages::{Role, SessionMessage};
 use crate::domain::types::progress::{
     EngineProgressEvent, EngineProgressMetadata, EngineProgressPhase, EngineProgressStatus,
@@ -16,6 +18,7 @@ use crate::domain::types::runtime::{
 };
 use crate::infrastructure::codex_oauth::CodexAccountStore;
 use crate::infrastructure::http_provider::HttpProvider;
+use crate::infrastructure::joy_ci_gate::JoyCiGateRunner;
 use crate::infrastructure::vfs_store::SessionVfs;
 use crate::infrastructure::workspace_cas::WorkspaceSnapshotCas;
 use crate::plumbing::hash_and_math::now_ms;
@@ -52,6 +55,13 @@ impl AgentEngine {
         ));
         let cas = WorkspaceSnapshotCas::open(&workspace_root);
         let initial_receipts = cas.load_recent_receipts(32);
+        let custom_profiles = JoyCiGateRunner.load_workspace_profiles(&workspace_root);
+        let initial_profile = config
+            .profile_id
+            .as_deref()
+            .and_then(|id| AgentProfile::resolve_with_custom(id, &custom_profiles))
+            .unwrap_or_else(AgentProfile::default_profile);
+        let initial_posture = initial_profile.default_posture;
         Self {
             workspace_root,
             config: Mutex::new(config),
@@ -68,7 +78,10 @@ impl AgentEngine {
             prefix_tracker: Mutex::new(PrefixStabilityTracker::default()),
             pinned_system_prompt: Mutex::new(None),
             last_prefix_status: Mutex::new("uninitialized".to_string()),
-            active_posture: Mutex::new(None),
+            active_posture: Mutex::new(initial_posture),
+            active_profile: Mutex::new(initial_profile),
+            ci_gate_runner: Arc::new(JoyCiGateRunner),
+            has_custom_ci_gate: false,
             turn_receipts: Mutex::new(initial_receipts),
             frame_counter: AtomicU64::new(0),
             event_seq: AtomicU64::new(0),
@@ -172,6 +185,63 @@ impl AgentEngine {
         let next = self.current_posture().step_next();
         self.set_posture(next);
         next
+    }
+
+    pub fn with_ci_gate_runner(mut self, runner: Arc<dyn ICiGateRunner>) -> Self {
+        self.ci_gate_runner = runner;
+        self.has_custom_ci_gate = true;
+        self
+    }
+
+    pub fn active_profile(&self) -> AgentProfile {
+        self.active_profile
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    pub fn list_profiles(&self) -> Vec<AgentProfile> {
+        let mut profiles = AgentProfile::builtin_profiles();
+        for custom in JoyCiGateRunner.load_workspace_profiles(&self.workspace_root) {
+            if let Some(existing) = profiles.iter_mut().find(|p| p.id == custom.id) {
+                *existing = custom;
+            } else {
+                profiles.push(custom);
+            }
+        }
+        profiles
+    }
+
+    pub fn set_profile(&self, profile_id: &str) -> Result<AgentProfile, String> {
+        let custom = JoyCiGateRunner.load_workspace_profiles(&self.workspace_root);
+        let resolved = AgentProfile::resolve_with_custom(profile_id, &custom)
+            .ok_or_else(|| format!("Unknown agent profile '{}'", profile_id))?;
+        *self
+            .active_profile
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = resolved.clone();
+        self.config
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .profile_id = Some(resolved.id.clone());
+        if let Some(p) = resolved.default_posture {
+            self.set_posture(p);
+        }
+        *self
+            .pinned_system_prompt
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = None;
+        self.prefix_tracker
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .declare_repin("profile_switch");
+        Ok(resolved)
+    }
+
+    pub fn run_ci_gate_now(&self) -> CiGateReceipt {
+        let profile = self.active_profile();
+        self.ci_gate_runner
+            .run_ci_gate(&self.workspace_root, &profile.ci_gate)
     }
 
     pub(crate) fn set_active_model_name(&self, name: &str) {

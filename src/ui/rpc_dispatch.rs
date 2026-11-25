@@ -113,6 +113,8 @@ pub fn build_hello_response(ws_id: &str, sess_id: &str, workspace_root: &Path) -
             "heredoc-defense-v1",
             "prompt-inspect-v1",
             "posture-dial-v1",
+            "agent-profiles-v1",
+            "joy-ci-gate-v1",
             "turn-receipts-v1",
             "request-preview-v1",
             "multi-provider-parity-v1",
@@ -355,6 +357,9 @@ pub fn build_context_inspect_response(conversation: &str, engine: &AgentEngine) 
         "posture": posture.slug(),
         "postureLabel": posture.display_label(),
         "promptProfile": snap.profile,
+        "agentProfile": snap.agent_profile,
+        "methodology": snap.methodology,
+        "ciGateEnabled": snap.ci_gate_enabled,
         "modelFamily": snap.model_family,
         "cachePrefixHash": snap.cache_prefix_hash,
         "prefixStatus": last_receipt.as_ref().map(|r| r.prefix_status.as_str()).unwrap_or("pinned_initial"),
@@ -382,6 +387,33 @@ pub fn build_prompt_inspect_response(mode: &str, engine: &AgentEngine) -> Value 
         "rendered": rendered,
         "observedAt": now_ms() as f64
     })
+}
+
+pub fn handle_profile_and_ci_rpc(
+    method: &str,
+    params: &Value,
+    engine: &AgentEngine,
+) -> Result<Value, (String, String)> {
+    match method {
+        "profile.list" => Ok(json!({
+            "activeProfile": engine.active_profile(),
+            "profiles": engine.list_profiles(),
+        })),
+        "profile.get" => Ok(json!(engine.active_profile())),
+        "profile.set" => {
+            let pid = params
+                .get("id")
+                .or_else(|| params.get("profile"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            engine
+                .set_profile(pid)
+                .map(|p| json!({ "activeProfile": p, "posture": engine.current_posture().slug() }))
+                .map_err(|msg| ("UNKNOWN_PROFILE".to_string(), msg))
+        }
+        "ci_gate.run" => Ok(json!(engine.run_ci_gate_now())),
+        _ => Err(("UNKNOWN_METHOD".to_string(), format!("Unsupported method: {method}"))),
+    }
 }
 
 pub fn build_context_history_response(
@@ -675,5 +707,24 @@ mod tests {
         {
             assert!(engine.config_snapshot().api_key.is_none());
         }
+    }
+
+    #[test]
+    fn test_profile_rpc_dispatch_in_ui_layer() {
+        let ws = std::env::temp_dir().join(format!("heav3ns-rpc-prof-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&ws);
+        let engine = crate::core::engine::AgentEngine::with_defaults(&ws);
+
+        let list = super::handle_profile_and_ci_rpc("profile.list", &json!({}), &engine).expect("list");
+        assert_eq!(list["activeProfile"]["id"], "joyzoning-architect");
+        assert_eq!(list["profiles"].as_array().map(|a| a.len()), Some(4));
+
+        let set_ok = super::handle_profile_and_ci_rpc("profile.set", &json!({ "id": "strict-ci" }), &engine)
+            .expect("set strict-ci");
+        assert_eq!(set_ok["activeProfile"]["id"], "strict-ci");
+        assert_eq!(set_ok["posture"], "ask");
+
+        assert!(super::handle_profile_and_ci_rpc("profile.set", &json!({ "id": "nope" }), &engine).is_err());
+        let _ = std::fs::remove_dir_all(&ws);
     }
 }

@@ -329,6 +329,7 @@ mod tests {
             tools_run: 0,
             not_recorded: vec![],
             claim_ceiling: vec![],
+            ci_gate: None,
         };
         {
             let mut receipts = engine.turn_receipts.lock().unwrap();

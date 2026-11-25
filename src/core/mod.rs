@@ -18,6 +18,8 @@ pub mod flight_runner;
 #[cfg(test)]
 pub mod provider_parity_more_tests;
 #[cfg(test)]
+pub mod profile_ci_tests;
+#[cfg(test)]
 pub mod provider_parity_tests;
 pub mod request_queue;
 pub mod session_store;

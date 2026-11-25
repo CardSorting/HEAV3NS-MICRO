@@ -245,6 +245,8 @@ pub struct AgentConfig {
     pub provider_keys: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub provider_endpoints: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
 }
 
 pub const DEFAULT_SYSTEM_PROMPT: &str = "You are HEAV3NS-MICRO, a sovereign local-first software engineering agent. Own the requested outcome from inspection through verified completion.";
@@ -271,6 +273,7 @@ impl Default for AgentConfig {
             fallback_providers: Vec::new(),
             provider_keys: BTreeMap::new(),
             provider_endpoints: BTreeMap::new(),
+            profile_id: Some("joyzoning-architect".to_string()),
         }
     }
 }

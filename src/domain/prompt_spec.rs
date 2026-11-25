@@ -1,4 +1,5 @@
 // [LAYER: DOMAIN]
+use crate::domain::profiles::AgentProfile;
 use crate::domain::skill_tree::SoulProfile;
 use crate::domain::types::runtime::{AgentConfig, ExecutionAuthorityLevel, DEFAULT_SYSTEM_PROMPT};
 use crate::domain::types::skill_types::SkillManifest;
@@ -120,6 +121,7 @@ pub struct SystemPromptSpec {
     pub authority: ExecutionAuthorityLevel,
     pub active_soul: Option<SoulProfile>,
     pub swarm_specialist: Option<SwarmSpecialistContext>,
+    pub active_profile: Option<AgentProfile>,
 }
 
 impl Default for SystemPromptSpec {
@@ -129,6 +131,7 @@ impl Default for SystemPromptSpec {
             authority: ExecutionAuthorityLevel::Autonomous,
             active_soul: None,
             swarm_specialist: None,
+            active_profile: Some(AgentProfile::default_profile()),
         }
     }
 }
@@ -139,11 +142,26 @@ impl SystemPromptSpec {
         authority: ExecutionAuthorityLevel,
         active_soul: Option<SoulProfile>,
     ) -> Self {
+        let resolved_profile = config
+            .profile_id
+            .as_deref()
+            .and_then(AgentProfile::resolve)
+            .unwrap_or_else(AgentProfile::default_profile);
+        Self::for_turn_with_profile(config, authority, active_soul, Some(resolved_profile))
+    }
+
+    pub fn for_turn_with_profile(
+        config: &AgentConfig,
+        authority: ExecutionAuthorityLevel,
+        active_soul: Option<SoulProfile>,
+        active_profile: Option<AgentProfile>,
+    ) -> Self {
         Self {
             profile: PromptProfile::select(config),
             authority,
             active_soul,
             swarm_specialist: None,
+            active_profile,
         }
     }
 
@@ -161,6 +179,7 @@ impl SystemPromptSpec {
                 parent_objective: parent_objective.into(),
                 assigned_files,
             }),
+            active_profile: Some(AgentProfile::default_profile()),
         }
     }
 
@@ -170,6 +189,7 @@ impl SystemPromptSpec {
             authority: ExecutionAuthorityLevel::Strict,
             active_soul: None,
             swarm_specialist: None,
+            active_profile: None,
         }
     }
 
@@ -277,7 +297,9 @@ impl SystemPromptSpec {
         }
 
         let compact_jz = self.profile != PromptProfile::Standard;
-        if let Some(jz) = Self::render_joyzoning_block(facts, compact_jz) {
+        if let Some(prof_block) = self.render_profile_methodology_block(facts, compact_jz) {
+            tail.push(prof_block);
+        } else if let Some(jz) = Self::render_joyzoning_block(facts, compact_jz) {
             tail.push(jz);
         }
         if self.profile == PromptProfile::Standard {
@@ -367,6 +389,49 @@ impl SystemPromptSpec {
             line.push_str(&format!(" | Manifests: {}", facts.manifests.join(", ")));
         }
         line
+    }
+
+    fn render_profile_methodology_block(
+        &self,
+        facts: &WorkspacePromptFacts,
+        compact: bool,
+    ) -> Option<String> {
+        let prof = self.active_profile.as_ref()?;
+        let joy_path = facts
+            .joy_methodology_path
+            .as_deref()
+            .unwrap_or(prof.methodology_path.as_str());
+        if compact {
+            let mut out = format!(
+                "# Profile: {} (`{}` · CI={})",
+                prof.id,
+                prof.methodology,
+                if prof.ci_gate.enabled { "strict" } else { "off" }
+            );
+            if facts.joyzoning_detected {
+                out.push_str("\n- Zones: `[LAYER: <ZONE>]`; DOMAIN=0% I/O & <=3 structs; CORE->DOMAIN(`I<Name>`); UI never imports INFRA; <800L.");
+            }
+            return Some(out);
+        }
+        let mut lines = vec![format!(
+            "# Joyzoning Architecture & Profile: {} (`{}`)",
+            prof.id, joy_path
+        )];
+        for dir in &prof.style_directives {
+            lines.push(format!("- {dir}"));
+        }
+        if prof.ci_gate.enabled {
+            lines.push(format!(
+                "- CI Gate (Dev Tasks): `--phase {} --theme {}` (fail_closed={}).",
+                prof.ci_gate.phase,
+                prof.ci_gate.theme,
+                prof.ci_gate.fail_closed
+            ));
+        }
+        if facts.joyzoning_detected {
+            lines.push("- Zones: PLUMBING->none; DOMAIN->PLUMBING (0% I/O, <=3 structs); INFRA->DOMAIN|PLUMBING; CORE->DOMAIN(`I<Name>`)|INFRA|PLUMBING; UI->CORE|DOMAIN.".to_string());
+        }
+        Some(lines.join("\n"))
     }
 
     fn render_joyzoning_block(facts: &WorkspacePromptFacts, compact: bool) -> Option<String> {

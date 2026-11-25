@@ -4,6 +4,7 @@ use crate::domain::compaction::CompactionPolicy;
 use crate::domain::interfaces::ILlmProvider;
 use crate::domain::prefix_and_manifest::PrefixFingerprint;
 use crate::domain::pricing_and_taxonomy::{ProviderTokenUsage, CREDENTIAL_REJECTED_UNSENT_CODE};
+use crate::domain::profiles::{AgentProfile, CiGateReceipt};
 use crate::domain::types::messages::{Role, SessionMessage};
 use crate::domain::types::progress::{
     EngineProgressMetadata, EngineProgressPhase, EngineProgressStatus,
@@ -15,6 +16,7 @@ use crate::domain::types::runtime::{
 use crate::domain::types::tick_result::{EngineTickResult, ProviderError, ProviderRequest};
 use crate::domain::types::tool_schedule::ScheduledToolCall;
 use crate::plumbing::hash_and_math::now_ms;
+use crate::plumbing::seatbelt_profile::{inspect_command_security, CommandSecurityVerdict};
 use crate::plumbing::secret_redactor::DeterministicSecretRedactor;
 use crate::plumbing::text_tokens::{canonical_tool_name, estimate_text_tokens};
 use serde_json::{json, Value};
@@ -48,6 +50,10 @@ impl AgentEngine {
         mut last_prefix_status: String,
         mut completed_with_assistant_reply: bool,
     ) -> EngineTickResult {
+        let mut dev_mutations_performed = false;
+        let mut ci_gate_checked_after_mutation = false;
+        let mut ci_gate_failed_blocking = false;
+        let mut last_ci_receipt: Option<CiGateReceipt> = None;
         for round in 0..max_rounds {
             if input
                 .cancel_token
@@ -89,6 +95,7 @@ impl AgentEngine {
                     last_prefix_status,
                     snap_before,
                     &all_tool_results,
+                    None,
                 );
                 return EngineTickResult {
                     frame_index,
@@ -140,6 +147,7 @@ impl AgentEngine {
                     last_prefix_status,
                     snap_before,
                     &all_tool_results,
+                    None,
                 );
                 return EngineTickResult {
                     frame_index,
@@ -201,8 +209,13 @@ impl AgentEngine {
                     .active_soul
                     .clone(),
             );
-            let spec =
-                crate::domain::prompt_spec::SystemPromptSpec::for_turn(&cfg, authority, soul);
+            let active_profile = self.active_profile();
+            let spec = crate::domain::prompt_spec::SystemPromptSpec::for_turn_with_profile(
+                &cfg,
+                authority,
+                soul,
+                Some(active_profile),
+            );
             let pinned_sys = self
                 .pinned_system_prompt
                 .lock()
@@ -304,6 +317,7 @@ impl AgentEngine {
                         last_prefix_status,
                         snap_before,
                         &all_tool_results,
+                        None,
                     );
                     return EngineTickResult {
                         frame_index,
@@ -368,6 +382,7 @@ impl AgentEngine {
                         last_prefix_status,
                         snap_before,
                         &all_tool_results,
+                        None,
                     );
                     return EngineTickResult {
                         frame_index,
@@ -396,7 +411,86 @@ impl AgentEngine {
             Self::accumulate_usage(&mut accumulated_usage, &req_for_usage, &resp);
 
             if resp.tool_calls.is_empty() {
-                final_response = resp.content.unwrap_or_default();
+                let candidate_reply = resp.content.unwrap_or_default();
+                let active_profile = self.active_profile();
+                let is_scripted_without_custom_gate =
+                    !self.has_custom_ci_gate && self.provider_arc().provider_name() == "scripted";
+                if active_profile.ci_gate.enabled
+                    && active_profile.ci_gate.trigger_on_dev_tasks
+                    && dev_mutations_performed
+                    && !ci_gate_checked_after_mutation
+                    && !is_scripted_without_custom_gate
+                {
+                    let gate_id = format!("ci-gate-r{round}");
+                    self.emit_progress_internal(
+                        &input.on_progress,
+                        &gate_id,
+                        EngineProgressPhase::Verifying,
+                        EngineProgressStatus::Started,
+                        format!(
+                            "Running HEAV3NS-JOY CI gate (profile={}, theme={})",
+                            active_profile.id, active_profile.ci_gate.theme
+                        ),
+                        None,
+                        started_ms,
+                        None,
+                    );
+                    let gate_receipt = self
+                        .ci_gate_runner
+                        .run_ci_gate(&self.workspace_root, &active_profile.ci_gate);
+                    let gate_passed = gate_receipt.passed;
+                    let gate_status = if gate_passed {
+                        EngineProgressStatus::Completed
+                    } else {
+                        EngineProgressStatus::Failed
+                    };
+                    self.emit_progress_internal(
+                        &input.on_progress,
+                        &gate_id,
+                        EngineProgressPhase::Verifying,
+                        gate_status,
+                        format!(
+                            "HEAV3NS-JOY CI gate {}: {} blocking, {} advisory ({}ms)",
+                            if gate_passed { "PASSED" } else { "FAILED" },
+                            gate_receipt.blocking_count,
+                            gate_receipt.advisory_count,
+                            gate_receipt.duration_ms
+                        ),
+                        Some(gate_receipt.summary.clone()),
+                        started_ms,
+                        None,
+                    );
+                    ci_gate_checked_after_mutation = true;
+                    last_ci_receipt = Some(gate_receipt.clone());
+                    ci_gate_failed_blocking = !gate_passed && active_profile.ci_gate.fail_closed;
+                    if ci_gate_failed_blocking && round + 1 < max_rounds {
+                        let mut sess = self.session.lock().unwrap_or_else(|e| e.into_inner());
+                        sess.add_message(SessionMessage::new(Role::Assistant, candidate_reply));
+                        sess.add_message(SessionMessage::new(
+                            Role::User,
+                            format!(
+                                "[HEAV3NS-JOY CI GATE FAILED — exit={}, blocking={}]\n{}\n\nFix all blocking Joyzoning/Spider violations above before concluding.",
+                                gate_receipt.exit_code,
+                                gate_receipt.blocking_count,
+                                gate_receipt.summary
+                            ),
+                        ));
+                        continue;
+                    }
+                    if ci_gate_failed_blocking {
+                        final_response = format!(
+                            "{candidate_reply}\n\n[HEAV3NS-JOY CI GATE FAILED — fail_closed=true, blocking={}]\n{}",
+                            gate_receipt.blocking_count,
+                            gate_receipt.summary
+                        );
+                        completed_with_assistant_reply = true;
+                        let mut sess = self.session.lock().unwrap_or_else(|e| e.into_inner());
+                        sess.add_message(SessionMessage::new(Role::Assistant, final_response.clone()));
+                        break;
+                    }
+                }
+
+                final_response = candidate_reply;
                 completed_with_assistant_reply = true;
                 let mut sess = self.session.lock().unwrap_or_else(|e| e.into_inner());
                 sess.add_message(SessionMessage::new(Role::Assistant, final_response.clone()));
@@ -546,6 +640,25 @@ impl AgentEngine {
                         rec.name.clone(),
                         wire_payload.to_string(),
                     ));
+                    let canon_name = canonical_tool_name(&rec.name);
+                    let cmd_mutated = canon_name == "run_command"
+                        && rec
+                            .args
+                            .as_ref()
+                            .and_then(|a| a.get("command").or_else(|| a.get("CommandLine")))
+                            .and_then(Value::as_str)
+                            .is_some_and(|cmd| {
+                                matches!(
+                                    inspect_command_security(cmd),
+                                    CommandSecurityVerdict::WorkspaceMutating { .. }
+                                        | CommandSecurityVerdict::RequireApproval { .. }
+                                )
+                            });
+                    if rec.success && (AgentProfile::is_dev_mutation_tool(canon_name) || cmd_mutated) {
+                        dev_mutations_performed = true;
+                        ci_gate_checked_after_mutation = false;
+                        ci_gate_failed_blocking = false;
+                    }
                     all_tool_results.push(rec);
                 }
             }
@@ -621,6 +734,13 @@ impl AgentEngine {
                 EngineProgressStatus::Cancelled,
                 "Turn cancelled by user.",
             )
+        } else if ci_gate_failed_blocking {
+            (
+                EngineTickOutcome::Failed,
+                EngineProgressPhase::Failed,
+                EngineProgressStatus::Failed,
+                "HEAV3NS-JOY CI gate failed (fail_closed=true)",
+            )
         } else {
             (
                 EngineTickOutcome::Completed,
@@ -658,6 +778,7 @@ impl AgentEngine {
             last_prefix_status,
             snap_before,
             &all_tool_results,
+            last_ci_receipt,
         );
 
         EngineTickResult {
