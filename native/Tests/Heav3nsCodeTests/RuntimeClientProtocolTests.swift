@@ -377,7 +377,7 @@ final class RuntimeClientProtocolTests: RuntimeClientTestCase {
         client.onConnection = { value in
             connection?(value)
             guard client.isReady, original == nil else { return }
-            original = workspace.podSnapshot.approval
+            original = workspace.currentApproval
             workspace.showApprovalReview()
             func views(_ parent: NSView) -> [NSView] { [parent] + parent.subviews.flatMap(views) }
             allow = workspace.window?.attachedSheet?.contentView.map(views)?.compactMap { $0 as? NSButton }.first { $0.title == "Allow Once" }
@@ -385,13 +385,13 @@ final class RuntimeClientProtocolTests: RuntimeClientTestCase {
         }
         client.onEvent = { value in
             event?(value)
-            guard value["type"] as? String == "approval.requested", let original, let replacement = workspace.podSnapshot.approval else { return }
+            guard value["type"] as? String == "approval.requested", let original, let replacement = workspace.currentApproval else { return }
             XCTAssertEqual(original.identity, replacement.identity); XCTAssertNotEqual(original, replacement)
             XCTAssertFalse(allow?.isEnabled == true)
             XCTAssertFalse(workspace.resolveApproval(original, decision: "allow"))
             XCTAssertTrue(workspace.resolveApproval(replacement, decision: "deny"))
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                XCTAssertTrue(workspace.podSnapshot.decisionPending); XCTAssertNil(workspace.podSnapshot.approvalError)
+                XCTAssertNotNil(workspace.decidingApproval); XCTAssertNil(workspace.approvalFailure)
                 XCTAssertFalse(workspace.resolveApproval(replacement, decision: "allow"))
                 client.request("history.read", params: ["run": "review"]) { result in
                     if case .success(let data) = result { XCTAssertEqual((data["run"] as? [String: Any])?["text"] as? String, "2") }
@@ -417,14 +417,14 @@ final class RuntimeClientProtocolTests: RuntimeClientTestCase {
         client.onConnection = { value in
             connection?(value)
             if client.isReady, request == nil {
-                request = workspace.podSnapshot.approval
+                request = workspace.currentApproval
                 XCTAssertTrue(workspace.resolveApproval(request!, decision: "allow"))
             } else if !client.isReady, let request, !checking {
                 checking = true
                 DispatchQueue.main.async {
-                    XCTAssertTrue(workspace.podSnapshot.decisionPending)
-                    XCTAssertTrue(workspace.podSnapshot.approvalError?.contains("outcome unknown") == true)
-                    XCTAssertFalse(workspace.podSnapshot.canDecide)
+                    XCTAssertNotNil(workspace.decidingApproval)
+                    XCTAssertTrue(workspace.approvalFailure?.contains("outcome unknown") == true)
+                    XCTAssertFalse(workspace.canDecideApproval)
                     XCTAssertFalse(workspace.resolveApproval(request, decision: "allow"))
                     checked.fulfill()
                 }
@@ -454,9 +454,9 @@ final class RuntimeClientProtocolTests: RuntimeClientTestCase {
         client.onConnection = { value in
             connection?(value)
             guard client.isReady, !requested else { return }; requested = true
-            workspace.stop(); XCTAssertFalse(workspace.podSnapshot.canStop)
+            workspace.stop(); XCTAssertFalse(workspace.canStop)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                XCTAssertTrue(workspace.podSnapshot.canStop)
+                XCTAssertTrue(workspace.canStop)
                 XCTAssertEqual(workspace.probeLayout["forceStopAvailable"] as? Bool, false)
                 workspace.stop()
             }

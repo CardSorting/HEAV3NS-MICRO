@@ -80,40 +80,6 @@ extension WorkspaceWindow {
         }
     }
 
-    func configurePods(_ show: @escaping () -> Void) { conversations.onPods = { [weak self] in guard let self, self.saveDraft() else { return }; show() } }
-
-    var podSnapshot: PodSnapshot {
-        let run = runs.first { $0["id"] as? String == active } ?? runs.last
-        let queued = runs.filter { $0["state"] as? String == "queued" }.count
-        let review = currentApproval != nil
-        let runState = run?["state"] as? String ?? ""
-        let activities = run?["activities"] as? [[String: Any]] ?? []
-        let disconnected = connection == "Preparing" || connection == "Connecting to LUMI…" ? "Connecting" : "Disconnected"
-        let terminalLabel = ["failed": "Failed", "interrupted": "Interrupted", "completed": "Completed", "cancelled": "Stopped", "timed_out": "Timed out"][runState] ?? "Idle"
-        let label = !client.isReady ? disconnected : switchingConversation ? "Opening thread" : cancelRequested ? "Stopping" : uncertainSubmission != nil ? "Check connection" : decidingApproval != nil ? "Saving decision" : review ? "Needs review" : pendingRequest != nil ? "Submitting" : hasWork ? "Working" : terminalLabel
-        let parsedActivities = run.map(WalkthroughProjection.activities) ?? []
-        let activeActivity = parsedActivities.filter { $0.isActive && $0.scope != "turn" }.max { $0.sequence < $1.sequence } ?? parsedActivities.max { $0.sequence < $1.sequence }
-        let podActivity = !client.isReady ? "Open thread to reconnect" : pendingRequest != nil ? "Submitting instruction…" : activeActivity.map { $0.scope == "turn" && !$0.detail.isEmpty ? $0.detail : $0.displayTitle } ?? (run?["activities"] as? [[String: Any]])?.last?["message"] as? String ?? (hasWork ? "Agent is working" : "Ready for another instruction")
-        return PodSnapshot(path: folder.path, thread: chatTitle.stringValue, status: label,
-            activity: podActivity,
-            instruction: String((run?["text"] as? String ?? "").prefix(220)), response: String((run?["response"] as? String ?? "").prefix(300)),
-            queued: queued, running: client.isReady && hasWork && !review, needsReview: review,
-            canStop: client.isReady && hasWork && !cancelRequested && !closing,
-            stream: PodStreamProjection.text(run), streamIdentity: "\(currentConversation ?? ""):\(run?["id"] as? String ?? "")",
-            approval: currentApproval, canDecide: client.isReady && decidingApproval == nil && !cancelRequested && !closing && !switchingConversation,
-            decisionPending: decidingApproval != nil, approvalError: approvalFailure,
-            connected: client.isReady, startedAt: run?["startedAt"] as? Double ?? (hasWork ? run?["createdAt"] as? Double : nil),
-            finishedAt: terminalStates.contains(runState) ? run?["updatedAt"] as? Double : nil,
-            lastActivityAt: activities.compactMap { $0["timestamp"] as? Double }.max(),
-            approvalRequestedAt: review ? (run?["approval"] as? [String: Any])?["createdAt"] as? Double : nil,
-            activityCount: max(run?["activityCount"] as? Int ?? 0, activities.count),
-            canReconnect: !client.isReady && client.process?.isRunning != true && !closing,
-            canOpenCheckpoints: client.isReady && client.capabilities.contains("checkpoints-v1") && !switchingConversation && !closing && window?.attachedSheet == nil,
-            contextID: podContextID, stopNeedsAttention: cancelRequested && forceAvailable)
-    }
-
-    func matchesPodTarget(_ target: PodTarget) -> Bool { target.path == folder.path && target.context == podContextID && !closing }
-
     func attach() { client.start(folder: folder); window?.makeFirstResponder(composer) }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -506,7 +472,12 @@ extension WorkspaceWindow {
             if let count = payload["activityCount"] as? Int { runs[index]["activityCount"] = max(count, runs[index]["activityCount"] as? Int ?? 0) }
             needsRebuild = true
             if window?.isMiniaturized == true || window?.occlusionState.contains(.visible) != true { return }
-            if layoutTimer == nil { layoutTimer = Timer.scheduledTimer(withTimeInterval: window?.isKeyWindow == true ? 0.1 : 1, repeats: false) { [weak self] _ in self?.layoutTimer = nil; self?.rebuildRows() } }
+            if layoutTimer == nil {
+                layoutTimer = Timer.scheduledTimer(withTimeInterval: window?.isKeyWindow == true ? 0.1 : 1, repeats: false) { [weak self] _ in
+                    guard let self, !self.closing else { return }
+                    self.layoutTimer = nil; self.rebuildRows()
+                }
+            }
         } else if RuntimeClient.runEvents.contains(event["type"] as? String ?? ""), payload["id"] is String {
             if let conversation = payload["conversation"] as? String, conversation != currentConversation { return }
             mergeRun(payload); rebuildRows(); finishStopAndSend()

@@ -14,8 +14,6 @@ final class ConversationSidebar: NSVisualEffectView, NSTableViewDataSource, NSTa
     private var deleteButtons = [NSButton]()
     var onSelect: ((String) -> Void)?
     var onProjects: (() -> Void)?
-    var onPods: (() -> Void)?
-    private lazy var pods = JourneyButton("Pods", symbol: "square.grid.2x2") { [weak self] in self?.onPods?() }
     var onAccount: (() -> Void)?
     var onMore: (() -> Void)?
     var onRecent: (() -> Void)?
@@ -50,11 +48,11 @@ final class ConversationSidebar: NSVisualEffectView, NSTableViewDataSource, NSTa
         table.setAccessibilityLabel("Conversations")
         let scroll = NSScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
         scroll.setContentHuggingPriority(.init(1), for: .vertical)
-        pods.toolTip = "See every loaded project and agent workflow together"
         let projects = JourneyButton("Project Library…", symbol: "folder") { [weak self] in self?.onProjects?() }
+        projects.toolTip = "Browse or open saved projects (⌘0)"
         let account = JourneyButton("Account", symbol: "person.crop.circle") { [weak self] in self?.onAccount?() }
         for button in [create, projects, account] { button.alignment = .left; button.bezelStyle = .inline; button.heightAnchor.constraint(equalToConstant: 32).isActive = true }
-        let root = JourneyStyle.stack([heading, pods, JourneyStyle.rule(), create, JourneyStyle.label("Conversations", size: 11, weight: .semibold, secondary: true), search, scroll, message, more, recent, JourneyStyle.rule(), projects, account], spacing: 12)
+        let root = JourneyStyle.stack([heading, JourneyStyle.rule(), create, JourneyStyle.label("Conversations", size: 11, weight: .semibold, secondary: true), search, scroll, message, more, recent, JourneyStyle.rule(), projects, account], spacing: 12)
         addSubview(root); JourneyStyle.pin(root, to: self, inset: 14)
         for view in root.arrangedSubviews { view.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true }
         more.isHidden = true; recent.isHidden = true; create.isEnabled = false
@@ -127,5 +125,9 @@ final class ConversationSidebar: NSVisualEffectView, NSTableViewDataSource, NSTa
         cell.textField = name; cell.imageView = icon; cell.toolTip = item.title
         return cell
     }
-    func dispose() { onSelect = nil; onDelete = nil; onNew = nil; onMore = nil }
+    func dispose() {
+        onSelect = nil; onDelete = nil; onNew = nil; onMore = nil
+        onRecent = nil; onProjects = nil; onAccount = nil
+        deleteButtons.removeAll()
+    }
 }

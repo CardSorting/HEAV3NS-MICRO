@@ -264,6 +264,55 @@ pub fn extract_jwt_expiry_ms(token: &str) -> Option<u64> {
     (exp > 0).then(|| exp.saturating_mul(1_000))
 }
 
+/// Escapes HTML special characters to prevent markup injection in local callback pages.
+pub fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&#39;")
+}
+
+/// Renders a self-contained, light/dark adaptive OAuth loopback callback page.
+pub fn render_oauth_callback_html(status: u16, title: &str, message: &str) -> String {
+    let ok = status == 200;
+    let safe_title = escape_html(title);
+    let safe_message = escape_html(message);
+    let badge_label = if ok { "Connected" } else if status == 404 { "Waiting" } else { "Action Needed" };
+    let tone_class = if ok { "is-ok" } else { "is-warn" };
+    let icon_svg = if ok {
+        "<svg width=\"20\" height=\"20\" viewBox=\"0 0 20 20\" fill=\"none\" aria-hidden=\"true\"><circle cx=\"10\" cy=\"10\" r=\"9\" stroke=\"currentColor\" stroke-width=\"1.75\"/><path d=\"M6.2 10.3L8.8 12.8L13.9 7.4\" stroke=\"currentColor\" stroke-width=\"1.85\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>"
+    } else {
+        "<svg width=\"20\" height=\"20\" viewBox=\"0 0 20 20\" fill=\"none\" aria-hidden=\"true\"><circle cx=\"10\" cy=\"10\" r=\"9\" stroke=\"currentColor\" stroke-width=\"1.75\"/><path d=\"M10 6.2V10.6\" stroke=\"currentColor\" stroke-width=\"1.85\" stroke-linecap=\"round\"/><circle cx=\"10\" cy=\"13.6\" r=\"1\" fill=\"currentColor\"/></svg>"
+    };
+    let footer = if ok {
+        "You can safely close this browser tab and return to HEAV3NS-CODE."
+    } else {
+        "Return to HEAV3NS-CODE to retry or cancel sign-in."
+    };
+    format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
+         <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
+         <meta name=\"color-scheme\" content=\"light dark\">\
+         <title>{safe_title} — HEAV3NS-CODE</title>\
+         <style>\
+         :root{{--bg:#f5f5f7;--surface:#ffffff;--border:rgba(15,23,42,.1);--text:#111827;--muted:#4b5563;--ok:#059669;--ok-bg:rgba(5,150,105,.11);--warn:#d97706;--warn-bg:rgba(217,119,6,.12);--shadow:0 18px 44px rgba(15,23,42,.08)}}\
+         @media(prefers-color-scheme:dark){{:root{{--bg:#0b0d12;--surface:#141821;--border:rgba(255,255,255,.1);--text:#f3f4f6;--muted:#9ca3af;--ok:#34d399;--ok-bg:rgba(52,211,153,.14);--warn:#fbbf24;--warn-bg:rgba(251,191,36,.14);--shadow:0 22px 54px rgba(0,0,0,.45)}}}}\
+         *{{box-sizing:border-box}}\
+         body{{margin:0;min-height:100dvh;display:grid;place-items:center;padding:24px;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"Inter\",system-ui,sans-serif;-webkit-font-smoothing:antialiased}}\
+         .card{{width:100%;max-width:440px;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px;box-shadow:var(--shadow)}}\
+         .top{{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px}}\
+         .brand{{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}}\
+         .badge{{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;font-size:12px;font-weight:600}}\
+         .badge.is-ok{{color:var(--ok);background:var(--ok-bg)}}\
+         .badge.is-warn{{color:var(--warn);background:var(--warn-bg)}}\
+         h1{{margin:0 0 10px;font-size:22px;line-height:1.25;letter-spacing:-.02em;font-weight:650}}\
+         p{{margin:0;font-size:15px;line-height:1.55;color:var(--muted)}}\
+         .foot{{margin-top:20px;padding-top:16px;border-top:1px solid var(--border);font-size:13px;color:var(--muted)}}\
+         </style></head>\
+         <body><main class=\"card\" role=\"status\" aria-live=\"polite\">\
+         <div class=\"top\"><span class=\"brand\">HEAV3NS-CODE</span><span class=\"badge {tone_class}\">{icon_svg}{badge_label}</span></div>\
+         <h1>{safe_title}</h1><p>{safe_message}</p>\
+         <p class=\"foot\">{footer}</p></main></body></html>"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,5 +376,18 @@ mod tests {
         );
         assert_eq!(extract_openai_plan_type(&jwt).as_deref(), Some("pro"));
         assert_eq!(extract_jwt_expiry_ms(&jwt), Some(1_900_000_000_000));
+    }
+
+    #[test]
+    fn test_render_oauth_callback_html_escapes_and_styles_status() {
+        let ok_html = render_oauth_callback_html(200, "You're connected", "Ready <script>alert(1)</script>");
+        assert!(ok_html.contains("prefers-color-scheme:dark"));
+        assert!(ok_html.contains("badge is-ok"));
+        assert!(ok_html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(!ok_html.contains("<script>"));
+
+        let err_html = render_oauth_callback_html(400, "Invalid state", "Bad \"state\" & retry");
+        assert!(err_html.contains("badge is-warn"));
+        assert!(err_html.contains("Bad &quot;state&quot; &amp; retry"));
     }
 }

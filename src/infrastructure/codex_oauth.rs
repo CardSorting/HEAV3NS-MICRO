@@ -3,11 +3,7 @@ use crate::domain::interfaces::{BoxFuture, ICodexAccountStore};
 use crate::domain::types::account_types::{ChatGptAccountCredentials, ChatGptAccountStoreData};
 use crate::domain::types::runtime::CancellationToken;
 use crate::plumbing::hash_and_math::{lock_unpoison, now_ms};
-use crate::plumbing::oauth_pkce::{
-    build_openai_authorize_url, encode_base64url, encode_hex_lower, extract_jwt_expiry_ms,
-    extract_openai_account_id, extract_openai_email, extract_openai_plan_type,
-    generate_pkce_challenge, parse_query_params, url_encode_component,
-};
+use crate::plumbing::oauth_pkce::{build_openai_authorize_url, encode_base64url, encode_hex_lower, extract_jwt_expiry_ms, extract_openai_account_id, extract_openai_email, extract_openai_plan_type, generate_pkce_challenge, parse_query_params, render_oauth_callback_html, url_encode_component};
 use serde_json::{json, Value};
 use std::fs;
 use std::io::Read;
@@ -235,13 +231,7 @@ impl CodexAccountStore {
             &state,
         );
 
-        let listener = TcpListener::bind(OPENAI_OAUTH_CALLBACK_ADDR)
-            .await
-            .map_err(|e| {
-                format!(
-                    "Could not start local sign-in listener on {OPENAI_OAUTH_CALLBACK_ADDR}: {e}"
-                )
-            })?;
+        let listener = bind_oauth_callback_listener(&cancel).await?;
         on_browser_url(auth_url);
 
         let code = wait_for_oauth_callback(listener, &state, &cancel).await?;
@@ -521,6 +511,22 @@ async fn read_oauth_body_bounded(
     Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
+/// Binds the loopback OAuth callback listener with brief `AddrInUse` retries so rapid cancel-and-retry sign-in succeeds.
+async fn bind_oauth_callback_listener(cancel: &CancellationToken) -> Result<TcpListener, String> {
+    let mut last_err = None;
+    for attempt in 0..6 {
+        if cancel.is_cancelled() { return Err("ChatGPT sign-in was cancelled.".to_string()); }
+        match TcpListener::bind(OPENAI_OAUTH_CALLBACK_ADDR).await {
+            Ok(listener) => return Ok(listener),
+            Err(err) if err.kind() == std::io::ErrorKind::AddrInUse && attempt < 5 => {
+                last_err = Some(err); tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(err) => return Err(format!("Could not start local sign-in listener on {OPENAI_OAUTH_CALLBACK_ADDR}: {err}")),
+        }
+    }
+    Err(format!("Could not start local sign-in listener on {OPENAI_OAUTH_CALLBACK_ADDR}: {}", last_err.map(|e| e.to_string()).unwrap_or_else(|| "address already in use".to_string())))
+}
+
 async fn wait_for_oauth_callback(
     listener: TcpListener,
     expected_state: &str,
@@ -598,28 +604,14 @@ async fn wait_for_oauth_callback(
     }
 }
 
-fn escape_html(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
-
 async fn write_http_html(
     stream: &mut tokio::net::TcpStream,
     status: u16,
     title: &str,
     message: &str,
 ) -> std::io::Result<()> {
-    let reason = if status == 200 { "OK" } else { "Bad Request" };
-    let safe_title = escape_html(title);
-    let safe_message = escape_html(message);
-    let body = format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>{safe_title}</title></head>\
-         <body style=\"font-family:-apple-system,system-ui,sans-serif;padding:48px;max-width:520px;margin:auto\">\
-         <h2>{safe_title}</h2><p>{safe_message}</p></body></html>"
-    );
+    let reason = match status { 200 => "OK", 404 => "Not Found", _ => "Bad Request" };
+    let body = render_oauth_callback_html(status, title, message);
     let resp = format!(
         "HTTP/1.1 {status} {reason}\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
@@ -700,24 +692,12 @@ fn parse_token_response(
     parsed: &Value,
     prev: Option<&ChatGptAccountCredentials>,
 ) -> Result<ChatGptAccountCredentials, String> {
-    let access_token = parsed
-        .get("access_token")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| "OpenAI token response did not contain access_token.".to_string())?
-        .to_string();
-    let refresh_token = parsed
-        .get("refresh_token")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .map(String::from)
-        .or_else(|| prev.and_then(|p| p.refresh_token.clone()));
-    let id_token = parsed
-        .get("id_token")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .map(String::from)
-        .or_else(|| prev.and_then(|p| p.id_token.clone()));
+    let access_token = parsed.get("access_token").and_then(Value::as_str).filter(|s| !s.is_empty())
+        .ok_or_else(|| "OpenAI token response did not contain access_token.".to_string())?.to_string();
+    let refresh_token = parsed.get("refresh_token").and_then(Value::as_str).filter(|s| !s.is_empty())
+        .map(String::from).or_else(|| prev.and_then(|p| p.refresh_token.clone()));
+    let id_token = parsed.get("id_token").and_then(Value::as_str).filter(|s| !s.is_empty())
+        .map(String::from).or_else(|| prev.and_then(|p| p.id_token.clone()));
 
     let claim_source = id_token.as_deref().unwrap_or(&access_token);
     let account_id = extract_openai_account_id(claim_source)

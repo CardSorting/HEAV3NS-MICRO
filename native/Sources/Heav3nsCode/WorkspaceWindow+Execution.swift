@@ -247,14 +247,17 @@ extension WorkspaceWindow {
     @objc func reconnect() {
         if client.isReady, uncertainSubmission != nil { reconcileSubmission(); return }
         guard client.process?.isRunning != true, !closing else { return }
-        client = RuntimeClient(); podContextID = UUID(); decidingApproval = nil; approvalFailure = nil
+        client.onNotice = nil; client.onConnection = nil; client.onEvent = nil; client.onExit = nil
+        client = RuntimeClient(); sessionContextID = UUID()
+        decidingApproval = nil; approvalFailure = nil; approvalFailureAttempt = nil; approvalReviewContext = nil
+        approvalReview?.dispose(); approvalReview = nil
         stopped = false; sequence = 0; cancelRequested = false; stopAcknowledged = true; cancellationToken = nil; forceAvailable = false; recovering = true
         configureClient(); reconnectButton.isHidden = true; client.start(folder: folder)
     }
 
     func updateApproval() {
-        if let decidingApproval, decidingApproval.request != currentApproval || decidingApproval.context != podContextID { self.decidingApproval = nil; approvalFailure = nil }
-        if let failure = approvalFailureAttempt, failure.request != currentApproval || failure.context != podContextID { approvalFailure = nil; approvalFailureAttempt = nil }
+        if let decidingApproval, decidingApproval.request != currentApproval || decidingApproval.context != sessionContextID { self.decidingApproval = nil; approvalFailure = nil }
+        if let failure = approvalFailureAttempt, failure.request != currentApproval || failure.context != sessionContextID { approvalFailure = nil; approvalFailureAttempt = nil }
         approval.isHidden = currentApproval == nil
         reviewApprovalButton.isEnabled = canReviewApproval
         denyButton.isEnabled = canDecideApproval
@@ -263,7 +266,7 @@ extension WorkspaceWindow {
         let summary = currentApproval.map { "\($0.tool)\n\($0.scope)" } ?? ""
         if approvalText.string != summary { approvalText.string = summary }
         if let review = approvalReview {
-            review.update(isCurrent: currentApproval == review.request && approvalReviewContext == podContextID, connected: client.isReady, submitting: decidingApproval?.request == review.request, stopping: cancelRequested || closing || switchingConversation, error: approvalFailure)
+            review.update(isCurrent: currentApproval == review.request && approvalReviewContext == sessionContextID, connected: client.isReady, submitting: decidingApproval?.request == review.request, stopping: cancelRequested || closing || switchingConversation, error: approvalFailure)
         }
     }
 
@@ -481,9 +484,9 @@ extension WorkspaceWindow {
 
     @objc func showApprovalReview() {
         guard canReviewApproval, let request = currentApproval, let window else { return }
-        let context = podContextID; approvalReviewContext = context
+        let context = sessionContextID; approvalReviewContext = context
         approvalReview = ApprovalReview(request: request, decide: { [weak self] request, decision in
-            guard let self, self.podContextID == context else { return }
+            guard let self, self.sessionContextID == context else { return }
             self.resolveApproval(request, decision: decision)
         }, didClose: { [weak self] in self?.approvalReview = nil; self?.updateApproval() })
         approvalReview?.present(for: window); updateApproval()
@@ -492,14 +495,15 @@ extension WorkspaceWindow {
     @objc func allowOnce() { if let request = currentApproval { resolveApproval(request, decision: "allow") } }
     @objc func deny() { if let request = currentApproval { resolveApproval(request, decision: "deny") } }
 
+    var canStop: Bool { client.isReady && hasWork && !cancelRequested && !closing }
     var canDecideApproval: Bool { currentApproval != nil && client.isReady && decidingApproval == nil && !cancelRequested && !closing && !switchingConversation }
 
     @discardableResult func resolveApproval(_ approval: ApprovalRequest, decision: String) -> Bool {
         guard ["allow", "allow_once", "allow_session", "deny"].contains(decision), currentApproval == approval, client.isReady, decidingApproval == nil, !cancelRequested, !closing, !switchingConversation else { return false }
-        let source = client, attempt = ApprovalDecision(request: approval, context: podContextID)
+        let source = client, attempt = ApprovalDecision(request: approval, context: sessionContextID)
         decidingApproval = attempt; approvalFailure = nil; approvalFailureAttempt = nil; updateStatus()
         source.request("approval.resolve", params: ["operation": approval.operation, "run": approval.run, "decision": decision]) { [weak self] result in
-            guard let self, self.client === source, self.podContextID == attempt.context, self.decidingApproval == attempt else { return }
+            guard let self, self.client === source, self.sessionContextID == attempt.context, self.decidingApproval == attempt else { return }
             if case .failure(let error) = result {
                 self.approvalFailureAttempt = attempt
                 if source.isReady { self.decidingApproval = nil; self.approvalFailure = error.localizedDescription }

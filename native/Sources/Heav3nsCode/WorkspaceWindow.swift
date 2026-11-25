@@ -104,7 +104,7 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
     var decidingApproval: ApprovalDecision?
     var approvalFailureAttempt: ApprovalDecision?
     var approvalReviewContext: UUID?
-    var podContextID = UUID()
+    var sessionContextID = UUID()
     var approvalFailure: String?
     let surfaces = NSSegmentedControl(labels: ["Conversation", "Task context"], trackingMode: .selectOne, target: nil, action: nil)
     var rows = [TranscriptRow]()
@@ -267,6 +267,7 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         elapsedTimer?.invalidate(); elapsedTimer = nil
         layoutTimer?.invalidate(); layoutTimer = nil
         if let viewportObserver { NotificationCenter.default.removeObserver(viewportObserver); self.viewportObserver = nil }
+        client.onNotice = nil; client.onConnection = nil; client.onEvent = nil; client.onExit = nil
         binaryDocumentLoader?.cancel(); binaryDocumentLoader = nil
         approvalReview?.dispose(); approvalReview = nil
         queueEditor?.dispose(); queueEditor = nil
@@ -274,6 +275,9 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         memoryWindow?.dismiss(); memoryWindow = nil
         palette?.dispose(); palette = nil
         quickOpen?.dispose(); quickOpen = nil
+        conversations.dispose()
+        navigation.dispose()
+        walkthrough.dispose()
         receiptBar.dispose()
         composer.dispose()
         turnScrubber.dispose()
@@ -282,6 +286,7 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         projectRun.dispose()
         modelPicker?.dispose(); modelPicker?.dismiss(restoreFocus: false); modelPicker = nil
         checkpointWindow?.dispose(); checkpointWindow = nil
+        onProjects = nil; onAccount = nil
     }
 
     func button(_ title: String, _ action: Selector, symbol: String? = nil) -> NSButton {
@@ -746,6 +751,7 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         dispose()
         client.closeInput()
         onClosed?()
+        onClosed = nil
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }

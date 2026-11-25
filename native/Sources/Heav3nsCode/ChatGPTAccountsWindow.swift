@@ -15,11 +15,13 @@ final class ChatGPTAccountsWindow: NSWindowController, NSWindowDelegate {
     private var message = ""
     private var loaded = false
     private var waiting = false
+    private var cancelling = false
     private var busy = false
     private var pendingRequests = 0
     private var requestToken: UInt64 = 0
     private var browserURL: URL?
     private var clock: Timer?
+    private var accountsObserver: NSObjectProtocol?
     var now: () -> Date = Date.init
 
     init(client: AccountClient = AccountClient()) {
@@ -43,7 +45,15 @@ final class ChatGPTAccountsWindow: NSWindowController, NSWindowDelegate {
             if !NSWorkspace.shared.open(url) { self.message = "The browser could not open. Use Open Browser to try again." }
             self.render()
         }
+        accountsObserver = NotificationCenter.default.addObserver(forName: Self.didChange, object: nil, queue: .main) { [weak self] note in
+            guard let self, note.object as AnyObject? !== self, self.window?.isVisible == true, !self.waiting else { return }
+            self.refresh()
+        }
         render()
+    }
+    deinit {
+        clock?.invalidate()
+        if let accountsObserver { NotificationCenter.default.removeObserver(accountsObserver) }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) unavailable") }
 
@@ -57,8 +67,11 @@ final class ChatGPTAccountsWindow: NSWindowController, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         clock?.invalidate(); clock = nil
         // Closing the window also ends any browser sign-in still waiting (EOF cancels it) and frees the helper process.
-        waiting = false; browserURL = nil; loaded = false; pendingRequests = 0; busy = false; requestToken &+= 1
+        waiting = false; cancelling = false; browserURL = nil; loaded = false; pendingRequests = 0; busy = false; requestToken &+= 1
         client.stop()
+    }
+    override func cancelOperation(_ sender: Any?) {
+        if !waiting { window?.performClose(sender) }
     }
 
     // MARK: Requests
@@ -81,7 +94,7 @@ final class ChatGPTAccountsWindow: NSWindowController, NSWindowDelegate {
             case .success(let data):
                 if let updated = ChatGPTAccountList(data) {
                     self.list = updated; self.message = success
-                    NotificationCenter.default.post(name: Self.didChange, object: nil)
+                    NotificationCenter.default.post(name: Self.didChange, object: self)
                 } else { self.message = "The account service returned an unexpected response. Try again." }
             case .failure(let error): self.message = error.localizedDescription
             }
@@ -91,10 +104,10 @@ final class ChatGPTAccountsWindow: NSWindowController, NSWindowDelegate {
 
     private func addAccount() {
         guard !waiting else { return }
-        waiting = true; browserURL = nil; message = ""; render()
+        waiting = true; cancelling = false; browserURL = nil; message = ""; render()
         client.request("signIn") { [weak self] result in
             guard let self else { return }
-            self.waiting = false; self.browserURL = nil; self.loaded = true
+            self.waiting = false; self.cancelling = false; self.browserURL = nil; self.loaded = true
             switch result {
             case .success(let data):
                 if let updated = ChatGPTAccountList(data) { self.list = updated }
@@ -102,14 +115,18 @@ final class ChatGPTAccountsWindow: NSWindowController, NSWindowDelegate {
                 let created = data["created"] as? Bool ?? true
                 self.message = added.map { created ? "Added \"\($0)\" and made it active." : "Refreshed \"\($0)\"." } ?? "Signed in."
                 if data["accessChecked"] as? Bool == false { self.message += " Model access could not be confirmed; check the account or try again." }
-                NotificationCenter.default.post(name: Self.didChange, object: nil)
+                NotificationCenter.default.post(name: Self.didChange, object: self)
             case .failure(let error): self.message = error.localizedDescription
             }
             self.render()
         }
     }
 
-    private func cancelSignIn() { client.request("cancel") { _ in }; message = "Cancelling sign-in…"; render() }
+    private func cancelSignIn() {
+        guard !cancelling else { return }
+        cancelling = true; message = "Cancelling sign-in…"; render()
+        client.request("cancel") { _ in }
+    }
 
     // MARK: Actions
 
@@ -148,7 +165,10 @@ final class ChatGPTAccountsWindow: NSWindowController, NSWindowDelegate {
                 views.append(JourneyStyle.label("No account is signed in yet.", size: 14))
             } else {
                 views.append(JourneyStyle.rule())
-                for account in list.accounts { views.append(row(account, now: current)) }
+                for (index, account) in list.accounts.enumerated() {
+                    if index > 0 { views.append(JourneyStyle.rule()) }
+                    views.append(row(account, now: current))
+                }
                 views.append(JourneyStyle.rule())
             }
         } else if !loaded {
@@ -159,13 +179,23 @@ final class ChatGPTAccountsWindow: NSWindowController, NSWindowDelegate {
         if waiting {
             let progress = NSProgressIndicator(); progress.style = .spinning; progress.controlSize = .small; progress.startAnimation(nil)
             var waitingViews: [NSView] = [progress]
-            if let browserURL { waitingViews.append(JourneyButton("Open Browser", symbol: "arrow.up.right.square") { NSWorkspace.shared.open(browserURL) }) }
-            waitingViews.append(JourneyButton("Cancel sign-in") { [weak self] in self?.cancelSignIn() })
+            if let browserURL {
+                waitingViews.append(JourneyButton("Open Browser", symbol: "arrow.up.right.square") { NSWorkspace.shared.open(browserURL) })
+                waitingViews.append(JourneyButton("Copy Link", symbol: "doc.on.doc") { [weak self] in
+                    NSPasteboard.general.clearContents(); NSPasteboard.general.setString(browserURL.absoluteString, forType: .string)
+                    self?.message = "Sign-in link copied. Paste it into any browser or profile to continue."; self?.render()
+                })
+            }
+            let cancel = JourneyButton(cancelling ? "Cancelling…" : "Cancel sign-in") { [weak self] in self?.cancelSignIn() }
+            cancel.isEnabled = !cancelling
+            waitingViews.append(cancel)
             views.append(JourneyStyle.stack(waitingViews, vertical: false, spacing: 10))
         } else {
             let add = JourneyButton(list?.accounts.isEmpty == false ? "Add another account…" : "Sign in with ChatGPT", symbol: "plus") { [weak self] in self?.addAccount() }
             add.bezelColor = .controlAccentColor; add.isEnabled = !busy
-            views.append(add)
+            let refresh = JourneyButton("Refresh", symbol: "arrow.clockwise") { [weak self] in self?.refresh() }
+            refresh.isEnabled = !busy
+            views.append(JourneyStyle.stack([add, refresh, NSView()], vertical: false, spacing: 8))
         }
 
         if let list, !list.accounts.isEmpty {
@@ -177,7 +207,14 @@ final class ChatGPTAccountsWindow: NSWindowController, NSWindowDelegate {
                                                             : "Off: you'll be told when an account is at its limit and can switch yourself.", size: 12, secondary: true))
             views.append(JourneyStyle.label(list.summary(now: current), size: 12, secondary: true))
         }
-        if !message.isEmpty { let notice = JourneyStyle.label(message, size: 13); notice.isSelectable = true; views.append(notice) }
+        if !message.isEmpty {
+            let box = NSBox(); box.boxType = .custom; box.cornerRadius = 10
+            box.fillColor = .controlBackgroundColor; box.borderColor = .separatorColor; box.borderWidth = 1
+            box.contentViewMargins = NSSize(width: 12, height: 10)
+            let notice = JourneyStyle.label(message, size: 13); notice.isSelectable = true
+            box.addSubview(notice); JourneyStyle.pin(notice, to: box, inset: 10)
+            views.append(box)
+        }
         for view in views { root.addArrangedSubview(view); if view is NSBox || view is NSStackView { view.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true } }
         window?.contentView?.needsLayout = true
     }
@@ -215,7 +252,8 @@ final class ChatGPTAccountsWindow: NSWindowController, NSWindowDelegate {
     }
     func dispose() {
         clock?.invalidate(); clock = nil
-        waiting = false; browserURL = nil; loaded = false; pendingRequests = 0; busy = false; requestToken &+= 1
+        if let accountsObserver { NotificationCenter.default.removeObserver(accountsObserver); self.accountsObserver = nil }
+        waiting = false; cancelling = false; browserURL = nil; loaded = false; pendingRequests = 0; busy = false; requestToken &+= 1
         client.stop()
         window?.orderOut(nil)
     }

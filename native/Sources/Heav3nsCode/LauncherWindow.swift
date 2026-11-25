@@ -10,12 +10,15 @@ final class LauncherWindow: NSWindowController, NSTableViewDataSource, NSTableVi
     private let defaults: UserDefaults
     private let account = AccountClient()
     private var connected = false
+    private var accountList: ChatGPTAccountList?
     private var waiting = false
+    private var cancelling = false
     private var browserURL: URL?
     private var accountMessage = ""
     private var accountPage = false
     private var accountStatusLoaded = false
     private var disconnecting = false
+    private var accountsObserver: NSObjectProtocol?
     private var pinnedOnly = false
     private var entries = [WorkspaceProject]()
     private var projectActivity = [String: ProjectActivity]()
@@ -56,6 +59,11 @@ final class LauncherWindow: NSWindowController, NSTableViewDataSource, NSTableVi
             guard let self else { return }; self.browserURL = url
             if !NSWorkspace.shared.open(url) { self.accountMessage = "The browser could not open. Use Open Browser to try again." }
             self.showSignIn()
+        }
+        accountsObserver = NotificationCenter.default.addObserver(forName: ChatGPTAccountsWindow.didChange, object: nil, queue: .main) { [weak self] note in
+            guard let self, note.object as AnyObject? !== self else { return }
+            self.accountStatusLoaded = false
+            if self.accountPage && !self.waiting { self.showSignIn() }
         }
         if defaults.bool(forKey: "journeyWelcomeCompleted") || !library.projects.isEmpty { showProjects() }
         else { showWelcome() }
@@ -104,7 +112,10 @@ final class LauncherWindow: NSWindowController, NSTableViewDataSource, NSTableVi
             accountStatusLoaded = true
             account.request("status") { [weak self] result in
                 guard let self else { return }
-                if case .success(let data) = result { self.connected = data["saved"] as? Bool == true }
+                if case .success(let data) = result {
+                    self.accountList = ChatGPTAccountList(data)
+                    self.connected = data["saved"] as? Bool == true || (self.accountList?.accounts.isEmpty == false)
+                }
                 if case .failure(let error) = result { self.accountMessage = error.localizedDescription; self.accountStatusLoaded = false }
                 if self.accountPage { self.renderSignIn() }
             }
@@ -113,13 +124,22 @@ final class LauncherWindow: NSWindowController, NSTableViewDataSource, NSTableVi
     }
     private func renderSignIn() {
         var views: [NSView] = [JourneyStyle.label(waiting ? "Continue in your browser." : connected ? "Your ChatGPT connection" : "Connect ChatGPT (optional)", size: 30, weight: .semibold)]
-        let detail = waiting ? "Complete the sign-in in your browser, then return here. You can cancel and try again at any time." : connected ? "ChatGPT is connected on this Mac. Add more accounts to switch when one reaches its usage limit; model access is checked when you start work." : "ChatGPT is one way to connect. You can also use your existing LUMI API key, compatible endpoint, or Claude Code setup. Choose your provider inside a workspace."
+        let detail = waiting ? "Complete the sign-in in your browser, then return here. You can cancel and try again at any time." : connected ? (accountList?.summary() ?? "ChatGPT is connected on this Mac.") + " Add more accounts to switch when one reaches its usage limit; model access is checked when you start work." : "ChatGPT is one way to connect. You can also use your existing LUMI API key, compatible endpoint, or Claude Code setup. Choose your provider inside a workspace."
         views.append(JourneyStyle.label(detail, size: 15, secondary: true))
         if !accountMessage.isEmpty { let notice = JourneyStyle.label(accountMessage, size: 13); notice.isSelectable = true; views.append(notice) }
         if waiting {
             let progress = NSProgressIndicator(); progress.style = .spinning; progress.startAnimation(nil); views.append(progress)
-            if let browserURL { views.append(JourneyButton("Open Browser", symbol: "arrow.up.right.square") { NSWorkspace.shared.open(browserURL) }) }
-            views.append(JourneyButton("Cancel sign-in") { [weak self] in self?.cancelSignIn() })
+            if let browserURL {
+                let openBrowser = JourneyButton("Open Browser", symbol: "arrow.up.right.square") { NSWorkspace.shared.open(browserURL) }
+                let copyLink = JourneyButton("Copy Sign-In Link", symbol: "doc.on.doc") { [weak self] in
+                    NSPasteboard.general.clearContents(); NSPasteboard.general.setString(browserURL.absoluteString, forType: .string)
+                    self?.accountMessage = "Sign-in link copied. Paste it into any browser or profile to continue."; self?.renderSignIn()
+                }
+                views.append(JourneyStyle.stack([openBrowser, copyLink, NSView()], vertical: false, spacing: 8))
+            }
+            let cancel = JourneyButton(cancelling ? "Cancelling…" : "Cancel sign-in") { [weak self] in self?.cancelSignIn() }
+            cancel.isEnabled = !cancelling
+            views.append(cancel)
         } else {
             // Adding or switching accounts is safe while workspaces are open: they pick the active account up on their next request.
             let signIn = JourneyButton(connected ? "Add another account…" : "Sign in with ChatGPT", symbol: connected ? "plus" : "person.crop.circle") { [weak self] in self?.signIn() }
@@ -134,24 +154,32 @@ final class LauncherWindow: NSWindowController, NSTableViewDataSource, NSTableVi
                 if !canChangeAccount() { views.append(JourneyStyle.label("Close your workspace windows before signing out of every account.", size: 12, secondary: true)) }
             }
         }
-        views.append(JourneyButton("Continue to projects", symbol: "folder") { [weak self] in self?.finishWelcome() })
+        let cont = JourneyButton("Continue to projects", symbol: "folder") { [weak self] in self?.finishWelcome() }
+        if !waiting { cont.keyEquivalent = "\r" }
+        views.append(cont)
         centered(views)
     }
     private func signIn() {
         guard !waiting, !disconnecting else { return }
-        waiting = true; browserURL = nil; accountMessage = ""; showSignIn()
+        waiting = true; cancelling = false; browserURL = nil; accountMessage = ""; showSignIn()
         account.request("signIn") { [weak self] result in
-            guard let self else { return }; self.waiting = false; self.browserURL = nil
+            guard let self else { return }; self.waiting = false; self.cancelling = false; self.browserURL = nil
             switch result {
             case .success(let data):
-                self.connected = data["saved"] as? Bool == true
+                self.accountList = ChatGPTAccountList(data)
+                self.connected = data["saved"] as? Bool == true || (self.accountList?.accounts.isEmpty == false)
                 self.accountMessage = data["accessChecked"] as? Bool == true && (data["modelCount"] as? Int ?? 0) > 0 ? "Connected. Available models were retrieved." : "Sign-in saved. Model access could not be confirmed; check your account or try connecting again."
+                NotificationCenter.default.post(name: ChatGPTAccountsWindow.didChange, object: self)
             case .failure(let error): self.accountMessage = error.localizedDescription
             }
             if self.accountPage { self.renderSignIn() }
         }
     }
-    private func cancelSignIn() { account.request("cancel") { _ in }; accountMessage = "Cancelling sign-in…"; showSignIn() }
+    private func cancelSignIn() {
+        guard !cancelling else { return }
+        cancelling = true; accountMessage = "Cancelling sign-in…"; showSignIn()
+        account.request("cancel") { _ in }
+    }
     private func disconnect() {
         guard canChangeAccount(), !waiting, !disconnecting else { return }
         disconnecting = true; accountMessage = "Disconnecting…"; renderSignIn()
@@ -159,7 +187,10 @@ final class LauncherWindow: NSWindowController, NSTableViewDataSource, NSTableVi
             guard let self else { return }
             self.disconnecting = false
             switch result {
-            case .success: self.connected = false; self.accountMessage = "The saved connection was removed from this Mac."
+            case .success(let data):
+                self.accountList = ChatGPTAccountList(data)
+                self.connected = false; self.accountMessage = "The saved connection was removed from this Mac."
+                NotificationCenter.default.post(name: ChatGPTAccountsWindow.didChange, object: self)
             case .failure(let error): self.accountMessage = error.localizedDescription
             }
             if self.accountPage { self.renderSignIn() }
@@ -383,7 +414,18 @@ final class LauncherWindow: NSWindowController, NSTableViewDataSource, NSTableVi
         cell.textField = name; cell.imageView = icon; cell.toolTip = details; cell.setAccessibilityLabel("\(project.name). \(details)")
         return cell
     }
-    func windowWillClose(_ notification: Notification) { activityScan?.cancel(); activityScan = nil; account.stop(); waiting = false; disconnecting = false; accountStatusLoaded = false; browserURL = nil }
+    deinit {
+        activityScan?.cancel()
+        account.stop()
+        if let accountsObserver { NotificationCenter.default.removeObserver(accountsObserver) }
+    }
+    func dispose() {
+        activityScan?.cancel(); activityScan = nil
+        account.stop()
+        if let accountsObserver { NotificationCenter.default.removeObserver(accountsObserver); self.accountsObserver = nil }
+        onOpenFolder = nil; onCreateProject = nil; onOpenProject = nil; canChangeAccount = { true }
+    }
+    func windowWillClose(_ notification: Notification) { activityScan?.cancel(); activityScan = nil; account.stop(); waiting = false; cancelling = false; disconnecting = false; accountStatusLoaded = false; browserURL = nil }
     func navigateProbe(_ step: String) {
         guard probe?.launcherPass == true else { return }
         switch step {

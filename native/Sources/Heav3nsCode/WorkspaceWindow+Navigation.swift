@@ -50,7 +50,7 @@ extension WorkspaceWindow {
 
     func switchConversation(_ id: String?, deleting: Bool = false) {
         guard canSwitchConversation, saveDraft() else { return }
-        switchingConversation = true; expectedConversation = nil; podContextID = UUID()
+        switchingConversation = true; expectedConversation = nil; sessionContextID = UUID()
         navigationGeneration += 1; inspectionGeneration += 1; conversationGeneration += 1; conversationSwitchGeneration += 1
         walkthroughLoadGeneration += 1; quickOpen?.dismiss()
         updateStatus()
@@ -100,7 +100,7 @@ extension WorkspaceWindow {
             draftByConversation[id] = composer.string
         }
         composer.string = draftByConversation[id] ?? ""
-        currentConversation = id; podContextID = UUID()
+        currentConversation = id; sessionContextID = UUID()
         runs = []; active = nil; expandedActions.removeAll()
         resetConversationInspection()
         if hadConversation { attachmentBar.clear() }

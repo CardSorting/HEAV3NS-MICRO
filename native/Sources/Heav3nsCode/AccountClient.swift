@@ -105,6 +105,7 @@ final class AccountClient {
         else { callback(.failure(BridgeError.message("The account service returned an invalid response."))) }
     }
     private func scheduleDeadline() {
+        guard let next = deadlines.values.min() else { deadlineTimer?.cancel(); deadlineTimer = nil; return }
         if deadlineTimer == nil {
             let timer = DispatchSource.makeTimerSource(queue: .main)
             timer.setEventHandler { [weak self] in
@@ -113,7 +114,7 @@ final class AccountClient {
             }
             deadlineTimer = timer; timer.resume()
         }
-        deadlineTimer?.schedule(deadline: deadlines.values.min() ?? .distantFuture)
+        deadlineTimer?.schedule(deadline: next)
     }
     private func fail(_ message: String) { stop(message: message) }
     func stop() { stop(message: "The account connection was closed.") }
