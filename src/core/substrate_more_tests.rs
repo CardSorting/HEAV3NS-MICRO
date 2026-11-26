@@ -636,4 +636,109 @@ mod tests {
         let reset = reg.select_relevant_tool_schemas("Read Cargo.toml");
         assert_eq!(reset.len(), core_count);
     }
+
+    #[tokio::test]
+    async fn test_galxai_documentation_sovereignty_skill_available_in_new_projects() {
+        let ws = TempWorkspace::new("fresh_galxai_docs_project");
+        let discovered = crate::core::request_queue::discover_skills_cached(&ws.path);
+        assert!(discovered
+            .iter()
+            .any(|s| s.name == "galxai-documentation-sovereignty"));
+
+        let catalog = SkillTreeCatalog::new();
+        let dag = catalog.evaluate_dag();
+        assert_eq!(dag["acyclic"], json!(true));
+        assert!(catalog
+            .nodes
+            .iter()
+            .any(|n| n.id == "galxai-documentation-sovereignty"));
+        let mut lint_cat = catalog.clone();
+        let lint = lint_cat
+            .lint_and_autofix_skill("galxai-documentation-sovereignty", false)
+            .unwrap();
+        assert_eq!(lint["issueCount"], json!(0), "lint issues: {lint}");
+
+        let mem = Arc::new(Mutex::new(MemoryStore::new()));
+        let reg = ToolRegistry::new(mem);
+        let rec = reg
+            .execute_single(
+                &ScheduledToolCall {
+                    id: "tc_galxai_skill".into(),
+                    name: "use_skill".into(),
+                    args: json!({ "name": "galxai-documentation-sovereignty" }),
+                },
+                &ws.path,
+                ExecutionAuthorityLevel::Autonomous,
+                None,
+            )
+            .await;
+        assert!(rec.success, "use_skill failed: {:?}", rec.error);
+        let instr = rec.output["instructions"].as_str().unwrap_or("");
+        assert!(instr.starts_with("# GALXAI Strict Documentation"));
+        assert!(!instr.starts_with("<!-- [LAYER:"));
+        assert!(instr.contains("scripts/scaffold-docs.mjs"));
+        assert!(instr.contains("bin/docs-check.mjs"));
+        assert!(instr.contains("bin/docs-roll.mjs"));
+        assert!(instr.contains("DOC-ANC-001"));
+        assert_eq!(rec.output["bundledScripts"].as_array().map(|a| a.len()), Some(3));
+
+        // Materialize bundled executable scripts into a brand-new empty project in one call.
+        let mat = reg
+            .execute_single(
+                &ScheduledToolCall {
+                    id: "tc_galxai_mat".into(),
+                    name: "use_skill".into(),
+                    args: json!({ "name": "galxai-documentation-sovereignty", "materialize": true }),
+                },
+                &ws.path,
+                ExecutionAuthorityLevel::Autonomous,
+                None,
+            )
+            .await;
+        assert!(mat.success, "use_skill materialize failed: {:?}", mat.error);
+        assert!(ws.path.join(".agents/skills/galxai-documentation-sovereignty/scripts/scaffold-docs.mjs").exists());
+        assert!(ws.path.join(".agents/skills/galxai-documentation-sovereignty/scripts/docs-check.mjs").exists());
+        assert!(ws.path.join(".agents/skills/galxai-documentation-sovereignty/scripts/docs-roll.mjs").exists());
+
+        // Workspace-local override takes precedence over built-in manifest.
+        fs::create_dir_all(ws.path.join(".agents/skills/galxai-documentation-sovereignty")).unwrap();
+        fs::write(
+            ws.path.join(".agents/skills/galxai-documentation-sovereignty/SKILL.md"),
+            "---\nname: galxai-documentation-sovereignty\ndescription: Custom override\n---\n# Custom Override Body\n",
+        )
+        .unwrap();
+        let overridden = crate::domain::types::skill_types::merge_builtin_skills(
+            SkillsIngestor::discover(&ws.path),
+        );
+        let entry = overridden
+            .iter()
+            .find(|s| s.name == "galxai-documentation-sovereignty")
+            .unwrap();
+        assert_eq!(entry.description, "Custom override");
+        assert!(entry.instructions.contains("# Custom Override Body"));
+
+        // Verify repo skills/ and .agents/skills/ copies remain body-identical with zero drift.
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let canonical = fs::read_to_string(
+            repo_root.join("skills/galxai-documentation-sovereignty/SKILL.md"),
+        )
+        .unwrap();
+        let agents_copy = fs::read_to_string(
+            repo_root.join(".agents/skills/galxai-documentation-sovereignty/SKILL.md"),
+        )
+        .unwrap();
+        assert_eq!(
+            crate::domain::types::skill_types::strip_skill_frontmatter(&canonical),
+            crate::domain::types::skill_types::strip_skill_frontmatter(&agents_copy),
+            "skills/ and .agents/skills/ SKILL.md bodies drifted"
+        );
+
+        let cfg = AgentConfig::default();
+        let sess = SessionStore::new("s_galxai", &ws.path, None);
+        let mem2 = MemoryStore::new();
+        let (msgs, _) = PromptComposer::compose(&cfg, &ws.path, &sess, &mem2, 1000);
+        assert!(msgs[0]
+            .content
+            .contains("galxai-documentation-sovereignty"));
+    }
 }

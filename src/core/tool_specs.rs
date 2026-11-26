@@ -282,10 +282,13 @@ pub fn builtin_tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "use_skill",
-            description: "Load the full SKILL.md instructions for a named workspace skill",
+            description: "Load the full SKILL.md instructions for a named workspace or built-in skill; optionally materialize bundled scripts into .agents/skills/<name>/",
             is_mutating: false,
             is_core: false,
-            parameters: vec![("name", ParamSchema::req(String, "Exact skill name to activate"))],
+            parameters: vec![
+                ("name", ParamSchema::req(String, "Exact skill name to activate")),
+                ("materialize", ParamSchema::opt(Boolean, "When true, atomically materialize bundled scripts into .agents/skills/<name>/ (non-destructive)")),
+            ],
         },
         ToolSpec {
             name: "computer_use",

@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 pub use crate::domain::skill_nodes::{SkillNode, SoulProfile};
+use crate::domain::types::skill_types::{GALXAI_DOCS_SKILL_DESC, GALXAI_DOCS_SKILL_MD, GALXAI_DOCS_SKILL_NAME};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillTreeCatalog {
@@ -51,6 +52,7 @@ impl SkillTreeCatalog {
     pub fn new() -> Self {
         let nodes = vec![
             seed_node("joyzoning-sovereignty", "Joyzoning Architectural Sovereignty", "Enforces 5-zone dependency boundaries, single-line imports, and I<Name> contractual sovereignty.", "architecture", 1, &[], &["architecture", "joyzoning", "sovereignty"], "1. Tag every file with [LAYER: <ZONE>].\n2. Verify pre-edit and post-edit with joy-check.\n3. Keep files under 800 lines."),
+            seed_node(GALXAI_DOCS_SKILL_NAME, "GALXAI Strict Documentation & Workspace Sovereignty", GALXAI_DOCS_SKILL_DESC, "documentation", 1, &["joyzoning-sovereignty"], &["documentation", "galxai", "diataxis", "readme", "docs-check", "docs-roll", "adr", "playbooks", "postmortems"], GALXAI_DOCS_SKILL_MD),
             seed_node("computer-use-operator", "Set-of-Marks GUI & Computer Operator", "Operates virtual and native displays via Set-of-Marks (SoM) bounding boxes, undo/redo checkpoints, and action DSL.", "computer-use", 2, &["joyzoning-sovereignty"], &["computer-use", "gui", "som", "display"], "1. Capture frame before mutating UI state.\n2. Target elements by somId or element_id.\n3. Verify post-action state and use undo on unexpected transitions."),
             seed_node("browser-dom-navigator", "Zero-Trust Browser & DOM Navigator", "Executes SSRF-guarded navigation and extracts compressed Set-of-Marks interactive DOM snapshots.", "computer-use", 2, &["computer-use-operator"], &["browser", "cdp", "dom", "ssrf"], "1. Validate target URL against SSRF/IMDS guards.\n2. Snapshot interactive DOM elements before clicking or typing.\n3. Redact sensitive query tokens in telemetry."),
             seed_node("adversarial-auditor", "Adversarial Security & Failure-Mode Auditor", "Hunts edge cases, injection vectors, race conditions, and silent failure paths with concrete root-cause fixes.", "security", 3, &["joyzoning-sovereignty"], &["security", "audit", "hardening", "red-team"], "1. Enumerate trust boundaries and untrusted inputs.\n2. Test boundary conditions, malformed payloads, and path traversal.\n3. Replace monkey patches with structural invariants."),

@@ -93,7 +93,7 @@ impl AgentProfile {
             methodology_path: DEFAULT_JOY_METHODOLOGY_PATH.to_string(),
             style_directives: vec![
                 "Triad Audit (Architect/Critic/SRE) -> Producer-Before-Consumer (`PLUMBING->DOMAIN->INFRA->CORE->UI`).".to_string(),
-                "Rules: `[LAYER: <ZONE>]` L1, Geo Alignment, <=3 `../` & 0 cycles, `I<Name>`, <800L; `joy-check.mjs` pre/post-edit.".to_string(),
+                "Rules: `[LAYER: <ZONE>]` L1, Geo, <=3 `../`, 0 cycles, `I<Name>`, <800L; `joy-check.mjs`; Docs: `galxai-documentation-sovereignty`.".to_string(),
             ],
             default_posture: None,
             ci_gate: CiGatePolicy::default(),

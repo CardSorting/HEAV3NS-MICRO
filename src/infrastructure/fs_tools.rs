@@ -1,4 +1,5 @@
 // [LAYER: INFRASTRUCTURE]
+use crate::domain::types::skill_types::{builtin_skill_scripts, merge_builtin_skills};
 use crate::infrastructure::search_tools::{
     atomic_write_file, batch_replace_regex_files, build_directory_tree, execute_grep_search,
     extract_workspace_symbols, read_text_file_bounded, resolve_and_verify_workspace_path,
@@ -697,7 +698,7 @@ pub fn dispatch_fs_tool(
             batch_replace_regex_files(cwd, &resolved, find_pat, replace_with, dry_run, journal)
         }
         "list_skills" => {
-            let manifests = SkillsIngestor::discover(cwd);
+            let manifests = merge_builtin_skills(SkillsIngestor::discover(cwd));
             let list: Vec<Value> = manifests
                 .into_iter()
                 .map(|m| json!({ "name": m.name, "description": m.description, "path": m.path }))
@@ -710,14 +711,35 @@ pub fn dispatch_fs_tool(
                 .and_then(|v| v.as_str())
                 .ok_or("Missing 'name'")?
                 .trim();
-            let manifests = SkillsIngestor::discover(cwd);
+            let materialize = args
+                .get("materialize")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let manifests = merge_builtin_skills(SkillsIngestor::discover(cwd));
             if let Some(found) = manifests.iter().find(|m| m.name.eq_ignore_ascii_case(name)) {
+                let bundled = builtin_skill_scripts(&found.name);
+                let mut materialized_paths = Vec::new();
+                if materialize && !bundled.is_empty() {
+                    let base = cwd.join(".agents/skills").join(&found.name);
+                    for (rel_script, content) in bundled {
+                        let dest = base.join(rel_script);
+                        if !dest.exists() {
+                            atomic_write_file(&dest, content.as_bytes())?;
+                            materialized_paths.push(
+                                format!(".agents/skills/{}/{rel_script}", found.name),
+                            );
+                        }
+                    }
+                }
+                let bundled_names: Vec<&str> = bundled.iter().map(|(p, _)| *p).collect();
                 Ok((
                     json!({
                         "success": true,
                         "name": found.name,
                         "location": found.path,
-                        "instructions": found.instructions
+                        "instructions": found.instructions,
+                        "bundledScripts": bundled_names,
+                        "materializedPaths": materialized_paths
                     }),
                     false,
                 ))

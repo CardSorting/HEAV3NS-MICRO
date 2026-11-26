@@ -6,7 +6,7 @@ use crate::domain::prefix_and_manifest::format_append_only_context_update;
 use crate::domain::prompt_spec::SystemPromptSpec;
 use crate::domain::types::messages::{Role, SessionMessage};
 use crate::domain::types::runtime::{AgentConfig, ExecutionAuthorityLevel, ExecutionPosture};
-use crate::domain::types::skill_types::SkillManifest;
+use crate::domain::types::skill_types::{merge_builtin_skills, SkillManifest};
 use crate::infrastructure::vfs_store::{SkillsIngestor, WorkspacePromptProbe};
 use crate::plumbing::hash_and_math::now_ms;
 use crate::plumbing::text_tokens::estimate_text_tokens;
@@ -108,13 +108,17 @@ impl RuntimeRequestQueue {
 pub fn discover_skills_cached(workspace_root: &Path) -> Vec<SkillManifest> {
     static CACHE: OnceLock<Mutex<HashMap<PathBuf, (u64, u128, Vec<SkillManifest>)>>> =
         OnceLock::new();
-    let dir_mtime = std::fs::metadata(workspace_root.join(".agents").join("skills"))
-        .or_else(|_| std::fs::metadata(workspace_root.join("skills")))
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
+    let dir_mtime = [".agents/skills", ".claude/skills", "skills"]
+        .iter()
+        .fold(0u128, |acc, rel| {
+            let mt = std::fs::metadata(workspace_root.join(rel))
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            acc.rotate_left(13) ^ mt
+        });
     let now = now_ms();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     if let Ok(guard) = cache.lock() {
@@ -124,7 +128,7 @@ pub fn discover_skills_cached(workspace_root: &Path) -> Vec<SkillManifest> {
             }
         }
     }
-    let fresh = SkillsIngestor::discover(workspace_root);
+    let fresh = merge_builtin_skills(SkillsIngestor::discover(workspace_root));
     if let Ok(mut guard) = cache.lock() {
         if guard.len() >= 32 {
             guard.clear();
