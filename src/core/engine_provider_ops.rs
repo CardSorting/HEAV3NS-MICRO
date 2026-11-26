@@ -1,7 +1,7 @@
 // [LAYER: CORE]
 use crate::core::engine::AgentEngine;
 use crate::domain::interfaces::{
-    ILlmProvider, IModelPricingRegistry, IWorkspaceSnapshotCas,
+    IModelPricingRegistry, IWorkspaceSnapshotCas,
 };
 use crate::domain::pricing_and_taxonomy::{
     select_auto_routed_model_with_catalog, AutoRouteDecision,

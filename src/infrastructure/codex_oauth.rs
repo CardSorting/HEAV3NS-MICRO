@@ -6,10 +6,8 @@ use crate::plumbing::hash_and_math::{lock_unpoison, now_ms};
 use crate::plumbing::oauth_pkce::{build_openai_authorize_url, encode_base64url, encode_hex_lower, generate_pkce_challenge};
 use serde_json::{json, Value};
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex as AsyncMutex;
 
 static REFRESH_FLIGHT_LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();

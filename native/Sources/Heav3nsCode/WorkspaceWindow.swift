@@ -97,6 +97,7 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
     let reviewApprovalButton = NSButton(title: "Review Request…", target: nil, action: nil)
     let denyButton = NSButton(title: "Deny", target: nil, action: nil); let allowSessionButton = NSButton(title: "Allow for Session", target: nil, action: nil); let allowButton = NSButton(title: "Allow Once", target: nil, action: nil)
     var activePosture: ExecutionPostureStop = .autoReview
+    var activeProfileID = "joyzoning-architect"
     var postureGeneration = 0
     var undoPending = false
     let postureButton = NSButton(title: "Posture: Auto-Review", target: nil, action: nil)

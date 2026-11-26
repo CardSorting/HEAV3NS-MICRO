@@ -27,7 +27,7 @@ use std::sync::{Arc, Mutex};
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn dispatch_worker_rpc_extended(
     method: &str,
-    parsed: &Value,
+    _parsed: &Value,
     params: &Value,
     req_id: &str,
     ws_id: &str,

@@ -789,6 +789,7 @@ pub(crate) fn parse_multidialect_sse_stream(raw_sse: &str, provider_label: &str,
     agg.finish()
 }
 
+#[cfg(test)]
 pub(crate) fn parse_multidialect_sse_stream_value_only(raw_sse: &str, provider_label: &str, extract_openai_usage_fn: fn(&Value) -> Option<ProviderTokenUsage>) -> Result<ProviderResponse, ProviderError> {
     let mut agg = IncrementalSseAggregator::new(provider_label, extract_openai_usage_fn, usize::MAX);
     agg.use_fast_delta = false;

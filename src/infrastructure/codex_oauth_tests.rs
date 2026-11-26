@@ -1,17 +1,11 @@
 // [LAYER: INFRASTRUCTURE]
-use crate::domain::interfaces::ICodexAccountStore;
 use crate::domain::types::runtime::CancellationToken;
 use crate::plumbing::hash_and_math::now_ms;
 use serde_json::json;
 use std::fs;
-use std::io::Read;
-use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use tokio::sync::Mutex as AsyncMutex;
-
-static REFRESH_FLIGHT_LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
 use crate::infrastructure::codex_oauth::*;
 
 #[cfg(test)]

@@ -432,6 +432,20 @@ extension WorkspaceWindow {
         addMenuItem(menu, title: "Command Palette… (⌘K)", symbol: "command") { [weak self] in self?.showCommandPalette() }
         addMenuItem(menu, title: "Choose Model & Provider… (⇧⌘M)", symbol: "cpu", enabled: client.capabilities.contains("model-selection-v1")) { [weak self] in self?.showModels() }
         addMenuItem(menu, title: "Cycle Execution Posture (\(activePosture.stepNext().label))", symbol: "slider.horizontal.3") { [weak self] in self?.stepPosture() }
+        if client.capabilities.contains("agent-profiles-v1") {
+            let profileItem = NSMenuItem(title: "Agent Profile (HEAV3NS-JOY)", action: nil, keyEquivalent: "")
+            if let img = NSImage(systemSymbolName: "person.badge.shield.checkmark", accessibilityDescription: nil) { profileItem.image = img }
+            let sub = NSMenu(title: "Agent Profile")
+            for (pid, label) in [("joyzoning-architect", "Joyzoning Architect (Default)"), ("strict-ci", "Strict CI Guardian"), ("fast-patch", "Fast Patch"), ("research-readonly", "Research Read-Only")] {
+                addMenuItem(sub, title: label, symbol: pid == activeProfileID ? "checkmark.circle.fill" : "circle", enabled: client.isReady) { [weak self] in self?.switchAgentProfile(pid) }
+                sub.items.last?.state = (pid == activeProfileID) ? .on : .off
+            }
+            profileItem.submenu = sub
+            menu.addItem(profileItem)
+        }
+        if client.capabilities.contains("joy-ci-gate-v1") {
+            addMenuItem(menu, title: "Run HEAV3NS-JOY CI Gate", symbol: "checkmark.shield", enabled: client.isReady) { [weak self] in self?.runJoyCiGate() }
+        }
         addMenuItem(menu, title: "Undo Last Turn (⌥⌘Z)", symbol: "arrow.uturn.backward", enabled: client.isReady && !hasWork) { [weak self] in self?.undoLastTurn() }
         addMenuItem(menu, title: "Refresh Current View", symbol: "arrow.clockwise") { [weak self] in self?.refreshNavigation() }
         menu.addItem(.separator())
@@ -519,6 +533,57 @@ extension WorkspaceWindow {
 
     func presentConversationMenu(_ item: ConversationSummary, from anchor: NSView) {
         popUpSidebarMenu(buildConversationMenu(item), from: anchor)
+    }
+
+    func switchAgentProfile(_ profileId: String) {
+        guard client.isReady else { return }
+        let source = client
+        source.request("profile.set", params: ["id": profileId]) { [weak self, weak source] result in
+            guard let self, let source, self.client === source, !self.closing else { return }
+            switch result {
+            case .success(let data):
+                let prof = data["activeProfile"] as? [String: Any]
+                let resolvedId = prof?["id"] as? String ?? profileId
+                let name = prof?["name"] as? String ?? resolvedId
+                self.activeProfileID = resolvedId
+                if let remotePosture = data["posture"] as? String, let stop = ExecutionPostureStop(rawValue: remotePosture) {
+                    self.applyPosture(stop, syncRemote: false)
+                }
+                self.showNotice("Active profile switched to \(name).")
+            case .failure(let err):
+                self.showNotice(err.localizedDescription)
+            }
+        }
+    }
+
+    func runJoyCiGate() {
+        guard client.isReady else { return }
+        let source = client
+        showNotice("Running HEAV3NS-JOY strict CI gate…")
+        source.request("ci_gate.run", params: [:]) { [weak self, weak source] result in
+            guard let self, let source, self.client === source, !self.closing else { return }
+            switch result {
+            case .success(let data):
+                let passed = data["passed"] as? Bool == true
+                let theme = data["theme"] as? String ?? "strict"
+                let phase = data["phase"] as? String ?? "ci"
+                let blocking = data["blockingCount"] as? Int ?? 0
+                let advisory = data["advisoryCount"] as? Int ?? 0
+                let ms = data["durationMs"] as? Int ?? 0
+                let summary = data["summary"] as? String ?? ""
+                self.showNotice("HEAV3NS-JOY CI Gate \(passed ? "PASSED" : "FAILED") · \(blocking) blocking · \(advisory) advisory (\(ms)ms)")
+                if !passed || !summary.isEmpty {
+                    self.prepareInspection(title: "HEAV3NS-JOY CI Gate (\(passed ? "PASS" : "FAIL"))", file: nil, contextSummary: true)
+                    self.pageLabel.stringValue = "theme=\(theme) · phase=\(phase) · \(blocking) blocking · \(advisory) advisory · \(ms)ms"
+                    self.inspection.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+                    self.inspection.string = summary.isEmpty ? "CI gate passed with 0 blocking violations." : summary
+                    self.inspection.scrollToBeginningOfDocument(nil)
+                    self.showingInspector = true; self.adapt()
+                }
+            case .failure(let err):
+                self.showNotice(err.localizedDescription)
+            }
+        }
     }
 }
 

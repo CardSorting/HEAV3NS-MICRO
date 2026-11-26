@@ -184,6 +184,14 @@ extension WorkspaceWindow {
         actions.append(WorkspaceAction(title: "Sovereign Swarm Radar…", shortcut: "⌥⌘R", keywords: ["radar", "telemetry", "nodes", "edge", "latency", "swarm"]) { SwarmRadarWindow.shared.present() })
         if canOpenFile { actions.insert(WorkspaceAction(title: "Open File…", shortcut: "⌘P", keywords: ["find", "search", "quick open"]) { [weak self] in self?.showQuickOpen() }, at: 1) }
         if client.isReady {
+            if client.capabilities.contains("joy-ci-gate-v1") {
+                actions.insert(WorkspaceAction(title: "Run HEAV3NS-JOY CI Gate", shortcut: "", keywords: ["joy", "ci", "gate", "spider", "lint", "architecture"]) { [weak self] in self?.runJoyCiGate() }, at: 1)
+            }
+            if client.capabilities.contains("agent-profiles-v1") {
+                for (pid, label) in [("joyzoning-architect", "Joyzoning Architect"), ("strict-ci", "Strict CI Guardian"), ("fast-patch", "Fast Patch"), ("research-readonly", "Research Read-Only")] {
+                    actions.append(WorkspaceAction(title: "Set Profile: \(label)", shortcut: "", keywords: ["profile", "methodology", "joy", pid]) { [weak self] in self?.switchAgentProfile(pid) })
+                }
+            }
             actions.insert(WorkspaceAction(title: "Preview Outbound Request & KV-Cache Manifest", shortcut: "⇧⌘I", keywords: ["manifest", "request", "preview", "kv", "cache", "prefix", "tokens", "bytes"]) { [weak self] in self?.showRequestPreview() }, at: 2)
             actions.insert(WorkspaceAction(title: "Inspect Turn Receipts & Honest Cost Ledger", shortcut: "", keywords: ["receipts", "ledger", "cost", "billing", "tokens", "audit"]) { [weak self] in self?.showTurnReceipts() }, at: 3)
             if !hasWork {

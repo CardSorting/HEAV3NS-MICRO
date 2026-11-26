@@ -381,6 +381,10 @@ final class RuntimeClient {
         case "agentSwarm.classify": return result["intent"] is String && result["strategy"] is String && result["complexity"] is NSNumber && (result["assignments"] as? [[String: Any]]).map { !$0.isEmpty && $0.count <= 8 } == true
         case "task.deferStatus": return result["enabled"] is Bool && result["deferred"] is Bool && result["queued"] is NSNumber
         case "agentSwarm.settings": return result["enabled"] is Bool && result["criticalCompletionReview"] is Bool && result["hierarchicalDefer"] is Bool && result["legion"] is Bool && result["maxSpecialists"] is NSNumber
+        case "profile.list": return result["activeProfile"] is [String: Any] && result["profiles"] is [[String: Any]]
+        case "profile.get": return result["id"] is String && result["methodology"] is String
+        case "profile.set": return result["activeProfile"] is [String: Any]
+        case "ci_gate.run": return result["passed"] is Bool && result["gate"] is String && result["summary"] is String
         default: return true
         }
     }

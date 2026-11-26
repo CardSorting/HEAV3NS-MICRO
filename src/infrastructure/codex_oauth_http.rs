@@ -6,13 +6,10 @@ use crate::plumbing::oauth_pkce::{encode_hex_lower, extract_jwt_expiry_ms, extra
 use serde_json::Value;
 use std::fs;
 use std::io::Read;
-use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use tokio::sync::Mutex as AsyncMutex;
 
-static REFRESH_FLIGHT_LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
 pub(crate) const OPENAI_OAUTH_CALLBACK_ADDR: &str = "127.0.0.1:1455";
 
 pub const OPENAI_CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";

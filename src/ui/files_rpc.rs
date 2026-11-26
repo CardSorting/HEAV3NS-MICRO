@@ -4,7 +4,6 @@ use crate::plumbing::hash_and_math::lock_unpoison;
 use crate::plumbing::secret_redactor::SafetyPolicy;
 use crate::plumbing::text_tokens::{encode_base64, render_unified_diff, safe_utf8_prefix};
 use serde_json::{json, Value};
-use sha2::Digest;
 use std::fs;
 use std::path::Path;
 

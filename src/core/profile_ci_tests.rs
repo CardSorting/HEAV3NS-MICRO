@@ -487,4 +487,26 @@ mod tests {
         assert_eq!(out["linesRemoved"], 1);
         assert!(out["diff"].as_str().unwrap_or("").contains("+pub const A: u8 = 2;"));
     }
+
+    #[test]
+    fn test_delete_file_emits_relative_path_and_removed_diff() {
+        use crate::infrastructure::fs_tools::dispatch_fs_tool;
+        use crate::infrastructure::transaction_journal::TransactionJournal;
+        use serde_json::Map;
+        use std::sync::Mutex;
+
+        let ws = TempDirGuard::new("delete-diff-stats");
+        let dir = ws.path.join("src/domain");
+        fs::create_dir_all(&dir).expect("mkdir");
+        fs::write(dir.join("obsolete.rs"), "// [LAYER: DOMAIN]\npub struct Old;\n").expect("seed");
+
+        let mut args = Map::new();
+        args.insert("path".into(), json!("src/domain/obsolete.rs"));
+        let journal = Mutex::new(TransactionJournal::new());
+        let (out, _) = dispatch_fs_tool("delete_file", &args, &ws.path, &journal).expect("delete");
+        assert_eq!(out["relativePath"], "src/domain/obsolete.rs");
+        assert_eq!(out["linesAdded"], 0);
+        assert_eq!(out["linesRemoved"], 2);
+        assert!(out["diff"].as_str().unwrap_or("").contains("-pub struct Old;"));
+    }
 }

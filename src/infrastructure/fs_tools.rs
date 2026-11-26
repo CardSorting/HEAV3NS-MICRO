@@ -448,7 +448,12 @@ pub fn dispatch_fs_tool(
                 }
                 fs::remove_dir_all(&resolved)
                     .map_err(|e| format!("Failed to remove directory: {e}"))?;
+                Ok((
+                    json!({ "success": true, "path": resolved.to_string_lossy() }),
+                    false,
+                ))
             } else {
+                let before = read_text_file_bounded(&resolved, MAX_FS_TEXT_READ_BYTES).unwrap_or_default();
                 let tx = journal
                     .lock()
                     .ok()
@@ -459,11 +464,21 @@ pub fn dispatch_fs_tool(
                     }
                     return Err(format!("Failed to delete file: {e}"));
                 }
+                let (rel, diff_text, lines_added, lines_removed, diff_truncated) =
+                    build_diff_stats_and_preview(cwd, &resolved, &before, "");
+                Ok((
+                    json!({
+                        "success": true,
+                        "path": resolved.to_string_lossy(),
+                        "relativePath": rel,
+                        "diff": diff_text,
+                        "linesAdded": lines_added,
+                        "linesRemoved": lines_removed,
+                        "diffTruncated": diff_truncated
+                    }),
+                    false,
+                ))
             }
-            Ok((
-                json!({ "success": true, "path": resolved.to_string_lossy() }),
-                false,
-            ))
         }
         "move_file" => {
             let src_raw = args
