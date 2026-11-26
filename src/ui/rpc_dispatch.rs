@@ -727,4 +727,38 @@ mod tests {
         assert!(super::handle_profile_and_ci_rpc("profile.set", &json!({ "id": "nope" }), &engine).is_err());
         let _ = std::fs::remove_dir_all(&ws);
     }
+
+    #[test]
+    fn test_progress_to_walkthrough_activity_preserves_diff_preview() {
+        use crate::domain::types::progress::{
+            EngineProgressEvent, EngineProgressMetadata, EngineProgressPhase, EngineProgressStatus,
+        };
+        let ev = EngineProgressEvent {
+            activity_id: "tools-r0".to_string(),
+            phase: EngineProgressPhase::Tool,
+            status: EngineProgressStatus::Completed,
+            message: "replace_file_content src/domain/item.rs (+1/-1, 2ms)".to_string(),
+            detail: Some("--- a/src/domain/item.rs\n+++ b/src/domain/item.rs\n@@ -1 +1 @@\n-old\n+new".to_string()),
+            timestamp: 1_000,
+            elapsed_ms: Some(2),
+            sequence: 3,
+            metadata: Some(EngineProgressMetadata {
+                source: Some("scheduler".to_string()),
+                scope: Some("step".to_string()),
+                item_type: Some("tool".to_string()),
+                files: Some(vec!["src/domain/item.rs".to_string()]),
+                preview_kind: Some("diff".to_string()),
+                preview_text: Some("--- a/src/domain/item.rs\n+++ b/src/domain/item.rs\n@@ -1 +1 @@\n-old\n+new".to_string()),
+                preview_limited: Some(false),
+                lines_added: Some(1),
+                lines_removed: Some(1),
+                ..Default::default()
+            }),
+        };
+        let act = crate::ui::worker_handlers::progress_to_walkthrough_activity(&ev);
+        assert_eq!(act["preview"]["kind"], "diff");
+        assert_eq!(act["metadata"]["files"][0], "src/domain/item.rs");
+        assert_eq!(act["metadata"]["linesAdded"], 1);
+        assert_eq!(act["metadata"]["linesRemoved"], 1);
+    }
 }

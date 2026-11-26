@@ -24,6 +24,8 @@ struct WalkthroughActivity: Equatable {
     let outputIdleMs: Int?
     let completedSteps: Int?
     let totalSteps: Int?
+    let linesAdded: Int?
+    let linesRemoved: Int?
     struct Preview: Equatable { let kind: String; let text: String; let limited: Bool }
     let preview: Preview?
 
@@ -49,10 +51,12 @@ struct WalkthroughActivity: Equatable {
         outputBytes = count("outputBytes"); outputLines = count("outputLines")
         outputIdleMs = count("outputIdleMs")
         completedSteps = count("completedSteps"); totalSteps = count("totalSteps")
+        linesAdded = count("linesAdded"); linesRemoved = count("linesRemoved")
         elapsed = (value["elapsedMs"] as? Double).flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
         timestamp = (value["timestamp"] as? Double).flatMap { $0.isFinite && $0 >= 0 ? $0 : nil } ?? 0
         if let raw = value["preview"] as? [String: Any], let kind = raw["kind"] as? String,
-           ["draft", "code", "command", "output", "message"].contains(kind), let text = raw["text"] as? String, text.utf8.count <= 1200 {
+           ["draft", "code", "diff", "command", "output", "message"].contains(kind), let text = raw["text"] as? String,
+           text.utf8.count <= (kind == "diff" ? 4096 : 1200) {
             preview = Preview(kind: kind, text: text, limited: raw["limited"] as? Bool ?? false)
         } else { preview = nil }
     }
@@ -76,6 +80,7 @@ struct WalkthroughActivity: Equatable {
         metadata["exitCode"] = exitCode; metadata["attempt"] = attempt
         metadata["outputBytes"] = outputBytes; metadata["outputLines"] = outputLines; metadata["outputIdleMs"] = outputIdleMs
         metadata["completedSteps"] = completedSteps; metadata["totalSteps"] = totalSteps
+        metadata["linesAdded"] = linesAdded; metadata["linesRemoved"] = linesRemoved
         var value: [String: Any] = ["activityId": id, "sequence": sequence, "startedSequence": order,
                                   "phase": phase, "status": status, "message": message, "detail": detail,
                                   "timestamp": timestamp, "metadata": metadata]
@@ -107,6 +112,9 @@ struct WalkthroughActivity: Equatable {
         let label: String
         switch (tool, preview?.kind) {
         case (_, "draft"): label = "Provider draft · Execution recorded separately"
+        case (_, "diff"):
+            if let a = linesAdded, let r = linesRemoved { label = "Live diff (+\(a) / -\(r))" }
+            else { label = "Live diff" }
         case ("use_skill", _): label = "Skill load result"
         case (_, "code"): label = "Code sent to tool"
         case (_, "command"): label = "Command"

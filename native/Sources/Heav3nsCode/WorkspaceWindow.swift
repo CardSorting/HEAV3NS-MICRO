@@ -55,6 +55,10 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
     lazy var conversations = ConversationSidebar(folder: folder)
     let leftSidebar = NSVisualEffectView()
     let navigatorTabs = NSSegmentedControl(labels: ["Chats", "Files", "Changes"], trackingMode: .selectOne, target: nil, action: nil)
+    private lazy var sidebarMenuButton: JourneyButton = JourneyButton("", symbol: "ellipsis.circle") { [weak self] in
+        guard let self else { return }
+        self.presentSidebarWorkspaceMenu(from: self.sidebarMenuButton)
+    }
     let leftNavigatorStack = NSStackView()
     let chatTitle = JourneyStyle.label("New conversation", size: 21, weight: .semibold)
     let chatState = JourneyStyle.label("Tell LUMI what you want to build.", size: 12, secondary: true)
@@ -363,8 +367,13 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
             leftNavigatorStack.topAnchor.constraint(equalTo: leftSidebar.topAnchor),
             leftNavigatorStack.bottomAnchor.constraint(equalTo: leftSidebar.bottomAnchor)
         ])
-        leftNavigatorStack.addArrangedSubview(navigatorTabs)
-        navigatorTabs.widthAnchor.constraint(equalTo: leftNavigatorStack.widthAnchor, constant: -16).isActive = true
+        sidebarMenuButton.bezelStyle = .texturedRounded
+        sidebarMenuButton.toolTip = "Open workspace options and all navigation features"
+        sidebarMenuButton.setAccessibilityLabel("Workspace sidebar menu")
+        sidebarMenuButton.widthAnchor.constraint(equalToConstant: 28).isActive = true
+        let sidebarHeaderRow = stack([navigatorTabs, sidebarMenuButton], vertical: false, spacing: 6)
+        leftNavigatorStack.addArrangedSubview(sidebarHeaderRow)
+        sidebarHeaderRow.widthAnchor.constraint(equalTo: leftNavigatorStack.widthAnchor, constant: -16).isActive = true
         leftNavigatorStack.addArrangedSubview(conversations)
         leftNavigatorStack.addArrangedSubview(navigation)
         conversations.widthAnchor.constraint(equalTo: leftNavigatorStack.widthAnchor).isActive = true
@@ -377,12 +386,16 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         conversations.onAccount = { [weak self] in self?.onAccount?() }
         conversations.onMore = { [weak self] in self?.loadConversations(next: true) }
         conversations.onRecent = { [weak self] in self?.loadConversations() }
+        conversations.onItemMenu = { [weak self] item, anchor in self?.presentConversationMenu(item, from: anchor) }
+        conversations.onWorkspaceMenu = { [weak self] anchor in self?.presentSidebarWorkspaceMenu(from: anchor) }
         navigation.onDestination = { [weak self] destination in self?.navigate(destination) }
         navigation.onOpen = { [weak self] entry in self?.openEntry(entry) }
         navigation.onBack = { [weak self] in self?.parentFolder() }
         navigation.onNext = { [weak self] in self?.nextNavigationPage?() }
         navigation.onPrevious = { [weak self] in self?.previousNavigationPage?() }
         navigation.onRefresh = { [weak self] in self?.refreshNavigation() }
+        navigation.onItemMenu = { [weak self] entry, anchor in self?.presentNavigationEntryMenu(entry, from: anchor) }
+        navigation.onWorkspaceMenu = { [weak self] anchor in self?.presentSidebarWorkspaceMenu(from: anchor) }
         navigation.onFilter = { [weak self] query in
             guard let self else { return }; self.navigationQuery = query
             if self.navigation.destination == .files { self.loadDirectory(self.directory) }
@@ -777,6 +790,8 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
             if let activityID = value.activityID {
                 self.walkthrough.selectActivity(activityID, expand: true)
             }
+        }, openDiff: { [weak self] in
+            if let file = value.diffFile { self?.inspect(.diff(file, staged: false)) }
         })
     }
 }

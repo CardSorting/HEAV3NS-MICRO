@@ -278,6 +278,7 @@ impl AgentEngine {
                 item_type: None,
                 completed_steps: Some(0),
                 total_steps: Some(max_rounds),
+                ..Default::default()
             }),
         );
 

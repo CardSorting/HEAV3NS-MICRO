@@ -24,6 +24,8 @@ final class NavigationSidebar: NSView, NSTableViewDataSource, NSTableViewDelegat
     var onNext: (() -> Void)?
     var onPrevious: (() -> Void)?
     var onRefresh: (() -> Void)?
+    var onItemMenu: ((SidebarEntry, NSView) -> Void)?
+    var onWorkspaceMenu: ((NSView) -> Void)?
     private(set) var destination = WorkspaceDestination.files
     private(set) var entries = [SidebarEntry]()
     private let destinations = NSTableView()
@@ -40,6 +42,7 @@ final class NavigationSidebar: NSView, NSTableViewDataSource, NSTableViewDelegat
     private let destinationRule = NSBox()
     private let root = NSStackView()
     private var compact = false
+    private var optionsButton: NSButton!
     var previewsSelection = true
 
     func useAsContextBrowser() {
@@ -92,7 +95,15 @@ final class NavigationSidebar: NSView, NSTableViewDataSource, NSTableViewDelegat
         next.target = self; next.action = #selector(nextPage); next.bezelStyle = .rounded; next.isHidden = true
         previous.target = self; previous.action = #selector(previousPage); previous.bezelStyle = .texturedRounded; previous.isEnabled = false
         previous.setAccessibilityLabel("Previous page")
-        let footer = NSStackView(views: [refresh, previous, next]); footer.spacing = 6; root.addArrangedSubview(footer)
+        let options = JourneyButton("", symbol: "ellipsis.circle") { [weak self] in
+            guard let self else { return }
+            self.onWorkspaceMenu?(self.optionsButton)
+        }
+        options.bezelStyle = .texturedRounded
+        options.setAccessibilityLabel("Sidebar workspace options")
+        options.toolTip = "Open workspace and navigation menu"
+        optionsButton = options
+        let footer = NSStackView(views: [refresh, previous, next, options]); footer.spacing = 6; root.addArrangedSubview(footer)
         addSubview(root); root.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([root.leadingAnchor.constraint(equalTo: leadingAnchor), root.trailingAnchor.constraint(equalTo: trailingAnchor), root.topAnchor.constraint(equalTo: topAnchor), root.bottomAnchor.constraint(equalTo: bottomAnchor)])
         for child in [destinationScroll, rule, pathBar, search, scroll, message, footer] { child.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -16).isActive = true }
@@ -164,12 +175,28 @@ final class NavigationSidebar: NSView, NSTableViewDataSource, NSTableViewDelegat
         let detail = NSTextField(labelWithString: entry.detail); detail.font = .systemFont(ofSize: 10); detail.textColor = .secondaryLabelColor; detail.lineBreakMode = .byTruncatingMiddle
         let showDetail = !entry.detail.isEmpty && (!compact || destination != .files)
         let labels = NSStackView(views: showDetail ? [title, detail] : [title]); labels.orientation = .vertical; labels.alignment = .leading; labels.spacing = 2
-        let content = NSStackView(views: [icon, labels]); content.spacing = 8; content.translatesAutoresizingMaskIntoConstraints = false
+        var rowViews: [NSView] = [icon, labels]
+        if tableView === items {
+            let itemMenu = JourneyButton("", symbol: "ellipsis.circle") { [weak self] in
+                guard let self, let anchor = self.items.view(atColumn: 0, row: row, makeIfNecessary: false) else { return }
+                self.onItemMenu?(entry, anchor)
+            }
+            itemMenu.bezelStyle = .inline; itemMenu.isBordered = false
+            itemMenu.setAccessibilityLabel("Options for \(entry.title)")
+            itemMenu.toolTip = "Show actions for \(entry.title)"
+            itemMenu.widthAnchor.constraint(equalToConstant: 20).isActive = true
+            rowViews.append(itemMenu)
+        }
+        let content = NSStackView(views: rowViews); content.spacing = 6; content.translatesAutoresizingMaskIntoConstraints = false
         cell.addSubview(content); cell.textField = title; cell.imageView = icon; cell.toolTip = entry.title + (entry.detail.isEmpty ? "" : "\n" + entry.detail)
         NSLayoutConstraint.activate([content.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 5), content.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -5), content.centerYAnchor.constraint(equalTo: cell.centerYAnchor), icon.widthAnchor.constraint(equalToConstant: 16), title.widthAnchor.constraint(equalTo: labels.widthAnchor)])
         if showDetail { detail.widthAnchor.constraint(equalTo: labels.widthAnchor).isActive = true }
         return cell
     }
-    func dispose() { filterWork?.cancel() }
+    func dispose() {
+        filterWork?.cancel()
+        onDestination = nil; onOpen = nil; onFilter = nil; onBack = nil
+        onNext = nil; onPrevious = nil; onRefresh = nil; onItemMenu = nil; onWorkspaceMenu = nil
+    }
     deinit { filterWork?.cancel() }
 }

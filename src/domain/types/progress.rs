@@ -39,7 +39,7 @@ pub enum EngineProgressStatus {
     Cancelled,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EngineProgressMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
@@ -53,6 +53,18 @@ pub struct EngineProgressMetadata {
     pub completed_steps: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "totalSteps")]
     pub total_steps: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub files: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "previewKind")]
+    pub preview_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "previewText")]
+    pub preview_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "previewLimited")]
+    pub preview_limited: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "linesAdded")]
+    pub lines_added: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "linesRemoved")]
+    pub lines_removed: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

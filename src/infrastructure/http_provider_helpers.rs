@@ -220,6 +220,7 @@ pub(crate) fn emit_stream_progress(
             item_type: Some("llm".to_string()),
             completed_steps: None,
             total_steps: None,
+            ..Default::default()
         }),
     });
 }

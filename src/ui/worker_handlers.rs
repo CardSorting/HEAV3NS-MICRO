@@ -596,7 +596,27 @@ pub fn progress_to_walkthrough_activity(ev: &EngineProgressEvent) -> Value {
         .as_ref()
         .and_then(|m| m.item_type.as_deref())
         .unwrap_or("tool");
-    json!({
+    let files: Vec<String> = ev
+        .metadata
+        .as_ref()
+        .and_then(|m| m.files.clone())
+        .unwrap_or_default();
+    let mut meta = json!({
+        "scope": if scope == "turn" { "turn" } else { "activity" },
+        "source": source,
+        "itemType": item_type,
+        "operation": "execute",
+        "files": files
+    });
+    if let Some(m) = ev.metadata.as_ref() {
+        if let Some(la) = m.lines_added {
+            meta["linesAdded"] = json!(la);
+        }
+        if let Some(lr) = m.lines_removed {
+            meta["linesRemoved"] = json!(lr);
+        }
+    }
+    let mut out = json!({
         "activityId": ev.activity_id,
         "sequence": seq,
         "startedSequence": seq,
@@ -606,14 +626,18 @@ pub fn progress_to_walkthrough_activity(ev: &EngineProgressEvent) -> Value {
         "detail": ev.detail.clone().unwrap_or_default(),
         "timestamp": ev.timestamp as f64,
         "elapsedMs": ev.elapsed_ms.unwrap_or(0) as f64,
-        "metadata": {
-            "scope": if scope == "turn" { "turn" } else { "activity" },
-            "source": source,
-            "itemType": item_type,
-            "operation": "execute",
-            "files": []
+        "metadata": meta
+    });
+    if let Some(m) = ev.metadata.as_ref() {
+        if let (Some(kind), Some(text)) = (m.preview_kind.as_deref(), m.preview_text.as_deref()) {
+            out["preview"] = json!({
+                "kind": kind,
+                "text": text,
+                "limited": m.preview_limited.unwrap_or(false)
+            });
         }
-    })
+    }
+    out
 }
 
 /// Executes an async `task.submit` turn in the background without blocking the multiplexed JSON-RPC stdin loop!

@@ -109,7 +109,17 @@ final class ActivityCell: NSTableCellView, NSTextViewDelegate {
     private func applyLatestPreview(followOutput: Bool = false) {
         applyingPreview = true
         let origin = previewScroll.contentView.bounds.origin
-        previewText.string = latestPreview?.text ?? ""
+        let text = latestPreview?.text ?? ""
+        let kind = latestPreview?.kind
+        if kind == "diff" || kind == "code" {
+            previewText.isRichText = true
+            previewText.textStorage?.setAttributedString(CodeOutline.highlight(text, diff: kind == "diff", fontSize: 11))
+        } else {
+            previewText.isRichText = false
+            previewText.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+            previewText.textColor = .labelColor
+            previewText.string = text
+        }
         previewScroll.contentView.scroll(to: origin)
         followOutputOnLayout = followOutput && latestPreview?.kind == "output"
         updatePreviewControls()

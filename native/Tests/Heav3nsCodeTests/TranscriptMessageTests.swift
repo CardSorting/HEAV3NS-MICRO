@@ -94,4 +94,93 @@ final class TranscriptMessageTests: XCTestCase {
         openBtn.performClick(nil)
         XCTAssertEqual(opened, 1)
     }
+
+    func testLiveHighlightedDiffCardFitsAndDispatchesViewDiff() throws {
+        _ = NSApplication.shared
+        let diff = """
+        --- a/src/domain/item.rs
+        +++ b/src/domain/item.rs
+        @@ -1,2 +1,2 @@
+        -pub struct Item { pub count: u32 }
+        +pub struct Item { pub count: u64, pub active: bool }
+        """
+        let row = TranscriptRow(
+            id: "run-1-diff-tools-r0",
+            title: "Diff · src/domain/item.rs · (+1 / -1)",
+            text: "",
+            activity: true,
+            runID: "run-1",
+            activityID: "tools-r0",
+            actionTitle: "Open in Walkthrough",
+            diffText: diff,
+            diffFile: "src/domain/item.rs",
+            diffStats: "(+1 / -1)"
+        )
+        var openedDiff = 0
+        let cell = TranscriptMessageCell(row, expanded: true, toggle: {}, openCheckpoint: {}, openAction: {}, openDiff: { openedDiff += 1 })
+        for width: CGFloat in [270, 360, 680] {
+            let geometry = TranscriptMessageLayout(row, availableWidth: width)
+            cell.frame = NSRect(x: 0, y: 0, width: width, height: geometry.height)
+            cell.layoutSubtreeIfNeeded()
+            XCTAssertTrue(cell.contentFits, "\(cell.layoutIssue ?? [:])")
+            XCTAssertNotNil(geometry.diffBox)
+            XCTAssertNotNil(geometry.openDiff)
+        }
+        let buttons = cell.subviews.flatMap(\.subviews).compactMap { $0 as? NSButton }
+        let viewDiffBtn = try XCTUnwrap(buttons.first { $0.title == "View Diff" })
+        XCTAssertNotNil(buttons.first { $0.title == "Copy Diff" })
+        viewDiffBtn.performClick(nil)
+        XCTAssertEqual(openedDiff, 1)
+
+        let longDiff = (1...30).map { "+\($0)" }.joined(separator: "\n")
+        let bounded = CodeOutline.boundedDiffPreview(longDiff, maxLines: 18)
+        XCTAssertEqual(bounded.omittedLines, 12)
+        XCTAssertTrue(bounded.preview.contains("12 more line(s)"))
+    }
+
+    func testCodeOutlineMultiLineHunkAndWalkthroughDiffPreview() throws {
+        let diff = """
+        --- a/src/app.swift
+        +++ b/src/app.swift
+        @@ -10,2 +10,3 @@
+        -let a = 1
+        -let b = "old 🌱"
+        +let a = 2
+        +let b = "new 🌱"
+        +let c = true
+        """
+        let summary = CodeOutline.diffSummary(diff)
+        XCTAssertEqual(summary.added, 3)
+        XCTAssertEqual(summary.removed, 2)
+        XCTAssertEqual(summary.files, ["src/app.swift"])
+
+        let highlighted = CodeOutline.highlight(diff, diff: true, fontSize: 11)
+        XCTAssertEqual(highlighted.string, diff)
+
+        let raw: [String: Any] = [
+            "activityId": "tools-r1",
+            "sequence": 4,
+            "phase": "writing",
+            "status": "completed",
+            "message": "replace_file_content src/app.swift (+3/-2, 4ms)",
+            "metadata": [
+                "scope": "activity",
+                "itemType": "tool",
+                "operation": "execute",
+                "files": ["src/app.swift"],
+                "linesAdded": 3,
+                "linesRemoved": 2
+            ],
+            "preview": [
+                "kind": "diff",
+                "text": diff,
+                "limited": false
+            ]
+        ]
+        let act = try XCTUnwrap(WalkthroughActivity(raw))
+        XCTAssertEqual(act.preview?.kind, "diff")
+        XCTAssertEqual(act.linesAdded, 3)
+        XCTAssertEqual(act.linesRemoved, 2)
+        XCTAssertEqual(act.previewTitle, "Live diff (+3 / -2)")
+    }
 }

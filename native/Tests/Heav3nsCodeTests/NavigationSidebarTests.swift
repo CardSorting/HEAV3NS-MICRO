@@ -54,4 +54,45 @@ final class NavigationSidebarTests: XCTestCase {
         sidebar.show([], location: "No matches", message: "No matching files")
         XCTAssertEqual(table.selectedRow, -1)
     }
+
+    func testLeftClickSidebarMenusAndRowOptionsDispatch() throws {
+        _ = NSApplication.shared
+        let nav = NavigationSidebar(frame: NSRect(x: 0, y: 0, width: 250, height: 500))
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        var wsMenuCount = 0
+        var itemMenuIds = [String]()
+        nav.onWorkspaceMenu = { _ in wsMenuCount += 1 }
+        nav.onItemMenu = { entry, _ in itemMenuIds.append(entry.id) }
+        nav.show([SidebarEntry(id: "src/main.rs", title: "main.rs", detail: "", symbol: "doc", value: [:])], location: "Project", message: "")
+        nav.layoutSubtreeIfNeeded()
+        let table = descendants(nav).compactMap { $0 as? NSTableView }.first { $0.accessibilityLabel() == "Workspace items" }!
+        _ = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
+
+        let buttons = descendants(nav).compactMap { $0 as? NSButton }
+        let wsBtn = try XCTUnwrap(buttons.first { $0.accessibilityLabel() == "Sidebar workspace options" })
+        wsBtn.performClick(nil)
+        XCTAssertEqual(wsMenuCount, 1)
+
+        let rowBtn = try XCTUnwrap(buttons.first { $0.accessibilityLabel() == "Options for main.rs" })
+        rowBtn.performClick(nil)
+        XCTAssertEqual(itemMenuIds, ["src/main.rs"])
+
+        let conv = ConversationSidebar(folder: URL(fileURLWithPath: "/tmp/ws"))
+        conv.frame = NSRect(x: 0, y: 0, width: 250, height: 500)
+        var convWsMenu = 0
+        var convItemIds = [String]()
+        conv.onWorkspaceMenu = { _ in convWsMenu += 1 }
+        conv.onItemMenu = { summary, _ in convItemIds.append(summary.id) }
+        conv.show([ConversationSummary(id: "c1", title: "Main Session", detail: "Active")], selected: "c1", canSwitch: true, more: false)
+        conv.layoutSubtreeIfNeeded()
+        let convTable = descendants(conv).compactMap { $0 as? NSTableView }.first!
+        _ = convTable.view(atColumn: 0, row: 0, makeIfNecessary: true)
+        let convButtons = descendants(conv).compactMap { $0 as? NSButton }
+        let convWsBtn = try XCTUnwrap(convButtons.first { $0.title == "Workspace Menu…" })
+        convWsBtn.performClick(nil)
+        XCTAssertEqual(convWsMenu, 1)
+        let convRowBtn = try XCTUnwrap(convButtons.first { $0.accessibilityLabel() == "Options for Main Session" })
+        convRowBtn.performClick(nil)
+        XCTAssertEqual(convItemIds, ["c1"])
+    }
 }

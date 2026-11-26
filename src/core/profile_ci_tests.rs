@@ -403,4 +403,88 @@ mod tests {
             .expect_err("untrusted joyCliPath must be rejected");
         assert!(err.contains("untrusted joyCliPath"));
     }
+
+    #[tokio::test]
+    async fn test_live_streaming_progress_emits_diff_preview_and_file_metadata() {
+        use crate::domain::types::progress::{EngineProgressPhase, EngineProgressStatus};
+        use std::sync::Mutex;
+
+        let ws = TempDirGuard::new("stream-diff");
+        let domain_dir = ws.path.join("src/domain");
+        fs::create_dir_all(&domain_dir).expect("mkdir");
+        fs::write(
+            domain_dir.join("item.rs"),
+            "// [LAYER: DOMAIN]\npub struct Item { pub count: u32 }\n",
+        )
+        .expect("seed file");
+
+        let provider = ScriptedProvider::new(vec![
+            ProviderStep::tool_call(
+                "tc_diff",
+                "replace_file_content",
+                json!({
+                    "path": "src/domain/item.rs",
+                    "target": "pub struct Item { pub count: u32 }",
+                    "replacement": "pub struct Item { pub count: u64, pub active: bool }"
+                }),
+                None,
+            ),
+            ProviderStep::text("Updated Item."),
+        ]);
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events_cb = Arc::clone(&events);
+        let mut input = EngineTickInput::new("Update Item");
+        input.on_progress = Some(Arc::new(move |ev| {
+            events_cb.lock().unwrap().push(ev);
+        }));
+
+        let engine = AgentEngine::new(&ws.path, AgentConfig::default(), provider);
+        let res = engine.tick(input).await;
+        assert_eq!(res.outcome, EngineTickOutcome::Completed);
+
+        let captured = events.lock().unwrap();
+        let tool_done = captured
+            .iter()
+            .find(|ev| {
+                ev.phase == EngineProgressPhase::Tool
+                    && ev.status == EngineProgressStatus::Completed
+            })
+            .expect("completed tool progress event");
+        let meta = tool_done.metadata.as_ref().expect("progress metadata");
+        assert_eq!(
+            meta.files.as_deref(),
+            Some(&["src/domain/item.rs".to_string()][..])
+        );
+        assert_eq!(meta.preview_kind.as_deref(), Some("diff"));
+        let diff_txt = meta.preview_text.as_deref().expect("diff preview text");
+        assert!(diff_txt.contains("--- a/src/domain/item.rs"));
+        assert!(diff_txt.contains("+++ b/src/domain/item.rs"));
+        assert!(diff_txt.contains("-pub struct Item { pub count: u32 }"));
+        assert!(diff_txt.contains("+pub struct Item { pub count: u64, pub active: bool }"));
+        assert_eq!(meta.lines_added, Some(1));
+        assert_eq!(meta.lines_removed, Some(1));
+    }
+
+    #[test]
+    fn test_apply_unified_diff_emits_relative_path_and_diff_stats() {
+        use crate::infrastructure::fs_tools::dispatch_fs_tool;
+        use crate::infrastructure::transaction_journal::TransactionJournal;
+        use serde_json::Map;
+        use std::sync::Mutex;
+
+        let ws = TempDirGuard::new("apply-diff-stats");
+        let dir = ws.path.join("src/domain");
+        fs::create_dir_all(&dir).expect("mkdir");
+        fs::write(dir.join("mod.rs"), "// [LAYER: DOMAIN]\npub const A: u8 = 1;\n").expect("seed");
+
+        let patch = "--- a/src/domain/mod.rs\n+++ b/src/domain/mod.rs\n@@ -1,2 +1,2 @@\n // [LAYER: DOMAIN]\n-pub const A: u8 = 1;\n+pub const A: u8 = 2;\n";
+        let mut args = Map::new();
+        args.insert("diff".into(), json!(patch));
+        let journal = Mutex::new(TransactionJournal::new());
+        let (out, _) = dispatch_fs_tool("apply_unified_diff", &args, &ws.path, &journal).expect("apply");
+        assert_eq!(out["relativePath"], "src/domain/mod.rs");
+        assert_eq!(out["linesAdded"], 1);
+        assert_eq!(out["linesRemoved"], 1);
+        assert!(out["diff"].as_str().unwrap_or("").contains("+pub const A: u8 = 2;"));
+    }
 }

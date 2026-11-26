@@ -11,7 +11,7 @@ use crate::plumbing::fuzzy_patch::{
 };
 use crate::plumbing::hash_and_math::fnv1a_32;
 use crate::plumbing::secret_redactor::SafetyPolicy;
-use crate::plumbing::text_tokens::safe_utf8_slice;
+use crate::plumbing::text_tokens::{render_unified_diff, safe_utf8_prefix, safe_utf8_slice};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -19,6 +19,39 @@ use std::path::Path;
 use std::sync::Mutex;
 
 const MAX_FS_TEXT_READ_BYTES: usize = 8 * 1024 * 1024;
+const MAX_STREAM_DIFF_BYTES: usize = 3_072;
+
+fn build_diff_stats_and_preview(
+    cwd: &Path,
+    resolved: &Path,
+    before: &str,
+    after: &str,
+) -> (String, String, usize, usize, bool) {
+    let canon_cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
+    let rel = resolved
+        .strip_prefix(&canon_cwd)
+        .or_else(|_| resolved.strip_prefix(cwd))
+        .unwrap_or(resolved)
+        .to_string_lossy()
+        .replace('\\', "/");
+    let full = render_unified_diff(&rel, before, after);
+    let mut added = 0usize;
+    let mut removed = 0usize;
+    for line in full.lines() {
+        if line.starts_with('+') && !line.starts_with("+++") {
+            added += 1;
+        } else if line.starts_with('-') && !line.starts_with("---") {
+            removed += 1;
+        }
+    }
+    let truncated = full.len() > MAX_STREAM_DIFF_BYTES;
+    let preview = if truncated {
+        format!("{}\n...[diff truncated]", safe_utf8_prefix(&full, MAX_STREAM_DIFF_BYTES))
+    } else {
+        full
+    };
+    (rel, preview, added, removed, truncated)
+}
 
 /// Dispatches native filesystem, diff, symbol, grep, and skill tools against the workspace
 /// with dual-scope credential checks, UTF-8 safe offsets, atomic file writes, and complete journaling.
@@ -91,14 +124,22 @@ pub fn dispatch_fs_tool(
                 .ok_or("Missing 'path'")?;
             let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
             let resolved = resolve_and_verify_workspace_path(cwd, raw_path)?;
+            let before = read_text_file_bounded(&resolved, MAX_FS_TEXT_READ_BYTES).unwrap_or_default();
             if let Ok(mut j) = journal.lock() {
                 j.record_mutation("write_file", &resolved);
             }
             atomic_write_file(&resolved, content.as_bytes())?;
+            let (rel, diff_text, lines_added, lines_removed, diff_truncated) =
+                build_diff_stats_and_preview(cwd, &resolved, &before, content);
             let mut out = json!({
                 "success": true,
                 "path": resolved.to_string_lossy(),
-                "bytesWritten": content.len()
+                "relativePath": rel,
+                "bytesWritten": content.len(),
+                "diff": diff_text,
+                "linesAdded": lines_added,
+                "linesRemoved": lines_removed,
+                "diffTruncated": diff_truncated
             });
             if let Some(adv) = SafetyPolicy::check_protected_instruction_write(&resolved) {
                 out["governanceAdvisory"] = Value::String(adv);
@@ -130,13 +171,20 @@ pub fn dispatch_fs_tool(
             }
             let updated = original.replacen(&matched_target, &eff_replacement, 1);
             atomic_write_file(&resolved, updated.as_bytes())?;
+            let (rel, diff_text, lines_added, lines_removed, diff_truncated) =
+                build_diff_stats_and_preview(cwd, &resolved, &original, &updated);
             Ok((
                 json!({
                     "success": true,
                     "path": resolved.to_string_lossy(),
+                    "relativePath": rel,
                     "confidence": confidence,
                     "autoHealed": confidence < 1.0 || drift_kind.is_some(),
-                    "escapeDriftCorrected": drift_kind
+                    "escapeDriftCorrected": drift_kind,
+                    "diff": diff_text,
+                    "linesAdded": lines_added,
+                    "linesRemoved": lines_removed,
+                    "diffTruncated": diff_truncated
                 }),
                 false,
             ))
@@ -154,7 +202,8 @@ pub fn dispatch_fs_tool(
                 return Err("No replacement chunks provided".to_string());
             }
             let resolved = resolve_and_verify_workspace_path(cwd, raw_path)?;
-            let mut current = read_text_file_bounded(&resolved, MAX_FS_TEXT_READ_BYTES)?;
+            let original = read_text_file_bounded(&resolved, MAX_FS_TEXT_READ_BYTES)?;
+            let mut current = original.clone();
             let mut applied = 0usize;
             for (idx, chunk) in chunks.iter().enumerate() {
                 let obj = chunk
@@ -180,11 +229,18 @@ pub fn dispatch_fs_tool(
                 j.record_mutation("multi_replace_file_content", &resolved);
             }
             atomic_write_file(&resolved, current.as_bytes())?;
+            let (rel, diff_text, lines_added, lines_removed, diff_truncated) =
+                build_diff_stats_and_preview(cwd, &resolved, &original, &current);
             Ok((
                 json!({
                     "success": true,
                     "path": resolved.to_string_lossy(),
-                    "replacementsApplied": applied
+                    "relativePath": rel,
+                    "replacementsApplied": applied,
+                    "diff": diff_text,
+                    "linesAdded": lines_added,
+                    "linesRemoved": lines_removed,
+                    "diffTruncated": diff_truncated
                 }),
                 false,
             ))
@@ -230,8 +286,19 @@ pub fn dispatch_fs_tool(
                 updated.push('\n');
             }
             atomic_write_file(&resolved, updated.as_bytes())?;
+            let (rel, diff_text, lines_added, lines_removed, diff_truncated) =
+                build_diff_stats_and_preview(cwd, &resolved, &original, &updated);
             Ok((
-                json!({ "success": true, "path": resolved.to_string_lossy(), "line": line_num }),
+                json!({
+                    "success": true,
+                    "path": resolved.to_string_lossy(),
+                    "relativePath": rel,
+                    "line": line_num,
+                    "diff": diff_text,
+                    "linesAdded": lines_added,
+                    "linesRemoved": lines_removed,
+                    "diffTruncated": diff_truncated
+                }),
                 false,
             ))
         }
@@ -245,6 +312,10 @@ pub fn dispatch_fs_tool(
                 return Err("No valid Unified Diff or V4A patch operations found".to_string());
             }
             let (mut modified, mut errors) = (Vec::new(), Vec::new());
+            let mut diff_chunks = Vec::new();
+            let mut total_added = 0usize;
+            let mut total_removed = 0usize;
+            let mut any_truncated = false;
             for op in &ops {
                 let resolved = match resolve_and_verify_workspace_path(cwd, &op.file_path) {
                     Ok(p) => p,
@@ -255,12 +326,18 @@ pub fn dispatch_fs_tool(
                 };
                 match op.op_type {
                     "delete" => {
+                        let before = read_text_file_bounded(&resolved, MAX_FS_TEXT_READ_BYTES).unwrap_or_default();
                         let tx = journal
                             .lock()
                             .ok()
                             .map(|mut j| j.record_mutation("apply_unified_diff", &resolved));
                         match fs::remove_file(&resolved) {
-                            Ok(_) => modified.push(op.file_path.clone()),
+                            Ok(_) => {
+                                let (rel, d, a, r, tr) = build_diff_stats_and_preview(cwd, &resolved, &before, "");
+                                total_added += a; total_removed += r; any_truncated |= tr;
+                                diff_chunks.push(d);
+                                modified.push(rel);
+                            }
                             Err(e) => {
                                 if let (Some(id), Ok(mut j)) = (tx, journal.lock()) {
                                     j.discard_tx(&id);
@@ -276,7 +353,12 @@ pub fn dispatch_fs_tool(
                             .ok()
                             .map(|mut j| j.record_mutation("apply_unified_diff", &resolved));
                         match atomic_write_file(&resolved, content.as_bytes()) {
-                            Ok(_) => modified.push(op.file_path.clone()),
+                            Ok(_) => {
+                                let (rel, d, a, r, tr) = build_diff_stats_and_preview(cwd, &resolved, "", &content);
+                                total_added += a; total_removed += r; any_truncated |= tr;
+                                diff_chunks.push(d);
+                                modified.push(rel);
+                            }
                             Err(e) => {
                                 if let (Some(id), Ok(mut j)) = (tx, journal.lock()) {
                                     j.discard_tx(&id);
@@ -292,7 +374,12 @@ pub fn dispatch_fs_tool(
                                     j.record_mutation("apply_unified_diff", &resolved)
                                 });
                                 match atomic_write_file(&resolved, updated.as_bytes()) {
-                                    Ok(_) => modified.push(op.file_path.clone()),
+                                    Ok(_) => {
+                                        let (rel, d, a, r, tr) = build_diff_stats_and_preview(cwd, &resolved, &orig, &updated);
+                                        total_added += a; total_removed += r; any_truncated |= tr;
+                                        diff_chunks.push(d);
+                                        modified.push(rel);
+                                    }
                                     Err(e) => {
                                         if let (Some(id), Ok(mut j)) = (tx, journal.lock()) {
                                             j.discard_tx(&id);
@@ -315,8 +402,24 @@ pub fn dispatch_fs_tool(
             if !errors.is_empty() && modified.is_empty() {
                 return Err(errors.join("; "));
             }
+            let combined = diff_chunks.join("\n");
+            let diff_truncated = any_truncated || combined.len() > MAX_STREAM_DIFF_BYTES;
+            let diff_preview = if combined.len() > MAX_STREAM_DIFF_BYTES {
+                format!("{}\n...[diff truncated]", safe_utf8_prefix(&combined, MAX_STREAM_DIFF_BYTES))
+            } else {
+                combined
+            };
             Ok((
-                json!({ "success": errors.is_empty(), "modifiedFiles": modified, "errors": errors }),
+                json!({
+                    "success": errors.is_empty(),
+                    "modifiedFiles": modified,
+                    "relativePath": modified.first().cloned().unwrap_or_default(),
+                    "errors": errors,
+                    "diff": diff_preview,
+                    "linesAdded": total_added,
+                    "linesRemoved": total_removed,
+                    "diffTruncated": diff_truncated
+                }),
                 false,
             ))
         }

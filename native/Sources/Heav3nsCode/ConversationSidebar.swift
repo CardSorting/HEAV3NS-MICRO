@@ -17,6 +17,8 @@ final class ConversationSidebar: NSVisualEffectView, NSTableViewDataSource, NSTa
     var onAccount: (() -> Void)?
     var onMore: (() -> Void)?
     var onRecent: (() -> Void)?
+    var onItemMenu: ((ConversationSummary, NSView) -> Void)?
+    var onWorkspaceMenu: ((NSView) -> Void)?
     private let table = NSTableView()
     private let search = NSSearchField()
     private let message = JourneyStyle.label("Connecting to LUMI…", size: 11, secondary: true)
@@ -28,6 +30,10 @@ final class ConversationSidebar: NSVisualEffectView, NSTableViewDataSource, NSTa
     private var hasEarlierConversations = false
     private var suppress = false
     private lazy var create = JourneyButton("New conversation", symbol: "plus.bubble") { [weak self] in self?.onNew?() }
+    private lazy var workspaceMenu: JourneyButton = JourneyButton("Workspace Menu…", symbol: "ellipsis.circle") { [weak self] in
+        guard let self else { return }
+        self.onWorkspaceMenu?(self.workspaceMenu)
+    }
     private lazy var more = JourneyButton("Earlier conversations") { [weak self] in self?.onMore?() }
     private lazy var recent = JourneyButton("Latest conversations") { [weak self] in self?.onRecent?() }
 
@@ -51,8 +57,9 @@ final class ConversationSidebar: NSVisualEffectView, NSTableViewDataSource, NSTa
         let projects = JourneyButton("Project Library…", symbol: "folder") { [weak self] in self?.onProjects?() }
         projects.toolTip = "Browse or open saved projects (⌘0)"
         let account = JourneyButton("Account", symbol: "person.crop.circle") { [weak self] in self?.onAccount?() }
-        for button in [create, projects, account] { button.alignment = .left; button.bezelStyle = .inline; button.heightAnchor.constraint(equalToConstant: 32).isActive = true }
-        let root = JourneyStyle.stack([heading, JourneyStyle.rule(), create, JourneyStyle.label("Conversations", size: 11, weight: .semibold, secondary: true), search, scroll, message, more, recent, JourneyStyle.rule(), projects, account], spacing: 12)
+        workspaceMenu.toolTip = "Open all workspace features, panels, and navigation options"
+        for button in [create, workspaceMenu, projects, account] { button.alignment = .left; button.bezelStyle = .inline; button.heightAnchor.constraint(equalToConstant: 32).isActive = true }
+        let root = JourneyStyle.stack([heading, JourneyStyle.rule(), create, JourneyStyle.label("Conversations", size: 11, weight: .semibold, secondary: true), search, scroll, message, more, recent, JourneyStyle.rule(), workspaceMenu, projects, account], spacing: 12)
         addSubview(root); JourneyStyle.pin(root, to: self, inset: 14)
         for view in root.arrangedSubviews { view.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true }
         more.isHidden = true; recent.isHidden = true; create.isEnabled = false
@@ -105,6 +112,16 @@ final class ConversationSidebar: NSVisualEffectView, NSTableViewDataSource, NSTa
         let labels = JourneyStyle.stack([name, detail], spacing: 4)
         let icon = NSImageView(image: NSImage(systemSymbolName: "bubble.left", accessibilityDescription: nil) ?? NSImage())
         icon.widthAnchor.constraint(equalToConstant: 18).isActive = true
+        let menuBtn = JourneyButton("", symbol: "ellipsis.circle") { [weak self] in
+            guard let self else { return }
+            let anchor = self.table.view(atColumn: 0, row: row, makeIfNecessary: false) ?? self.table
+            self.onItemMenu?(item, anchor)
+        }
+        menuBtn.bezelStyle = .inline; menuBtn.isBordered = false
+        menuBtn.toolTip = "Conversation options…"
+        menuBtn.setAccessibilityLabel("Options for \(item.title)")
+        menuBtn.widthAnchor.constraint(equalToConstant: 24).isActive = true
+        menuBtn.heightAnchor.constraint(equalToConstant: 24).isActive = true
         let delete = JourneyButton("", symbol: "trash") { [weak self] in
             guard let self, self.table.isEnabled else { return }
             self.onDelete?(item.id)
@@ -118,7 +135,7 @@ final class ConversationSidebar: NSVisualEffectView, NSTableViewDataSource, NSTa
         delete.heightAnchor.constraint(equalToConstant: 28).isActive = true
         deleteButtons.append(delete)
         labels.setContentCompressionResistancePriority(.init(1), for: .horizontal)
-        let root = JourneyStyle.stack([icon, labels, delete], vertical: false, spacing: 8)
+        let root = JourneyStyle.stack([icon, labels, delete, menuBtn], vertical: false, spacing: 6)
         cell.addSubview(root); JourneyStyle.pin(root, to: cell, inset: 6)
         name.widthAnchor.constraint(equalTo: labels.widthAnchor).isActive = true
         detail.widthAnchor.constraint(equalTo: labels.widthAnchor).isActive = true
@@ -128,6 +145,7 @@ final class ConversationSidebar: NSVisualEffectView, NSTableViewDataSource, NSTa
     func dispose() {
         onSelect = nil; onDelete = nil; onNew = nil; onMore = nil
         onRecent = nil; onProjects = nil; onAccount = nil
+        onItemMenu = nil; onWorkspaceMenu = nil
         deleteButtons.removeAll()
     }
 }

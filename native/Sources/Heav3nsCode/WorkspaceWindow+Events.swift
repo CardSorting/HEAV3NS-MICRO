@@ -571,6 +571,30 @@ extension WorkspaceWindow {
                 let childTitle = parsed?.displayTitle ?? (activity["message"] as? String ?? "Activity")
                 next.append(TranscriptRow(id: aid, title: "\(workerTag)\(childTitle) · \(phase)\(elapsed)\(captionSuffix)", text: expandedText, activity: true, evidence: expandedActions.contains(aid) ? rowEvidence : nil, runID: id, activityID: rawID.isEmpty ? nil : rawID, actionTitle: expandedActions.contains(aid) ? "Open in Walkthrough" : nil))
             }
+            for parsed in parsedActivities where parsed.scope != "turn" && parsed.preview?.kind == "diff" {
+                if let diffText = parsed.preview?.text, !diffText.isEmpty {
+                    let summary = CodeOutline.diffSummary(diffText)
+                    let file = parsed.files.first ?? summary.files.first
+                    let added = parsed.linesAdded ?? summary.added
+                    let removed = parsed.linesRemoved ?? summary.removed
+                    let stats = "(+\(added) / -\(removed))"
+                    let fileLabel = file ?? "Workspace edit"
+                    let diffTitle = "Diff · \(fileLabel) · \(stats)"
+                    next.append(TranscriptRow(
+                        id: "\(id)-diff-\(parsed.id)",
+                        title: diffTitle,
+                        text: "",
+                        activity: true,
+                        evidence: parsed.files.count > 1 ? parsed.files.joined(separator: " · ") : nil,
+                        runID: id,
+                        activityID: parsed.id,
+                        actionTitle: "Open in Walkthrough",
+                        diffText: diffText,
+                        diffFile: file,
+                        diffStats: stats
+                    ))
+                }
+            }
             if let response = run["response"] as? String {
                 let route = run["modelSelection"] as? [String: Any]
                 let model = route?["model"] as? String
