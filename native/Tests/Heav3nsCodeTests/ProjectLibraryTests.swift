@@ -20,7 +20,7 @@ final class ProjectLibraryTests: XCTestCase {
     func testCreationIsExclusiveAndNeverChangesExistingContent() throws {
         let root = try directory()
         let created = try ProjectCreation.create(name: "My Project 🌤", in: root)
-        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: created.path), [])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: created.path), [".git"])
         let file = created.appendingPathComponent("keep.txt")
         try "Keep me".write(to: file, atomically: true, encoding: .utf8)
         XCTAssertThrowsError(try ProjectCreation.create(name: created.lastPathComponent, in: root))

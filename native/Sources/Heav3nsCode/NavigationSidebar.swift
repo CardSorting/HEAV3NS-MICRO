@@ -3,7 +3,7 @@ import AppKit
 
 enum WorkspaceDestination: Int, CaseIterable {
     case files, changes, sessions
-    var title: String { ["Files", "Changes", "Recorded Runs"][rawValue] }
+    var title: String { ["Files", "Source Control", "Recorded Runs"][rawValue] }
     var symbol: String { ["folder", "arrow.triangle.branch", "clock"][rawValue] }
 }
 
@@ -27,6 +27,8 @@ final class NavigationSidebar: NSView, NSTableViewDataSource, NSTableViewDelegat
     var onItemMenu: ((SidebarEntry, NSView) -> Void)?
     var buildItemMenu: ((SidebarEntry) -> NSMenu?)?
     var onWorkspaceMenu: ((NSView) -> Void)?
+    var onInitGit: (() -> Void)?
+    var onOpenSourceControl: (() -> Void)?
     private(set) var destination = WorkspaceDestination.files
     private(set) var entries = [SidebarEntry]()
     private let destinations = NSTableView()
@@ -42,6 +44,10 @@ final class NavigationSidebar: NSView, NSTableViewDataSource, NSTableViewDelegat
     private let destinationScroll = NSScrollView()
     private let destinationRule = NSBox()
     private let root = NSStackView()
+    private let sourceControlBar = NSStackView()
+    private let initGitRow = NSStackView()
+    private let openSourceControlRow = NSStackView()
+    private let gitBranchLabel = NSTextField(labelWithString: "main")
     private var compact = false
     private var optionsButton: NSButton!
     var previewsSelection = true
@@ -92,6 +98,27 @@ final class NavigationSidebar: NSView, NSTableViewDataSource, NSTableViewDelegat
         root.addArrangedSubview(pathBar)
         search.placeholderString = "Filter this folder"; search.delegate = self; search.setAccessibilityLabel("Filter workspace items")
         root.addArrangedSubview(search)
+
+        sourceControlBar.orientation = .vertical; sourceControlBar.alignment = .leading; sourceControlBar.spacing = 6
+        let initLabel = NSTextField(labelWithString: "Not a Git repository")
+        initLabel.font = .systemFont(ofSize: 11); initLabel.textColor = .secondaryLabelColor
+        initLabel.setContentHuggingPriority(.init(1), for: .horizontal)
+        let initBtn = JourneyButton("Initialize Git", symbol: "arrow.triangle.branch") { [weak self] in self?.onInitGit?() }
+        initBtn.controlSize = .small; initBtn.bezelStyle = .rounded
+        initGitRow.orientation = .horizontal; initGitRow.alignment = .centerY; initGitRow.spacing = 6
+        [initLabel, initBtn].forEach(initGitRow.addArrangedSubview)
+
+        let openSCBtn = JourneyButton("Open Source Control…", symbol: "arrow.triangle.branch") { [weak self] in self?.onOpenSourceControl?() }
+        openSCBtn.controlSize = .small; openSCBtn.bezelStyle = .rounded; openSCBtn.bezelColor = .controlAccentColor
+        gitBranchLabel.font = .systemFont(ofSize: 11, weight: .semibold); gitBranchLabel.lineBreakMode = .byTruncatingMiddle
+        gitBranchLabel.setContentHuggingPriority(.init(1), for: .horizontal)
+        openSourceControlRow.orientation = .horizontal; openSourceControlRow.alignment = .centerY; openSourceControlRow.spacing = 6
+        [gitBranchLabel, openSCBtn].forEach(openSourceControlRow.addArrangedSubview)
+
+        [initGitRow, openSourceControlRow].forEach(sourceControlBar.addArrangedSubview)
+        sourceControlBar.isHidden = true
+        root.addArrangedSubview(sourceControlBar)
+
         let scroll = NSScrollView(); scroll.documentView = items; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
         scroll.setContentHuggingPriority(.init(1), for: .vertical); root.addArrangedSubview(scroll)
         message.font = .systemFont(ofSize: 11); message.textColor = .secondaryLabelColor; root.addArrangedSubview(message)
@@ -111,7 +138,8 @@ final class NavigationSidebar: NSView, NSTableViewDataSource, NSTableViewDelegat
         let footer = NSStackView(views: [refresh, previous, next, options]); footer.spacing = 6; root.addArrangedSubview(footer)
         addSubview(root); root.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([root.leadingAnchor.constraint(equalTo: leadingAnchor), root.trailingAnchor.constraint(equalTo: trailingAnchor), root.topAnchor.constraint(equalTo: topAnchor), root.bottomAnchor.constraint(equalTo: bottomAnchor)])
-        for child in [destinationScroll, rule, pathBar, search, scroll, message, footer] { child.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -16).isActive = true }
+        for child in [destinationScroll, rule, pathBar, search, sourceControlBar, scroll, message, footer] { child.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -16).isActive = true }
+        for row in [initGitRow, openSourceControlRow] { row.widthAnchor.constraint(equalTo: sourceControlBar.widthAnchor).isActive = true }
         select(.files, notify: false)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) unavailable") }
@@ -119,7 +147,16 @@ final class NavigationSidebar: NSView, NSTableViewDataSource, NSTableViewDelegat
         resetFilter(); destination = value
         suppressSelection = true; destinations.selectRowIndexes(IndexSet(integer: value.rawValue), byExtendingSelection: false); suppressSelection = false
         search.placeholderString = value == .files ? "Filter this folder" : value == .sessions ? "Filter runs on this page" : "Filter changed files"
+        sourceControlBar.isHidden = value != .changes
+        items.rowHeight = value == .changes ? 24 : (compact ? 32 : 42)
         if notify { onDestination?(value) }
+    }
+
+    func setSourceControlState(isGitRepo: Bool, branch: String, hasChanges: Bool) {
+        sourceControlBar.isHidden = destination != .changes
+        initGitRow.isHidden = isGitRepo
+        openSourceControlRow.isHidden = false
+        gitBranchLabel.stringValue = isGitRepo ? (hasChanges ? "\(branch)*" : branch) : "Not Git"
     }
     func show(_ entries: [SidebarEntry], location: String, message: String, canGoBack: Bool = false, more: Bool = false, hasPrevious: Bool = false) {
         let selected = items.selectedRow >= 0 && self.entries.indices.contains(items.selectedRow) ? self.entries[items.selectedRow].id : nil
@@ -161,7 +198,9 @@ final class NavigationSidebar: NSView, NSTableViewDataSource, NSTableViewDelegat
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard !suppressSelection, let table = notification.object as? NSTableView else { return }
         if table === destinations, let value = WorkspaceDestination(rawValue: table.selectedRow) { select(value) }
-        else if table === items, previewsSelection, items.isEnabled, entries.indices.contains(table.selectedRow), entries[table.selectedRow].value["directory"] as? Bool != true { onOpen?(entries[table.selectedRow]) }
+        else if table === items, previewsSelection, items.isEnabled, entries.indices.contains(table.selectedRow),
+                entries[table.selectedRow].value["isSectionHeader"] as? Bool != true,
+                entries[table.selectedRow].value["directory"] as? Bool != true { onOpen?(entries[table.selectedRow]) }
     }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let entry: SidebarEntry
@@ -174,14 +213,45 @@ final class NavigationSidebar: NSView, NSTableViewDataSource, NSTableViewDelegat
             entry = entries[row]
         }
         let cell = NSTableCellView()
+        if entry.value["isSectionHeader"] as? Bool == true {
+            let header = NSTextField(labelWithString: entry.title)
+            header.font = .systemFont(ofSize: 10.5, weight: .bold)
+            header.textColor = .secondaryLabelColor
+            header.translatesAutoresizingMaskIntoConstraints = false
+            cell.addSubview(header)
+            var views: [NSView] = [header]
+            if let count = entry.value["sectionCount"] as? Int {
+                let badge = NSTextField(labelWithString: " \(count) ")
+                badge.font = .systemFont(ofSize: 10, weight: .semibold)
+                badge.textColor = .secondaryLabelColor
+                badge.wantsLayer = true
+                badge.layer?.cornerRadius = 6
+                badge.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.08).cgColor
+                badge.setContentHuggingPriority(.required, for: .horizontal)
+                views.append(badge)
+            }
+            let bar = NSStackView(views: views)
+            bar.orientation = .horizontal; bar.alignment = .centerY; bar.spacing = 4; bar.translatesAutoresizingMaskIntoConstraints = false
+            header.setContentHuggingPriority(.init(1), for: .horizontal)
+            cell.addSubview(bar)
+            NSLayoutConstraint.activate([bar.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 6), bar.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6), bar.centerYAnchor.constraint(equalTo: cell.centerYAnchor)])
+            return cell
+        }
         let icon = NSImageView(image: NSImage(systemSymbolName: entry.symbol, accessibilityDescription: nil) ?? NSImage())
-        icon.contentTintColor = .controlAccentColor
+        icon.contentTintColor = destination == .changes ? (entry.value["staged"] as? Bool == true && entry.value["section"] as? String == "staged" ? .systemGreen : .systemOrange) : .controlAccentColor
         let title = NSTextField(labelWithString: entry.title); title.font = .systemFont(ofSize: 12); title.lineBreakMode = .byTruncatingMiddle
         let detail = NSTextField(labelWithString: entry.detail); detail.font = .systemFont(ofSize: 10); detail.textColor = .secondaryLabelColor; detail.lineBreakMode = .byTruncatingMiddle
-        let showDetail = !entry.detail.isEmpty && (!compact || destination != .files)
+        let showDetail = !entry.detail.isEmpty && destination != .changes && (!compact || destination != .files)
         let labels = NSStackView(views: showDetail ? [title, detail] : [title]); labels.orientation = .vertical; labels.alignment = .leading; labels.spacing = 2
         var rowViews: [NSView] = [icon, labels]
         if tableView === items {
+            if destination == .changes, let badgeChar = entry.value["statusBadge"] as? String {
+                let statusLabel = NSTextField(labelWithString: badgeChar)
+                statusLabel.font = .monospacedSystemFont(ofSize: 10.5, weight: .bold)
+                statusLabel.textColor = badgeChar == "U" || badgeChar == "A" ? .systemGreen : badgeChar == "D" ? .systemRed : .systemOrange
+                statusLabel.setContentHuggingPriority(.required, for: .horizontal)
+                rowViews.append(statusLabel)
+            }
             let itemMenu = JourneyButton("", symbol: "ellipsis.circle") { [weak self] in
                 guard let self, let anchor = self.items.view(atColumn: 0, row: row, makeIfNecessary: false) else { return }
                 self.onItemMenu?(entry, anchor)
@@ -202,6 +272,7 @@ final class NavigationSidebar: NSView, NSTableViewDataSource, NSTableViewDelegat
         filterWork?.cancel()
         onDestination = nil; onOpen = nil; onFilter = nil; onBack = nil
         onNext = nil; onPrevious = nil; onRefresh = nil; onItemMenu = nil; buildItemMenu = nil; onWorkspaceMenu = nil
+        onInitGit = nil; onOpenSourceControl = nil
         items.contextMenuForRow = nil
     }
     deinit { filterWork?.cancel() }

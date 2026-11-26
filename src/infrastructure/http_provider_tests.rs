@@ -157,6 +157,21 @@ mod tests {
         assert!(bytes2 > 0);
     }
 
+    #[test]
+    fn test_streaming_edit_tool_synthesizes_live_diff_preview_from_partial_json() {
+        use crate::infrastructure::http_provider_helpers::extract_openai_usage;
+        use crate::infrastructure::sse_and_response_parsers::IncrementalSseAggregator;
+        let mut agg = IncrementalSseAggregator::new("openai", extract_openai_usage, 1024 * 1024);
+        let chunk = b"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"edit_file\",\"arguments\":\"{\\\"Path\\\":\\\"src/app.rs\\\",\\\"Target\\\":\\\"let x = 1;\\\",\\\"Replacement\\\":\\\"let x = 2;\\nlet y = 3\"}}]}}]}\n\n";
+        agg.push_bytes(chunk).unwrap();
+        let (file_path, diff_text) = agg.stream_diff_preview().expect("live diff synthesized");
+        assert_eq!(file_path.as_deref(), Some("src/app.rs"));
+        assert!(diff_text.contains("--- a/src/app.rs"));
+        assert!(diff_text.contains("-let x = 1;"));
+        assert!(diff_text.contains("+let x = 2;"));
+        assert!(diff_text.contains("+let y = 3"));
+    }
+
     #[tokio::test]
     async fn test_complete_with_progress_honors_cancellation_and_timeout() {
         let provider = HttpProvider::new("openai", "http://127.0.0.1:9/v1", Some("sk-test".to_string()), 5_000);

@@ -25,6 +25,8 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
     var maxSpecialists = 4
     let jumpButton = NSButton(title: "Jump to Latest", target: nil, action: nil)
     let composer = ComposerView()
+    let composerSurface = NSStackView()
+    var composerHeightConstraint: NSLayoutConstraint?
     let attachmentBar = AttachmentTokenBar()
     let jumpBar = NSPathControl()
     let toolbarHistory = NSSegmentedControl(images: [
@@ -67,6 +69,7 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
     let projectRun = ProjectRunView()
     let projectRunScroll = NSScrollView()
     var checkpointWindow: CheckpointWindow?
+    var sourceControlWindow: SourceControlWindow?
     var work = NSStackView()
     let centerPreview = NativeAppPreviewView()
     var chatChromeViews = [NSView]()
@@ -301,6 +304,7 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         centerPreview.dispose()
         modelPicker?.dispose(); modelPicker?.dismiss(restoreFocus: false); modelPicker = nil
         checkpointWindow?.dispose(); checkpointWindow = nil
+        sourceControlWindow?.close(); sourceControlWindow = nil
         onProjects = nil; onAccount = nil
     }
 
@@ -399,6 +403,7 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         navigation.onItemMenu = { [weak self] entry, anchor in self?.presentNavigationEntryMenu(entry, from: anchor) }
         navigation.buildItemMenu = { [weak self] entry in self?.buildNavigationEntryMenu(entry) }
         navigation.onWorkspaceMenu = { [weak self] anchor in self?.presentSidebarWorkspaceMenu(from: anchor) }
+        configureSourceControlCallbacks()
         navigation.onFilter = { [weak self] query in
             guard let self else { return }; self.navigationQuery = query
             if self.navigation.destination == .files { self.loadDirectory(self.directory) }
@@ -451,7 +456,9 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         breadcrumb.setAccessibilityLabel("Inspected file path"); breadcrumb.isHidden = true
         inspector.addArrangedSubview(breadcrumb); breadcrumb.widthAnchor.constraint(equalTo: inspector.widthAnchor).isActive = true
         diffScope.target = self; diffScope.action = #selector(changeDiffScope); diffScope.isHidden = true; diffScope.selectedSegment = 0
-        inspector.addArrangedSubview(diffScope)
+        let openSCBtn = JourneyButton("Source Control…", symbol: "arrow.triangle.branch") { [weak self] in self?.showSourceControl() }
+        openSCBtn.controlSize = .small; openSCBtn.bezelStyle = .rounded; openSCBtn.toolTip = "Open dedicated Source Control window (⇧⌘G)"
+        inspector.addArrangedSubview(stack([diffScope, openSCBtn], spacing: 8))
         recordedOutput.target = self; recordedOutput.action = #selector(openRecordedOutput); recordedOutput.bezelStyle = .rounded; recordedOutput.isHidden = true
         relatedEvidence.target = self; relatedEvidence.action = #selector(openRelatedEvidence); relatedEvidence.isHidden = true
         relatedEvidence.setAccessibilityLabel("Related evidence for this instruction")
@@ -544,6 +551,7 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         composer.setAccessibilityLabel("Instruction to LUMI")
         composer.submit = { [weak self] in self?.submit() }
         composer.onStepPosture = { [weak self] in self?.stepPosture() }
+        composer.onTextGeometryInvalidated = { [weak self] in self?.updateComposerLayout(animated: true) }
         composer.onFileDropped = { [weak self] url in
             guard let self else { return }
             let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? 0
@@ -557,8 +565,9 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         attachmentBar.onChange = { [weak self] in self?.saveDraft() }
         let composerScroll = NSScrollView(); composerScroll.documentView = composer; composerScroll.hasVerticalScroller = true
         composerScroll.borderType = .noBorder
-        composerScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-        composerScroll.heightAnchor.constraint(lessThanOrEqualToConstant: 160).isActive = true
+        let heightConstraint = composerScroll.heightAnchor.constraint(equalToConstant: 26)
+        heightConstraint.priority = .defaultHigh; heightConstraint.isActive = true
+        composerHeightConstraint = heightConstraint
         let composerBody = stack([attachmentBar, composerScroll], vertical: true, spacing: 6)
         attachmentBar.widthAnchor.constraint(equalTo: composerBody.widthAnchor).isActive = true
         composerScroll.widthAnchor.constraint(equalTo: composerBody.widthAnchor).isActive = true
@@ -566,8 +575,7 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         let composerBottomBar = NSStackView()
         composerBottomBar.orientation = .horizontal; composerBottomBar.alignment = .centerY; composerBottomBar.spacing = 8
         composerBottomBar.translatesAutoresizingMaskIntoConstraints = false
-        status.setContentHuggingPriority(.init(1), for: .horizontal)
-        status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        status.setContentHuggingPriority(.init(1), for: .horizontal); status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         composerBottomBar.addArrangedSubview(status)
         queueButton.target = self; queueButton.action = #selector(showQueue); queueButton.bezelStyle = .rounded
         queueButton.toolTip = "Review, edit, or remove queued instructions (⌘4)"
@@ -577,24 +585,21 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         queueContent.onRemove = { [weak self] in self?.removeQueued($0) }
         queueContent.onEdit = { [weak self] in self?.editQueued($0) }
         sendButton.target = self; sendButton.action = #selector(submit); sendButton.bezelStyle = .rounded
-        sendButton.bezelColor = .controlAccentColor
-        sendButton.keyEquivalent = "\r"
+        sendButton.bezelColor = .controlAccentColor; sendButton.keyEquivalent = "\r"
         sendButton.setAccessibilityLabel("Send instruction to LUMI")
-        stopSendButton.target = self; stopSendButton.action = #selector(stopAndSend); stopSendButton.bezelStyle = .rounded
-        stopSendButton.isHidden = true
-        composerBottomBar.addArrangedSubview(stopSendButton)
-        composerBottomBar.addArrangedSubview(stopButton)
-        composerBottomBar.addArrangedSubview(sendButton)
+        stopSendButton.target = self; stopSendButton.action = #selector(stopAndSend); stopSendButton.bezelStyle = .rounded; stopSendButton.isHidden = true
+        [stopSendButton, stopButton, sendButton].forEach(composerBottomBar.addArrangedSubview)
         for control in [queueButton, stopSendButton, stopButton, sendButton] { control.setContentHuggingPriority(.required, for: .horizontal) }
 
-        let composerSurface = NSStackView(views: [composerBody, composerBottomBar])
-        composerSurface.orientation = .vertical; composerSurface.alignment = .leading; composerSurface.spacing = 8
-        composerSurface.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+        [composerBody, composerBottomBar].forEach(composerSurface.addArrangedSubview)
+        composerSurface.orientation = .vertical; composerSurface.alignment = .leading; composerSurface.spacing = 4
+        composerSurface.edgeInsets = NSEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
         composerSurface.wantsLayer = true; composerSurface.layer?.cornerRadius = 8
         composerSurface.layer?.borderWidth = 1; composerSurface.layer?.borderColor = NSColor.separatorColor.cgColor
         composerSurface.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
-        composerBody.widthAnchor.constraint(equalTo: composerSurface.widthAnchor, constant: -24).isActive = true
-        composerBottomBar.widthAnchor.constraint(equalTo: composerSurface.widthAnchor, constant: -24).isActive = true
+        composerBody.widthAnchor.constraint(equalTo: composerSurface.widthAnchor, constant: -20).isActive = true
+        composerBottomBar.widthAnchor.constraint(equalTo: composerSurface.widthAnchor, constant: -20).isActive = true
+        updateComposerLayout(animated: false)
 
         let dismissNotice = button("", #selector(dismissNotice), symbol: "xmark")
         dismissNotice.bezelStyle = .inline; dismissNotice.toolTip = "Dismiss notice"
@@ -771,7 +776,7 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
         guard rows.indices.contains(row) else { return 40 }
-        return TranscriptMessageLayout(rows[row], availableWidth: tableView.frameOfCell(atColumn: 0, row: row).width).height
+        return TranscriptMessageLayout(rows[row], availableWidth: tableView.frameOfCell(atColumn: 0, row: row).width, expanded: expandedActions.contains(rows[row].id)).height
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {

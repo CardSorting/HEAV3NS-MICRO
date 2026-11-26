@@ -160,6 +160,7 @@ extension WorkspaceWindow {
             WorkspaceAction(title: "Show Chats", shortcut: "⇧⌘C", keywords: ["chat", "conversations", "threads", "sidebar"]) { [weak self] in self?.showChats() },
             WorkspaceAction(title: "Show Files", shortcut: "⌘1", keywords: ["code", "tree", "explorer"]) { [weak self] in self?.showFiles() },
             WorkspaceAction(title: "Show Changes", shortcut: "⌘2", keywords: ["diff", "git", "modified"]) { [weak self] in self?.showChanges() },
+            WorkspaceAction(title: "Open Source Control Window…", shortcut: "⇧⌘G", keywords: ["git", "source control", "commit", "push", "branch", "graph"]) { [weak self] in self?.showSourceControl() },
             WorkspaceAction(title: "Show Recorded Runs", shortcut: "⌘3", keywords: ["history", "sessions"]) { [weak self] in self?.showSessions() },
             WorkspaceAction(title: "Show Walkthrough", shortcut: "⌘6", keywords: ["activity", "timeline", "steps"]) { [weak self] in self?.showWalkthrough() },
             WorkspaceAction(title: "Show Up Next", shortcut: "⌘4", keywords: ["queue", "pending instructions"]) { [weak self] in self?.showQueue() },

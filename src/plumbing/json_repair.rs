@@ -211,3 +211,106 @@ pub fn normalize_completed_tool_call_arguments(
     }
     Err(format!("{provider_label} returned invalid tool arguments"))
 }
+
+/// Extracts a partial or complete string value for `key` from streaming JSON tool arguments.
+fn extract_partial_json_string_field(raw: &str, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        let needle = format!("\"{key}\"");
+        let Some(pos) = raw.find(&needle) else { continue };
+        let after_key = &raw[pos + needle.len()..];
+        let trimmed = after_key.trim_start();
+        let Some(after_colon) = trimmed.strip_prefix(':') else { continue };
+        let after_ws = after_colon.trim_start();
+        let Some(rest) = after_ws.strip_prefix('"') else { continue };
+        let mut out = String::new();
+        let mut chars = rest.chars();
+        while let Some(ch) = chars.next() {
+            if ch == '"' {
+                return Some(out);
+            }
+            if ch == '\\' {
+                match chars.next() {
+                    Some('n') => out.push('\n'),
+                    Some('r') => out.push('\r'),
+                    Some('t') => out.push('\t'),
+                    Some('"') => out.push('"'),
+                    Some('\\') => out.push('\\'),
+                    Some('/') => out.push('/'),
+                    Some(other) => out.push(other),
+                    None => break,
+                }
+            } else {
+                out.push(ch);
+            }
+        }
+        if !out.is_empty() {
+            return Some(out);
+        }
+    }
+    None
+}
+
+/// Synthesizes a live unified-diff preview from streaming partial tool-call arguments
+/// for file-editing tools (`edit_file`, `replace_file_content`, `write_file`, `apply_patch`).
+pub fn synthesize_streaming_tool_diff(
+    tool_name: &str,
+    partial_args: &str,
+) -> Option<(Option<String>, String)> {
+    let lower = tool_name.to_ascii_lowercase();
+    let is_edit_tool = lower.contains("edit")
+        || lower.contains("replace")
+        || lower.contains("write")
+        || lower.contains("patch");
+    if !is_edit_tool {
+        return None;
+    }
+    let path = extract_partial_json_string_field(
+        partial_args,
+        &["Path", "path", "file_path", "TargetFile", "target_file"],
+    );
+    if let Some(raw_diff) =
+        extract_partial_json_string_field(partial_args, &["diff", "patch", "patchText"])
+    {
+        if raw_diff.contains('\n') || raw_diff.starts_with('-') || raw_diff.starts_with('+') {
+            return Some((path, raw_diff));
+        }
+    }
+    let target = extract_partial_json_string_field(
+        partial_args,
+        &["Target", "target", "TargetContent", "old_string"],
+    );
+    let replacement = extract_partial_json_string_field(
+        partial_args,
+        &[
+            "Replacement",
+            "replacement",
+            "ReplacementContent",
+            "new_string",
+            "Content",
+            "content",
+        ],
+    );
+    if target.is_none() && replacement.is_none() {
+        return None;
+    }
+    let label = path.as_deref().unwrap_or("workspace_edit");
+    let mut lines = vec![
+        format!("--- a/{label}"),
+        format!("+++ b/{label}"),
+        "@@ live streaming edit @@".to_string(),
+    ];
+    if let Some(t) = target {
+        for line in t.lines().take(24) {
+            lines.push(format!("-{line}"));
+        }
+    }
+    if let Some(r) = replacement {
+        for line in r.lines().take(24) {
+            lines.push(format!("+{line}"));
+        }
+    }
+    if lines.len() <= 3 {
+        return None;
+    }
+    Some((path, lines.join("\n")))
+}

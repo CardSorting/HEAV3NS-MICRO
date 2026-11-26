@@ -95,6 +95,8 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         chats.keyEquivalentModifierMask = [.command, .shift]; chats.target = self
         view.addItem(withTitle: "Code", action: #selector(showFiles), keyEquivalent: "1").target = self
         view.addItem(withTitle: "Changes", action: #selector(showChanges), keyEquivalent: "2").target = self
+        let scItem = view.addItem(withTitle: "Source Control…", action: #selector(showSourceControl), keyEquivalent: "g")
+        scItem.keyEquivalentModifierMask = [.command, .shift]; scItem.target = self
         view.addItem(withTitle: "Recorded Runs", action: #selector(showSessions), keyEquivalent: "3").target = self
         view.addItem(withTitle: "Walkthrough", action: #selector(showWalkthrough), keyEquivalent: "6").target = self
         view.addItem(withTitle: "Run Project", action: #selector(showProjectRun), keyEquivalent: "r").target = self
@@ -225,6 +227,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     @objc private func showChats() { current?.showChats() }
     @objc private func showFiles() { current?.showFiles() }
     @objc private func showChanges() { current?.showChanges() }
+    @objc private func showSourceControl() { current?.showSourceControl() }
     @objc private func showSessions() { current?.showSessions() }
     @objc private func showQueue() { current?.showQueue() }
     @objc private func showApprovalReview() { current?.showApprovalReview() }
@@ -294,7 +297,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         if menuItem.action == #selector(stop) { return current?.hasWork == true }
         if [#selector(allowOperation), #selector(denyOperation)].contains(menuItem.action) { return current?.canDecideApproval == true }
         if menuItem.action == #selector(showApprovalReview) { return current?.canReviewApproval == true }
-        if [#selector(toggleNavigation), #selector(focusComposer), #selector(showChats), #selector(showFiles), #selector(showChanges), #selector(showSessions), #selector(showQueue), #selector(showWalkthrough), #selector(toggleMaximizeContext), #selector(stepPosture)].contains(menuItem.action) { return current != nil }
+        if [#selector(toggleNavigation), #selector(focusComposer), #selector(showChats), #selector(showFiles), #selector(showChanges), #selector(showSourceControl), #selector(showSessions), #selector(showQueue), #selector(showWalkthrough), #selector(toggleMaximizeContext), #selector(stepPosture)].contains(menuItem.action) { return current != nil }
         if menuItem.action == #selector(undoLastTurn) { return current?.client.isReady == true && current?.hasWork == false }
         if menuItem.action == #selector(showRequestPreview) { return current?.client.isReady == true }
         return true

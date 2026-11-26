@@ -558,5 +558,46 @@ extension WorkspaceWindow {
             }
         }
     }
+
+    func updateComposerLayout(animated: Bool) {
+        let isEmpty = composer.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let insetY: CGFloat = isEmpty ? 2 : 4
+        if composer.textContainerInset.height != insetY {
+            composer.textContainerInset = NSSize(width: 0, height: insetY)
+        }
+        let targetHeight: CGFloat
+        if isEmpty {
+            targetHeight = 26
+        } else if let layoutManager = composer.layoutManager, let textContainer = composer.textContainer {
+            layoutManager.ensureLayout(for: textContainer)
+            let used = layoutManager.usedRect(for: textContainer).height
+            targetHeight = min(160, max(28, ceil(used + insetY * 2)))
+        } else {
+            targetHeight = 44
+        }
+        let targetSpacing: CGFloat = isEmpty ? 4 : 7
+        let targetInsets = isEmpty
+            ? NSEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
+            : NSEdgeInsets(top: 9, left: 12, bottom: 9, right: 12)
+        let currentHeight = composerHeightConstraint?.constant ?? targetHeight
+        let changed = abs(currentHeight - targetHeight) > 0.5 || composerSurface.spacing != targetSpacing
+        guard changed else { return }
+        let apply = {
+            self.composerHeightConstraint?.constant = targetHeight
+            self.composerSurface.spacing = targetSpacing
+            self.composerSurface.edgeInsets = targetInsets
+            self.composerSurface.layoutSubtreeIfNeeded()
+        }
+        if animated, window != nil {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.14
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                context.allowsImplicitAnimation = true
+                apply()
+            }
+        } else {
+            apply()
+        }
+    }
 }
 

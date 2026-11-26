@@ -16,6 +16,7 @@ struct TranscriptRow: Equatable {
     var diffText: String? = nil
     var diffFile: String? = nil
     var diffStats: String? = nil
+    var diffLive: Bool = false
 }
 
 /// Row height and rendered text share the actual cell width, including AppKit's
@@ -34,7 +35,7 @@ struct TranscriptMessageLayout {
     let checkpoint: NSRect?
     let action: NSRect?
 
-    init(_ row: TranscriptRow, availableWidth: CGFloat) {
+    init(_ row: TranscriptRow, availableWidth: CGFloat, expanded: Bool = false) {
         width = max(120, min(760, availableWidth - 24, row.user ? availableWidth * 0.86 : availableWidth))
         let textWidth = width - 24
         func measured(_ text: String, width: CGFloat, font: NSFont) -> CGFloat {
@@ -53,14 +54,15 @@ struct TranscriptMessageLayout {
             body = frame; y = frame.maxY
         } else { body = nil }
         if let diffText = row.diffText, !diffText.isEmpty {
-            let bounded = CodeOutline.boundedDiffPreview(diffText, maxLines: 18).preview
-            let innerWidth = max(40, textWidth - 16)
-            let attr = CodeOutline.highlight(bounded, diff: true, fontSize: 11)
+            let displayed = expanded ? diffText : CodeOutline.compressedDiffPreview(diffText, maxChangedLines: 8).preview
+            let innerWidth = max(40, textWidth - 20)
+            let attr = CodeOutline.highlight(displayed, diff: true, fontSize: 11)
             let diffHeight = ceil(attr.boundingRect(with: NSSize(width: innerWidth, height: .greatestFiniteMagnitude),
                 options: [.usesLineFragmentOrigin, .usesFontLeading]).height) + 4
-            let box = NSRect(x: 12, y: y + 6, width: textWidth, height: diffHeight + 12)
+            let headerHeight: CGFloat = 20
+            let box = NSRect(x: 12, y: y + 6, width: textWidth, height: headerHeight + diffHeight + 14)
             diffBox = box
-            diffField = NSRect(x: 8, y: 6, width: innerWidth, height: diffHeight)
+            diffField = NSRect(x: 12, y: 6 + headerHeight, width: innerWidth, height: diffHeight)
             y = box.maxY
         } else {
             diffBox = nil
@@ -98,16 +100,53 @@ private final class TranscriptMessageSurface: NSView {
     }
 }
 
+private enum StreamingDiffRevealTracker {
+    @MainActor static var revealedCharsByRowID = [String: Int]()
+
+    @MainActor static func record(_ rowID: String, count: Int) {
+        if revealedCharsByRowID.count > 200 && revealedCharsByRowID[rowID] == nil {
+            revealedCharsByRowID.removeAll(keepingCapacity: true)
+        }
+        revealedCharsByRowID[rowID] = count
+    }
+
+    static func nextTokenBoundary(in text: String, from index: String.Index, remaining: Int) -> String.Index {
+        guard index < text.endIndex else { return text.endIndex }
+        let maxStep = max(4, min(14, remaining / 40))
+        var idx = index
+        var step = 0
+        while idx < text.endIndex && step < maxStep {
+            let ch = text[idx]
+            idx = text.index(after: idx)
+            step += 1
+            if step >= 2 && (ch == " " || ch == "\n" || ch == "." || ch == "(" || ch == ")" || ch == "," || ch == ";") {
+                break
+            }
+        }
+        return idx
+    }
+}
+
 private final class TranscriptDiffSurface: NSView {
     override var isFlipped: Bool { true }
+    var isLive = false { didSet { needsDisplay = true } }
+
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.textBackgroundColor.withAlphaComponent(0.75).setFill()
+        NSColor.textBackgroundColor.withAlphaComponent(isLive ? 0.86 : 0.75).setFill()
         let path = NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8)
         path.fill()
-        NSColor.separatorColor.withAlphaComponent(0.55).setStroke()
-        path.lineWidth = 1
+        let borderColor = isLive ? NSColor.systemTeal.withAlphaComponent(0.60) : NSColor.separatorColor.withAlphaComponent(0.55)
+        borderColor.setStroke()
+        path.lineWidth = isLive ? 1.25 : 1
         path.stroke()
+
+        let accentRect = NSRect(x: 0, y: 0, width: 3.5, height: bounds.height)
+        let accentPath = NSBezierPath(roundedRect: accentRect, xRadius: 2, yRadius: 2)
+        (isLive ? NSColor.systemTeal : NSColor.systemBlue.withAlphaComponent(0.55)).setFill()
+        accentPath.fill()
     }
+
+    func dispose() {}
 }
 
 final class TranscriptMessageCell: NSTableCellView {
@@ -118,16 +157,25 @@ final class TranscriptMessageCell: NSTableCellView {
     private let body = NSTextField(wrappingLabelWithString: "")
     private let evidence = NSTextField(wrappingLabelWithString: "")
     private let diffBox = TranscriptDiffSurface()
+    private let diffHeader = NSTextField(labelWithString: "")
+    private let diffLiveDot = NSView()
     private let diffField = NSTextField(wrappingLabelWithString: "")
+    private var diffRevealTimer: Timer?
     private let icon = NSImageView()
+    private let expanded: Bool
+    private var toggleAction: (() -> Void)?
+    private var diffClickRecognizer: NSClickGestureRecognizer?
     private var disclosure: JourneyButton?
     private var openDiffButton: JourneyButton?
     private var copyDiffButton: JourneyButton?
+    private var expandDiffButton: JourneyButton?
     private var checkpoint: JourneyButton?
     private var actionButton: JourneyButton?
 
     init(_ row: TranscriptRow, expanded: Bool, toggle: @escaping () -> Void, openCheckpoint: @escaping () -> Void, openAction: (() -> Void)? = nil, openDiff: (() -> Void)? = nil) {
         self.row = row
+        self.expanded = expanded
+        self.toggleAction = toggle
         super.init(frame: .zero)
         surface.user = row.user; surface.activity = row.activity; addSubview(surface)
         title.stringValue = row.title; title.font = .systemFont(ofSize: 12, weight: .semibold)
@@ -139,10 +187,89 @@ final class TranscriptMessageCell: NSTableCellView {
         body.isHidden = row.text.isEmpty; evidence.isHidden = row.evidence == nil
 
         if let diffText = row.diffText, !diffText.isEmpty {
-            let bounded = CodeOutline.boundedDiffPreview(diffText, maxLines: 18).preview
-            diffField.attributedStringValue = CodeOutline.highlight(bounded, diff: true, fontSize: 11)
+            let compressed = CodeOutline.compressedDiffPreview(diffText, maxChangedLines: 8)
+            let displayed = expanded ? diffText : compressed.preview
+            diffBox.isLive = row.diffLive
+            diffLiveDot.wantsLayer = true
+            diffLiveDot.layer?.cornerRadius = 3.5
+            diffLiveDot.layer?.backgroundColor = NSColor.systemGreen.cgColor
+            diffLiveDot.isHidden = !row.diffLive
+            if row.diffLive {
+                let pulse = CABasicAnimation(keyPath: "opacity")
+                pulse.fromValue = 1.0
+                pulse.toValue = 0.25
+                pulse.duration = 0.85
+                pulse.autoreverses = true
+                pulse.repeatCount = .infinity
+                pulse.isRemovedOnCompletion = false
+                diffLiveDot.layer?.add(pulse, forKey: "livePulse")
+            }
+            let headerAttr = NSMutableAttributedString(
+                string: row.diffLive ? "LIVE STREAMING DIFF" : (expanded ? "FULL DIFF" : "BRIEF DIFF"),
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
+                    .foregroundColor: row.diffLive ? NSColor.systemTeal : NSColor.secondaryLabelColor
+                ]
+            )
+            if let stats = row.diffStats, !stats.isEmpty {
+                headerAttr.append(NSAttributedString(string: " · ", attributes: [.font: NSFont.systemFont(ofSize: 10, weight: .medium), .foregroundColor: NSColor.tertiaryLabelColor]))
+                let parts = stats.trimmingCharacters(in: CharacterSet(charactersIn: "()")).components(separatedBy: "/")
+                if parts.count == 2 {
+                    headerAttr.append(NSAttributedString(string: parts[0].trimmingCharacters(in: .whitespaces), attributes: [.font: NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold), .foregroundColor: NSColor.systemGreen]))
+                    headerAttr.append(NSAttributedString(string: " ", attributes: [.font: NSFont.systemFont(ofSize: 10)]))
+                    headerAttr.append(NSAttributedString(string: parts[1].trimmingCharacters(in: .whitespaces), attributes: [.font: NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold), .foregroundColor: NSColor.systemRed]))
+                } else {
+                    headerAttr.append(NSAttributedString(string: stats, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold), .foregroundColor: NSColor.secondaryLabelColor]))
+                }
+            }
+            if !expanded && compressed.omittedLines > 0 {
+                headerAttr.append(NSAttributedString(string: " · Click to expand", attributes: [.font: NSFont.systemFont(ofSize: 10, weight: .regular), .foregroundColor: NSColor.tertiaryLabelColor]))
+            }
+            diffHeader.attributedStringValue = headerAttr
+            diffBox.addSubview(diffLiveDot)
+            diffBox.addSubview(diffHeader)
+
+            diffField.wantsLayer = true
             diffField.isSelectable = true
             diffBox.addSubview(diffField)
+
+            let totalChars = displayed.count
+            let prevRevealed = StreamingDiffRevealTracker.revealedCharsByRowID[row.id] ?? (row.diffLive ? 0 : totalChars)
+            let startCount = max(0, min(prevRevealed, totalChars))
+            if row.diffLive && startCount < totalChars {
+                var currentOffset = startCount
+                var currentIndex = displayed.index(displayed.startIndex, offsetBy: startCount)
+                currentIndex = StreamingDiffRevealTracker.nextTokenBoundary(in: displayed, from: currentIndex, remaining: totalChars - currentOffset)
+                currentOffset = displayed.distance(from: displayed.startIndex, to: currentIndex)
+                let initialSlice = String(displayed[..<currentIndex])
+                diffField.attributedStringValue = CodeOutline.streamingDiffAttributed(initialSlice, hasMore: currentOffset < totalChars, fontSize: 11)
+                StreamingDiffRevealTracker.record(row.id, count: currentOffset)
+                if currentOffset < totalChars {
+                    diffRevealTimer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { [weak self] timer in
+                        guard let self else { timer.invalidate(); return }
+                        currentIndex = StreamingDiffRevealTracker.nextTokenBoundary(in: displayed, from: currentIndex, remaining: totalChars - currentOffset)
+                        currentOffset = displayed.distance(from: displayed.startIndex, to: currentIndex)
+                        let hasMore = currentOffset < totalChars
+                        let slice = String(displayed[..<currentIndex])
+                        MainActor.assumeIsolated {
+                            self.diffField.attributedStringValue = CodeOutline.streamingDiffAttributed(slice, hasMore: hasMore, fontSize: 11)
+                            StreamingDiffRevealTracker.record(row.id, count: currentOffset)
+                        }
+                        if !hasMore {
+                            timer.invalidate()
+                            self.diffRevealTimer = nil
+                        }
+                    }
+                }
+            } else {
+                diffField.attributedStringValue = CodeOutline.highlight(displayed, diff: true, fontSize: 11)
+                StreamingDiffRevealTracker.record(row.id, count: totalChars)
+            }
+
+            diffBox.toolTip = expanded ? "Click to compress diff" : "Click to expand full diff"
+            let click = NSClickGestureRecognizer(target: self, action: #selector(handleDiffBoxClick))
+            diffBox.addGestureRecognizer(click)
+            diffClickRecognizer = click
             surface.addSubview(diffBox)
             let copyBtn = JourneyButton("Copy Diff", symbol: "doc.on.doc") {
                 NSPasteboard.general.clearContents()
@@ -151,6 +278,14 @@ final class TranscriptMessageCell: NSTableCellView {
             copyBtn.bezelStyle = .inline; copyBtn.controlSize = .small
             copyBtn.toolTip = "Copy full unified diff to clipboard"
             copyDiffButton = copyBtn; surface.addSubview(copyBtn)
+            if expanded || compressed.omittedLines > 0 {
+                let expandTitle = expanded ? "Compress" : "Expand Full Diff"
+                let expandSymbol = expanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right"
+                let expandBtn = JourneyButton(expandTitle, symbol: expandSymbol, action: toggle)
+                expandBtn.bezelStyle = .inline; expandBtn.controlSize = .small
+                expandBtn.toolTip = expanded ? "Compress to brief changed lines" : "Expand to full unified diff"
+                expandDiffButton = expandBtn; surface.addSubview(expandBtn)
+            }
         } else {
             diffBox.isHidden = true
         }
@@ -185,9 +320,10 @@ final class TranscriptMessageCell: NSTableCellView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) unavailable") }
     override func setFrameSize(_ newSize: NSSize) { super.setFrameSize(newSize); needsLayout = true }
+    @objc private func handleDiffBoxClick() { toggleAction?() }
     override func layout() {
         super.layout()
-        let geometry = TranscriptMessageLayout(row, availableWidth: bounds.width)
+        let geometry = TranscriptMessageLayout(row, availableWidth: bounds.width, expanded: expanded)
         surface.frame = NSRect(x: row.user ? bounds.width - 12 - geometry.width : 12, y: 2, width: geometry.width, height: geometry.height - 4)
         title.frame = geometry.title
         body.frame = geometry.body ?? .zero
@@ -195,6 +331,12 @@ final class TranscriptMessageCell: NSTableCellView {
         for field in [title, body, evidence] where !field.isHidden { field.preferredMaxLayoutWidth = field.frame.width }
         if let boxFrame = geometry.diffBox, let fieldFrame = geometry.diffField, !diffBox.isHidden {
             diffBox.frame = boxFrame
+            if row.diffLive {
+                diffLiveDot.frame = NSRect(x: 12, y: 9, width: 7, height: 7)
+                diffHeader.frame = NSRect(x: 24, y: 5, width: max(40, boxFrame.width - 34), height: 15)
+            } else {
+                diffHeader.frame = NSRect(x: 12, y: 5, width: max(40, boxFrame.width - 22), height: 15)
+            }
             diffField.frame = fieldFrame
             diffField.preferredMaxLayoutWidth = fieldFrame.width
         }
@@ -203,15 +345,27 @@ final class TranscriptMessageCell: NSTableCellView {
         if var frame = geometry.openDiff, let openDiffButton {
             frame.size.width = min(frame.width, openDiffButton.intrinsicContentSize.width)
             openDiffButton.frame = frame
+            var nextX = frame.maxX + 8
             if var copyFrame = geometry.copyDiff, let copyDiffButton {
-                let x = frame.maxX + 8
-                copyFrame.origin.x = x
-                copyFrame.size.width = min(max(0, geometry.width - 12 - x), copyDiffButton.intrinsicContentSize.width)
+                copyFrame.origin.x = nextX
+                copyFrame.size.width = min(max(0, geometry.width - 12 - nextX), copyDiffButton.intrinsicContentSize.width)
                 copyDiffButton.frame = copyFrame
+                nextX = copyFrame.maxX + 8
+            }
+            if var expandFrame = geometry.copyDiff, let expandDiffButton {
+                expandFrame.origin.x = nextX
+                expandFrame.size.width = min(max(0, geometry.width - 12 - nextX), expandDiffButton.intrinsicContentSize.width)
+                expandDiffButton.frame = expandFrame
             }
         } else if var copyFrame = geometry.copyDiff, let copyDiffButton {
             copyFrame.size.width = min(copyFrame.width, copyDiffButton.intrinsicContentSize.width)
             copyDiffButton.frame = copyFrame
+            if var expandFrame = geometry.copyDiff, let expandDiffButton {
+                let nextX = copyFrame.maxX + 8
+                expandFrame.origin.x = nextX
+                expandFrame.size.width = min(max(0, geometry.width - 12 - nextX), expandDiffButton.intrinsicContentSize.width)
+                expandDiffButton.frame = expandFrame
+            }
         }
         if var frame = geometry.action, let actionButton {
             frame.size.width = min(frame.width, actionButton.intrinsicContentSize.width)
@@ -233,7 +387,12 @@ final class TranscriptMessageCell: NSTableCellView {
             "labels": [title, body, evidence].filter { !$0.isHidden }.map { ["frame": NSStringFromRect($0.frame), "text": String($0.stringValue.prefix(80))] }]
     }
     func dispose() {
-        [disclosure, openDiffButton, copyDiffButton, checkpoint, actionButton].forEach { $0?.removeFromSuperview() }
-        disclosure = nil; openDiffButton = nil; copyDiffButton = nil; checkpoint = nil; actionButton = nil
+        diffRevealTimer?.invalidate(); diffRevealTimer = nil
+        diffLiveDot.layer?.removeAllAnimations()
+        diffBox.dispose()
+        if let diffClickRecognizer { diffBox.removeGestureRecognizer(diffClickRecognizer) }
+        diffClickRecognizer = nil; toggleAction = nil
+        [disclosure, openDiffButton, copyDiffButton, expandDiffButton, checkpoint, actionButton].forEach { $0?.removeFromSuperview() }
+        disclosure = nil; openDiffButton = nil; copyDiffButton = nil; expandDiffButton = nil; checkpoint = nil; actionButton = nil
     }
 }

@@ -50,7 +50,55 @@ enum CodeOutline {
         guard lines.count > maxLines else { return (text, 0) }
         let omitted = lines.count - maxLines
         let head = lines.prefix(maxLines).joined(separator: "\n")
-        return ("\(head)\n@@ … \(omitted) more line(s) — click View Diff for full comparison @@", omitted)
+        return ("\(head)\n@@ … \(omitted) more line(s) — click to expand full diff @@", omitted)
+    }
+
+    /// Compresses a unified diff to only its changed (`+`/`-`) lines and concise hunk context
+    /// so streaming diff cards highlight what actually changed in brief.
+    static func compressedDiffPreview(_ text: String, maxChangedLines: Int = 8) -> (preview: String, omittedLines: Int, totalChangedLines: Int) {
+        let lines = text.components(separatedBy: "\n")
+        var out = [String]()
+        var shownChanged = 0
+        var totalChanged = 0
+        var pendingHunkHeader: String?
+
+        for line in lines {
+            if line.hasPrefix("diff --git ") || line.hasPrefix("index ") || line.hasPrefix("--- ") || line.hasPrefix("+++ ") || line.hasPrefix("\\ ") {
+                continue
+            }
+            if line.hasPrefix("@@") {
+                if let range = line.range(of: "@@", options: .backwards), range.upperBound < line.endIndex {
+                    let symbol = line[range.upperBound...].trimmingCharacters(in: .whitespaces)
+                    pendingHunkHeader = symbol.isEmpty ? nil : "@@ \(symbol) @@"
+                } else {
+                    pendingHunkHeader = nil
+                }
+                continue
+            }
+            let isChange = (line.hasPrefix("+") && !line.hasPrefix("+++")) || (line.hasPrefix("-") && !line.hasPrefix("---"))
+            guard isChange else { continue }
+            totalChanged += 1
+            if shownChanged < maxChangedLines {
+                if let header = pendingHunkHeader {
+                    out.append(header)
+                    pendingHunkHeader = nil
+                } else if shownChanged > 0 && out.last?.hasPrefix("@@") == false && pendingHunkHeader != nil {
+                    out.append("@@ … @@")
+                }
+                out.append(line)
+                shownChanged += 1
+            }
+        }
+
+        if totalChanged == 0 {
+            let fallback = boundedDiffPreview(text, maxLines: maxChangedLines)
+            return (fallback.preview, fallback.omittedLines, 0)
+        }
+        let omitted = max(0, totalChanged - shownChanged)
+        if omitted > 0 {
+            out.append("@@ … \(omitted) more changed line(s) — click to expand full diff @@")
+        }
+        return (out.joined(separator: "\n"), omitted, totalChanged)
     }
 
     static func highlight(_ text: String, diff: Bool, fontSize: CGFloat = 12) -> NSAttributedString {
@@ -73,6 +121,11 @@ enum CodeOutline {
         }
 
         let lines = text.components(separatedBy: "\n")
+        let diffParagraph = NSMutableParagraphStyle()
+        diffParagraph.lineSpacing = 2.5
+        diffParagraph.headIndent = 14
+        diffParagraph.firstLineHeadIndent = 0
+        result.addAttribute(.paragraphStyle, value: diffParagraph, range: NSRange(location: 0, length: result.length))
         var lineOffsets = [Int]()
         lineOffsets.reserveCapacity(lines.count)
         var currentOffset = 0
@@ -113,6 +166,11 @@ enum CodeOutline {
                 result.addAttribute(.font, value: boldFont, range: lineRange)
                 result.addAttribute(.backgroundColor, value: NSColor.labelColor.withAlphaComponent(0.05), range: lineRange)
                 i += 1
+            } else if line.hasPrefix("@@ …") {
+                result.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: lineRange)
+                result.addAttribute(.font, value: NSFont.monospacedSystemFont(ofSize: max(10, fontSize - 0.5), weight: .medium), range: lineRange)
+                result.addAttribute(.backgroundColor, value: NSColor.labelColor.withAlphaComponent(0.04), range: lineRange)
+                i += 1
             } else if line.hasPrefix("@@") {
                 result.addAttribute(.foregroundColor, value: NSColor.systemBlue, range: lineRange)
                 result.addAttribute(.font, value: boldFont, range: lineRange)
@@ -127,6 +185,7 @@ enum CodeOutline {
                     let r = NSRange(location: lineOffsets[delEnd], length: (lines[delEnd] as NSString).length)
                     result.addAttribute(.foregroundColor, value: NSColor.systemRed, range: r)
                     result.addAttribute(.backgroundColor, value: NSColor.systemRed.withAlphaComponent(0.09), range: r)
+                    if r.length > 0 { result.addAttribute(.font, value: boldFont, range: NSRange(location: r.location, length: 1)) }
                     delEnd += 1
                 }
                 var addEnd = delEnd
@@ -134,6 +193,7 @@ enum CodeOutline {
                     let r = NSRange(location: lineOffsets[addEnd], length: (lines[addEnd] as NSString).length)
                     result.addAttribute(.foregroundColor, value: NSColor.systemGreen, range: r)
                     result.addAttribute(.backgroundColor, value: NSColor.systemGreen.withAlphaComponent(0.09), range: r)
+                    if r.length > 0 { result.addAttribute(.font, value: boldFont, range: NSRange(location: r.location, length: 1)) }
                     addEnd += 1
                 }
                 let pairedCount = min(delEnd - i, addEnd - delEnd)
@@ -149,11 +209,37 @@ enum CodeOutline {
             } else if line.hasPrefix("+") && !line.hasPrefix("+++") {
                 result.addAttribute(.foregroundColor, value: NSColor.systemGreen, range: lineRange)
                 result.addAttribute(.backgroundColor, value: NSColor.systemGreen.withAlphaComponent(0.09), range: lineRange)
+                if lineRange.length > 0 { result.addAttribute(.font, value: boldFont, range: NSRange(location: lineRange.location, length: 1)) }
                 i += 1
             } else {
                 i += 1
             }
         }
         return result
+    }
+
+    /// Highlights a live-streaming diff prefix without polluting intra-line diffing,
+    /// washes the active write-head line, and appends a styled teal editor caret (`▌`).
+    static func streamingDiffAttributed(_ slice: String, hasMore: Bool, fontSize: CGFloat = 11) -> NSAttributedString {
+        let highlighted = NSMutableAttributedString(attributedString: highlight(slice, diff: true, fontSize: fontSize))
+        guard hasMore else { return highlighted }
+        let nsSlice = slice as NSString
+        if nsSlice.length > 0 {
+            let lastNewline = nsSlice.range(of: "\n", options: .backwards)
+            let lineStart = lastNewline.location == NSNotFound ? 0 : lastNewline.location + 1
+            let activeRange = NSRange(location: lineStart, length: nsSlice.length - lineStart)
+            if activeRange.length > 0 {
+                highlighted.addAttribute(.backgroundColor, value: NSColor.systemTeal.withAlphaComponent(0.11), range: activeRange)
+            }
+        }
+        let caret = NSAttributedString(
+            string: "▌",
+            attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: fontSize + 0.5, weight: .bold),
+                .foregroundColor: NSColor.systemTeal
+            ]
+        )
+        highlighted.append(caret)
+        return highlighted
     }
 }

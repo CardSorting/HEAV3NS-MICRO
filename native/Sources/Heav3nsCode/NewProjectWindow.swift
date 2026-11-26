@@ -24,7 +24,32 @@ enum ProjectCreation {
             return mkdir(path, 0o755) == 0 ? 0 : errno
         }
         guard failure == 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(failure), userInfo: [NSFilePathErrorKey: folder.path]) }
+        initializeGitRepository(in: folder)
         return folder
+    }
+
+    static func initializeGitRepository(in folder: URL) {
+        let git = "/usr/bin/git"
+        guard FileManager.default.isExecutableFile(atPath: git) else { return }
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: git)
+        proc.currentDirectoryURL = folder
+        proc.arguments = ["init", "-b", "main"]
+        proc.standardOutput = Pipe()
+        proc.standardError = Pipe()
+        if (try? proc.run()) != nil {
+            proc.waitUntilExit()
+            if proc.terminationStatus != 0 {
+                let fallback = Process()
+                fallback.executableURL = URL(fileURLWithPath: git)
+                fallback.currentDirectoryURL = folder
+                fallback.arguments = ["init"]
+                fallback.standardOutput = Pipe()
+                fallback.standardError = Pipe()
+                try? fallback.run()
+                fallback.waitUntilExit()
+            }
+        }
     }
 }
 

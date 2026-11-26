@@ -7,6 +7,8 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
 
+use crate::ui::git_remote_rpc::handle_git_remote_rpc;
+use crate::ui::git_rpc::{current_git_branch, git_remote_sync_state, handle_git_rpc, is_git_repository, is_safe_rel_path, list_git_status_entries, read_git_diff_for_path};
 use crate::ui::rpc_dispatch::{sha256_bytes_hex, validate_rpc_read_path};
 
 pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> Value {
@@ -198,22 +200,40 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
             })
         }
         "changes.list" => {
+            let is_git = is_git_repository(root);
+            let branch = if is_git {
+                current_git_branch(root)
+            } else {
+                "unversioned".to_string()
+            };
+            let mut entries: Vec<Value> = Vec::new();
+            let mut seen_paths = std::collections::HashSet::new();
+            let mut limited = false;
+            if is_git {
+                let (git_entries, git_limited) = list_git_status_entries(root);
+                limited = git_limited;
+                for item in git_entries {
+                    if let Some(p) = item.get("path").and_then(|v| v.as_str()) {
+                        seen_paths.insert(p.to_string());
+                    }
+                    entries.push(item);
+                }
+            }
             let staged = lock_unpoison(&engine.vfs()).export_staged();
-            let mut entries: Vec<Value> = staged
-                .into_iter()
-                .map(|f| {
+            for f in staged {
+                if seen_paths.insert(f.path.clone()) {
                     let name = Path::new(&f.path)
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_else(|| f.path.clone());
-                    json!({
+                    entries.push(json!({
                         "path": f.path, "name": name,
                         "status": if f.is_deleted { "deleted" } else { "modified" },
                         "staged": true, "unstaged": false, "untracked": false
-                    })
-                })
-                .collect();
-            if entries.is_empty() {
+                    }));
+                }
+            }
+            if entries.is_empty() && !is_git {
                 if let Some(last) = engine.latest_receipt() {
                     for fc in last.file_changes {
                         let name = Path::new(&fc.path)
@@ -228,7 +248,20 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
                     }
                 }
             }
-            json!({ "entries": entries, "limited": false })
+            let (has_remote, ahead, behind) = if is_git {
+                git_remote_sync_state(root)
+            } else {
+                (false, 0u64, 0u64)
+            };
+            json!({
+                "entries": entries,
+                "isGitRepo": is_git,
+                "branch": branch,
+                "hasRemote": has_remote,
+                "ahead": ahead,
+                "behind": behind,
+                "limited": limited
+            })
         }
         "changes.read" => {
             let path = params.get("path").and_then(|v| v.as_str()).unwrap_or("");
@@ -238,7 +271,7 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
             } else {
                 Vec::new()
             };
-            let diff = if let Some(f) = staged.into_iter().find(|f| f.path == path) {
+            let mut diff = if let Some(f) = staged.into_iter().find(|f| f.path == path) {
                 let old = validate_rpc_read_path(root, path)
                     .filter(|p| {
                         fs::metadata(p)
@@ -248,16 +281,19 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
                     .and_then(|p| fs::read_to_string(p).ok())
                     .unwrap_or_default();
                 render_unified_diff(path, &old, if f.is_deleted { "" } else { &f.content })
-            } else if want_staged != Some(true) {
-                engine
+            } else if is_git_repository(root) && is_safe_rel_path(path) {
+                read_git_diff_for_path(root, path, want_staged == Some(true))
+            } else {
+                String::new()
+            };
+            if diff.is_empty() && want_staged != Some(true) {
+                diff = engine
                     .latest_receipt()
                     .and_then(|last| last.snapshot_before.zip(last.snapshot_after))
                     .and_then(|(b, a)| engine.cas_diff_between(&b, Some(a.as_str())).ok())
                     .map(|(_, full_diff)| filter_unified_diff_for_path(&full_diff, path))
-                    .unwrap_or_default()
-            } else {
-                String::new()
-            };
+                    .unwrap_or_default();
+            }
             let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let limit = (params
                 .get("limit")
@@ -266,7 +302,9 @@ pub fn handle_files_rpc(method: &str, params: &Value, engine: &AgentEngine) -> V
                 .clamp(1, 512 * 1024);
             crate::ui::worker_handlers::paginate_text_response(&diff, "diff", offset, limit)
         }
-        _ => json!({ "entries": [] }),
+        _ => handle_git_remote_rpc(method, params, root)
+            .or_else(|| handle_git_rpc(method, params, root))
+            .unwrap_or_else(|| json!({ "entries": [] })),
     }
 }
 

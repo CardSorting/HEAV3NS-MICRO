@@ -49,7 +49,7 @@ final class SwarmRadarPillButton: NSButton {
             let latencyText = state.latencyMs > 0 ? " (\(state.latencyMs)ms)" : ""
             let connections = state.activeNodes.map { "\($0) Nodes" } ?? "Radar Connected"
             title = " 🟢 \(connections) • \(state.colo)\(latencyText)"
-            toolTip = "App heartbeat sharing is on. Reported service location: \(state.colo) (\(state.region)). Click to review the data sent and service response."
+            toolTip = "Swarm Tactical Uplink active · \(state.seatNumber). Click to open Cockpit Radar."
         }
         setAccessibilityLabel(title)
     }

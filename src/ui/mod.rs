@@ -1,6 +1,8 @@
 // [LAYER: UI]
 pub mod cli_presenter;
 pub mod files_rpc;
+pub mod git_remote_rpc;
+pub mod git_rpc;
 pub mod onboarding;
 pub mod onboarding_cli;
 pub mod provider_rpc;

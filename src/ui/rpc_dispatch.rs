@@ -84,6 +84,7 @@ pub fn build_hello_response(ws_id: &str, sess_id: &str, workspace_root: &Path) -
             "files",
             "file-search-v1",
             "changes",
+            "source-control-v1",
             "paged-inspection",
             "workspace-stop",
             "run-details",

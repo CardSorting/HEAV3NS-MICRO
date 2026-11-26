@@ -98,6 +98,11 @@ impl IncrementalSseAggregator {
         (text_preview, tool_name, tool_bytes)
     }
 
+    pub(crate) fn stream_diff_preview(&self) -> Option<(Option<String>, String)> {
+        let slot = self.tool_map.values().last()?;
+        crate::plumbing::json_repair::synthesize_streaming_tool_diff(&slot.1, &slot.2)
+    }
+
     pub(crate) fn push_bytes(&mut self, bytes: &[u8]) -> Result<(), ProviderError> {
         self.total_bytes = self.total_bytes.saturating_add(bytes.len());
         if self.total_bytes > self.max_total_bytes {

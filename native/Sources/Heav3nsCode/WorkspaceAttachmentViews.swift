@@ -67,6 +67,14 @@ final class ComposerView: NSTextView {
     var submit: (() -> Void)?
     var onFileDropped: ((URL) -> Void)?
     var onStepPosture: (() -> Void)?
+    var onTextGeometryInvalidated: (() -> Void)?
+
+    override var string: String {
+        didSet {
+            needsDisplay = true
+            onTextGeometryInvalidated?()
+        }
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -103,10 +111,24 @@ final class ComposerView: NSTextView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard string.isEmpty, !hasMarkedText() else { return }
-        let origin = NSPoint(x: textContainerOrigin.x + (textContainer?.lineFragmentPadding ?? 5), y: textContainerOrigin.y)
-        ("Message LUMI… (⇧⇥ posture · ⌘K commands · /plan · /undo · /btw)" as NSString).draw(at: origin, withAttributes: [.font: font ?? NSFont.systemFont(ofSize: 14), .foregroundColor: NSColor.placeholderTextColor])
+        let x = textContainerOrigin.x + (textContainer?.lineFragmentPadding ?? 5)
+        let origin = NSPoint(x: x, y: textContainerOrigin.y)
+        let available = max(40, bounds.width - x - 4)
+        let placeholder = bounds.width < 430
+            ? "Message LUMI… (⌘K · /plan · /btw)"
+            : "Message LUMI… (⇧⇥ posture · ⌘K commands · /plan · /undo · /btw)"
+        let rect = NSRect(x: origin.x, y: origin.y, width: available, height: max(18, bounds.height - origin.y))
+        (placeholder as NSString).draw(
+            with: rect,
+            options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+            attributes: [.font: font ?? NSFont.systemFont(ofSize: 14), .foregroundColor: NSColor.placeholderTextColor]
+        )
     }
-    override func didChangeText() { super.didChangeText(); needsDisplay = true }
+    override func didChangeText() {
+        super.didChangeText()
+        needsDisplay = true
+        onTextGeometryInvalidated?()
+    }
     override func doCommand(by selector: Selector) {
         if selector == #selector(NSResponder.insertBacktab(_:)), !hasMarkedText() {
             onStepPosture?()
@@ -120,7 +142,7 @@ final class ComposerView: NSTextView {
         }
         super.keyDown(with: event)
     }
-    func dispose() { submit = nil; onFileDropped = nil; onStepPosture = nil }
+    func dispose() { submit = nil; onFileDropped = nil; onStepPosture = nil; onTextGeometryInvalidated = nil }
 }
 
 final class TranscriptScrollView: NSScrollView {

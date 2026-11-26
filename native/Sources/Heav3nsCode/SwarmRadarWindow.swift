@@ -4,39 +4,34 @@ import AppKit
 final class SwarmRadarWindow: NSWindowController, NSWindowDelegate {
     static let shared = SwarmRadarWindow()
 
-    private let statusPill = JourneyStyle.label("Checking connection…", size: 12, weight: .bold)
-    private let titleLabel = JourneyStyle.label("Sovereign Swarm Radar", size: 22, weight: .bold)
-    private let subtitleLabel = JourneyStyle.label("Optional service connection · heartbeat details shown below", size: 12, secondary: true)
+    private let statusPill = JourneyStyle.label("STANDBY", size: 11, weight: .bold)
+    private let titleLabel = JourneyStyle.label("Sovereign Swarm Radar", size: 18, weight: .bold)
+    private let nodeIdLabel = JourneyStyle.label("NODE_LOCAL", size: 11, weight: .bold)
+    private let statsSummaryLabel = JourneyStyle.label("WAVE 1 · SCORE 0 · ⚡ 75 · HULL 100%", size: 11.5, weight: .semibold)
 
-    private let seatLabel = JourneyStyle.label("Not assigned", size: 14, weight: .semibold)
-    private let nodeIdLabel = JourneyStyle.label("NODE_LOCAL", size: 13, weight: .bold)
-    private let archLabel = JourneyStyle.label("Apple Silicon (arm64)", size: 13)
-    private let privacyBadge = JourneyStyle.label("Not anonymous: sends a stable installation ID, app version, architecture, source, and action. Code and prompts are not included.", size: 12, weight: .medium)
+    private let deployInterceptorBtn = JourneyButton("[1] Fighter (25⚡)", symbol: "paperplane.fill") {}
+    private let deployTurretBtn = JourneyButton("[2] Turret (40⚡)", symbol: "scope") {}
+    private let deployHeavyBtn = JourneyButton("[3] Gundam (50⚡)", symbol: "shield.lefthalf.filled") {}
+    private let overdriveBtn = JourneyButton("[4] Overdrive (60⚡)", symbol: "bolt.shield.fill") {}
+    private let orbitalStrikeBtn = JourneyButton("[5] Orbital Strike (75⚡)", symbol: "sparkles") {}
+    private let resetMissionBtn = JourneyButton("[R] Reset", symbol: "arrow.counterclockwise") {}
 
-    private let coloLabel = JourneyStyle.label("Not connected", size: 13, weight: .semibold)
-    private let latencyLabel = JourneyStyle.label("Not measured", size: 13, weight: .bold)
-    private let transportLabel = JourneyStyle.label("HTTPS · protocol negotiated by the system", size: 13)
-    private let ttlLabel = JourneyStyle.label("Not reported by service", size: 12, secondary: true)
-
-    private let activeNodesLabel = JourneyStyle.label("Not reported", size: 14, weight: .bold)
-    private let totalInstallsLabel = JourneyStyle.label("Not reported", size: 14, weight: .semibold)
-    private let geoLabel = JourneyStyle.label("Not reported", size: 13)
-
-    private let copyButton = JourneyButton("Copy ID", symbol: "doc.on.doc") {}
-    private let pingButton = JourneyButton("⚡ Ping Nearest Edge", symbol: "bolt.fill") {}
-    private let webButton = JourneyButton("🌐 View Global Radar", symbol: "safari") {}
-    private let privacyCheckbox = NSButton(checkboxWithTitle: "Share app heartbeat with HEAV3NS", target: nil, action: nil)
+    private let copyButton = JourneyButton("Copy", symbol: "doc.on.doc") {}
+    private let pingButton = JourneyButton("⚡ Uplink", symbol: "bolt.fill") {}
+    private let webButton = JourneyButton("🌐 Global", symbol: "safari") {}
+    private let privacyCheckbox = NSButton(checkboxWithTitle: "Tactical Uplink", target: nil, action: nil)
     private let pingSpinner = NSProgressIndicator()
+    private let radarCanvas = SwarmRadarCanvasView()
 
     init() {
         let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 580, height: 600),
-            styleMask: [.titled, .closable, .miniaturizable],
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         win.title = "Sovereign Swarm Radar"
-        win.minSize = NSSize(width: 540, height: 560)
+        win.minSize = NSSize(width: 760, height: 520)
         win.isReleasedWhenClosed = false
         super.init(window: win)
         win.delegate = self
@@ -52,8 +47,6 @@ final class SwarmRadarWindow: NSWindowController, NSWindowDelegate {
     func present() {
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        // Refresh edge latency on present
-        pingEdge()
     }
 
     func toggle() {
@@ -77,109 +70,74 @@ final class SwarmRadarWindow: NSWindowController, NSWindowDelegate {
         pingSpinner.controlSize = .small
         pingSpinner.isHidden = true
 
-        privacyBadge.textColor = .secondaryLabelColor
-        nodeIdLabel.font = .monospacedSystemFont(ofSize: 13, weight: .bold)
+        nodeIdLabel.font = .monospacedSystemFont(ofSize: 11, weight: .bold)
+        statsSummaryLabel.font = .monospacedSystemFont(ofSize: 11.5, weight: .semibold)
+        statsSummaryLabel.textColor = .systemTeal
 
-        copyButton.target = self
-        copyButton.action = #selector(copyNodeId)
-        copyButton.bezelStyle = .inline
-
-        pingButton.target = self
-        pingButton.action = #selector(pingEdge)
-        pingButton.bezelColor = .controlAccentColor
-
-        webButton.target = self
-        webButton.action = #selector(openWebRadar)
-
-        privacyCheckbox.target = self
-        privacyCheckbox.action = #selector(togglePrivacy)
+        copyButton.target = self; copyButton.action = #selector(copyNodeId); copyButton.bezelStyle = .inline; copyButton.controlSize = .small
+        pingButton.target = self; pingButton.action = #selector(pingEdge); pingButton.controlSize = .small; pingButton.bezelColor = .controlAccentColor
+        webButton.target = self; webButton.action = #selector(openWebRadar); webButton.controlSize = .small
+        privacyCheckbox.target = self; privacyCheckbox.action = #selector(togglePrivacy); privacyCheckbox.controlSize = .small
         privacyCheckbox.state = SwarmRadarManager.shared.isHeartbeatDisabled ? .off : .on
 
-        // Header view
-        let header = JourneyStyle.stack([
-            statusPill,
+        deployInterceptorBtn.target = self; deployInterceptorBtn.action = #selector(deployInterceptorAction); deployInterceptorBtn.controlSize = .small
+        deployTurretBtn.target = self; deployTurretBtn.action = #selector(deployTurretAction); deployTurretBtn.controlSize = .small
+        deployHeavyBtn.target = self; deployHeavyBtn.action = #selector(deployHeavyAction); deployHeavyBtn.controlSize = .small
+        overdriveBtn.target = self; overdriveBtn.action = #selector(overdriveAction); overdriveBtn.controlSize = .small; overdriveBtn.bezelColor = .systemGreen
+        orbitalStrikeBtn.target = self; orbitalStrikeBtn.action = #selector(orbitalStrikeAction); orbitalStrikeBtn.controlSize = .small; orbitalStrikeBtn.bezelColor = .systemOrange
+        resetMissionBtn.target = self; resetMissionBtn.action = #selector(resetMissionAction); resetMissionBtn.controlSize = .small
+
+        let topBar = JourneyStyle.stack([
             titleLabel,
-            subtitleLabel
-        ], spacing: 4)
-
-        // Card 1: Local Node Identity
-        let nodeCard = createCard(title: "LOCAL COCKPIT CERTIFICATE", views: [
-            createRow(label: "Cockpit Seat:", value: seatLabel),
-            createRow(label: "Anonymous Node ID:", value: JourneyStyle.stack([nodeIdLabel, copyButton], vertical: false, spacing: 8)),
-            createRow(label: "Architecture:", value: archLabel),
-            createRow(label: "Data sent:", value: privacyBadge)
-        ])
-
-        // Card 2: Connection details
-        let edgeCard = createCard(title: "CONNECTION DETAILS", views: [
-            createRow(label: "Service location:", value: coloLabel),
-            createRow(label: "Roundtrip time:", value: latencyLabel),
-            createRow(label: "Connection:", value: transportLabel),
-            createRow(label: "Data retention:", value: ttlLabel)
-        ])
-
-        // Card 3: Service-reported information
-        let swarmCard = createCard(title: "SERVICE-REPORTED INFORMATION", views: [
-            createRow(label: "Active connections:", value: activeNodesLabel),
-            createRow(label: "Installations:", value: totalInstallsLabel),
-            createRow(label: "Coverage:", value: geoLabel)
-        ])
-
-        // Actions Bar
-        let actionsRow = JourneyStyle.stack([
-            privacyCheckbox,
+            nodeIdLabel,
+            copyButton,
             NSView(),
+            statsSummaryLabel,
+            statusPill
+        ], vertical: false, spacing: 8)
+        topBar.alignment = .centerY
+
+        radarCanvas.setContentHuggingPriority(.init(1), for: .vertical)
+        radarCanvas.setContentCompressionResistancePriority(.init(1), for: .vertical)
+        radarCanvas.onStatsChanged = { [weak self] stats in
+            guard let self else { return }
+            self.deployInterceptorBtn.isEnabled = !stats.gameOver && stats.energy >= 25
+            self.deployTurretBtn.isEnabled = !stats.gameOver && stats.energy >= 40
+            self.deployHeavyBtn.isEnabled = !stats.gameOver && stats.energy >= 50
+            self.overdriveBtn.isEnabled = !stats.gameOver && stats.energy >= 60
+            self.orbitalStrikeBtn.isEnabled = !stats.gameOver && stats.energy >= 75
+            self.statsSummaryLabel.stringValue = stats.gameOver
+                ? "HQ BREACHED · FINAL SCORE \(stats.score)"
+                : "WAVE \(stats.wave) · SCORE \(stats.score) · ⚡ \(stats.energy) · HULL \(stats.hull)%"
+            self.statsSummaryLabel.textColor = stats.gameOver ? .systemRed : (stats.overdriveActive ? .systemGreen : .systemTeal)
+        }
+
+        let rtsDock = JourneyStyle.stack([
+            deployInterceptorBtn,
+            deployTurretBtn,
+            deployHeavyBtn,
+            overdriveBtn,
+            orbitalStrikeBtn,
+            resetMissionBtn,
+            NSView(),
+            privacyCheckbox,
             pingSpinner,
             pingButton,
             webButton
-        ], vertical: false, spacing: 10)
-        actionsRow.alignment = .centerY
+        ], vertical: false, spacing: 6)
+        rtsDock.alignment = .centerY
 
         let mainStack = JourneyStyle.stack([
-            header,
-            JourneyStyle.rule(),
-            nodeCard,
-            edgeCard,
-            swarmCard,
-            JourneyStyle.rule(),
-            actionsRow
-        ], spacing: 14)
-
-        mainStack.edgeInsets = NSEdgeInsets(top: 20, left: 24, bottom: 20, right: 24)
+            topBar,
+            radarCanvas,
+            rtsDock
+        ], spacing: 10)
+        mainStack.edgeInsets = NSEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)
         root.addSubview(mainStack)
         JourneyStyle.pin(mainStack, to: root)
         for view in mainStack.arrangedSubviews {
-            view.widthAnchor.constraint(equalTo: mainStack.widthAnchor, constant: -48).isActive = true
+            view.widthAnchor.constraint(equalTo: mainStack.widthAnchor, constant: -32).isActive = true
         }
-    }
-
-    private func createCard(title: String, views: [NSView]) -> NSView {
-        let box = NSBox()
-        box.boxType = .custom
-        box.cornerRadius = 10
-        box.fillColor = NSColor.windowBackgroundColor.withAlphaComponent(0.4)
-        box.borderColor = NSColor.separatorColor.withAlphaComponent(0.6)
-        box.borderWidth = 1.0
-
-        let header = JourneyStyle.label(title, size: 10, weight: .bold, secondary: true)
-        var cardViews: [NSView] = [header]
-        cardViews.append(contentsOf: views)
-
-        let stack = JourneyStyle.stack(cardViews, spacing: 6)
-        stack.edgeInsets = NSEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)
-        box.addSubview(stack)
-        JourneyStyle.pin(stack, to: box)
-        for view in stack.arrangedSubviews {
-            view.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -32).isActive = true
-        }
-        return box
-    }
-
-    private func createRow(label: String, value: NSView) -> NSView {
-        let labelView = JourneyStyle.label(label, size: 12, secondary: true)
-        labelView.widthAnchor.constraint(equalToConstant: 140).isActive = true
-        let row = JourneyStyle.stack([labelView, value], vertical: false, spacing: 8)
-        return row
     }
 
     private func setupListeners() {
@@ -200,47 +158,22 @@ final class SwarmRadarWindow: NSWindowController, NSWindowDelegate {
     }
 
     private func updateUI(with state: SwarmRadarState) {
+        nodeIdLabel.stringValue = state.displayNodeId
         if state.isHeartbeatDisabled {
-            statusPill.stringValue = "⚪ APP HEARTBEAT OFF (SHARING DISABLED)"
+            statusPill.stringValue = "⚪ LOCAL SIM"
             statusPill.textColor = .secondaryLabelColor
-            coloLabel.stringValue = "Not connected"
-            latencyLabel.stringValue = "N/A"
-            latencyLabel.textColor = .secondaryLabelColor
             privacyCheckbox.state = .off
         } else {
-            let onlineStatus = state.isOnline
-                ? (state.activeNodes.map { "🟢 \($0) NODES ONLINE" } ?? "🟢 CONNECTED")
-                : "🟡 CONNECTING…"
-            statusPill.stringValue = "\(onlineStatus) • \(state.colo) EDGE (\(state.latencyMs)ms)"
+            statusPill.stringValue = state.isOnline ? "🟢 UPLINK (\(state.latencyMs)ms)" : "🟡 SYNCING…"
             statusPill.textColor = state.isOnline ? .systemGreen : .systemYellow
-
-            coloLabel.stringValue = "\(state.colo) (\(state.region))"
-
-            if state.latencyMs > 0 {
-                latencyLabel.stringValue = "\(state.latencyMs) ms"
-                switch state.latencyTier {
-                case .optimal: latencyLabel.textColor = .systemGreen
-                case .good: latencyLabel.textColor = .systemYellow
-                case .high: latencyLabel.textColor = .systemOrange
-                case .unknown: latencyLabel.textColor = .labelColor
-                }
-            } else {
-                latencyLabel.stringValue = "Measuring…"
-                latencyLabel.textColor = .secondaryLabelColor
-            }
             privacyCheckbox.state = .on
         }
-
-        seatLabel.stringValue = state.seatNumber
-        nodeIdLabel.stringValue = state.displayNodeId
-        activeNodesLabel.stringValue = state.isHeartbeatDisabled ? "Unavailable while sharing is off" : (state.activeNodes.map { "\(NumberFormatter.localizedString(from: NSNumber(value: $0), number: .decimal)) Online" } ?? "Not reported")
-        totalInstallsLabel.stringValue = state.isHeartbeatDisabled ? "Unavailable while sharing is off" : (state.totalInstalls.map { "\(NumberFormatter.localizedString(from: NSNumber(value: $0), number: .decimal)) reported" } ?? "Not reported")
-
-        #if arch(arm64)
-        archLabel.stringValue = "Apple Silicon (arm64)"
-        #else
-        archLabel.stringValue = "Intel (x86_64)"
-        #endif
+        radarCanvas.update(
+            isLive: !state.isHeartbeatDisabled && state.isOnline,
+            activeUnits: state.activeNodes,
+            sector: state.isHeartbeatDisabled ? "SECTOR-07 // LOCAL COMMAND" : state.region,
+            callsign: state.displayNodeId
+        )
     }
 
     @objc private func copyNodeId() {
@@ -248,8 +181,8 @@ final class SwarmRadarWindow: NSWindowController, NSWindowDelegate {
         pasteboard.clearContents()
         pasteboard.setString(SwarmRadarManager.shared.currentState.displayNodeId, forType: .string)
         copyButton.title = "Copied!"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { [weak self] in
-            self?.copyButton.title = "Copy ID"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            self?.copyButton.title = "Copy"
         }
     }
 
@@ -257,7 +190,6 @@ final class SwarmRadarWindow: NSWindowController, NSWindowDelegate {
         pingSpinner.isHidden = false
         pingSpinner.startAnimation(nil)
         pingButton.isEnabled = false
-
         SwarmRadarManager.shared.ping(action: "Edge Latency Ping", source: "radar_inspector") { [weak self] _ in
             self?.pingSpinner.stopAnimation(nil)
             self?.pingSpinner.isHidden = true
@@ -271,12 +203,19 @@ final class SwarmRadarWindow: NSWindowController, NSWindowDelegate {
         }
     }
 
+    @objc private func deployInterceptorAction() { _ = radarCanvas.deployInterceptor() }
+    @objc private func deployTurretAction() { _ = radarCanvas.deployTurret() }
+    @objc private func deployHeavyAction() { _ = radarCanvas.deployHeavyMech() }
+    @objc private func overdriveAction() { _ = radarCanvas.triggerOverdrive() }
+    @objc private func orbitalStrikeAction() { _ = radarCanvas.triggerOrbitalStrike() }
+    @objc private func resetMissionAction() { radarCanvas.resetMission() }
+
     @objc private func togglePrivacy() {
-        let isOptedOut = privacyCheckbox.state == .off
-        SwarmRadarManager.shared.setHeartbeatDisabled(isOptedOut)
+        SwarmRadarManager.shared.setHeartbeatDisabled(privacyCheckbox.state == .off)
     }
 
     func dispose() {
+        radarCanvas.dispose()
         NotificationCenter.default.removeObserver(self)
     }
 

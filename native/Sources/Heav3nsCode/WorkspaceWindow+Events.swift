@@ -579,7 +579,7 @@ extension WorkspaceWindow {
                 let childTitle = parsed?.displayTitle ?? (activity["message"] as? String ?? "Activity")
                 next.append(TranscriptRow(id: aid, title: "\(workerTag)\(childTitle) · \(phase)\(elapsed)\(captionSuffix)", text: expandedText, activity: true, evidence: expandedActions.contains(aid) ? rowEvidence : nil, runID: id, activityID: rawID.isEmpty ? nil : rawID, actionTitle: expandedActions.contains(aid) ? "Open in Walkthrough" : nil))
             }
-            for parsed in parsedActivities where parsed.scope != "turn" && parsed.preview?.kind == "diff" {
+            for parsed in parsedActivities where parsed.preview?.kind == "diff" && (parsed.scope != "turn" || runIsLive) {
                 if let diffText = parsed.preview?.text, !diffText.isEmpty {
                     let summary = CodeOutline.diffSummary(diffText)
                     let file = parsed.files.first ?? summary.files.first
@@ -587,7 +587,8 @@ extension WorkspaceWindow {
                     let removed = parsed.linesRemoved ?? summary.removed
                     let stats = "(+\(added) / -\(removed))"
                     let fileLabel = file ?? "Workspace edit"
-                    let diffTitle = "Diff · \(fileLabel) · \(stats)"
+                    let isDraftStream = parsed.scope == "turn"
+                    let diffTitle = isDraftStream ? "Streaming Diff · \(fileLabel) · \(stats)" : "Diff · \(fileLabel) · \(stats)"
                     next.append(TranscriptRow(
                         id: "\(id)-diff-\(parsed.id)",
                         title: diffTitle,
@@ -596,10 +597,11 @@ extension WorkspaceWindow {
                         evidence: parsed.files.count > 1 ? parsed.files.joined(separator: " · ") : nil,
                         runID: id,
                         activityID: parsed.id,
-                        actionTitle: "Open in Walkthrough",
+                        actionTitle: isDraftStream ? nil : "Open in Walkthrough",
                         diffText: diffText,
                         diffFile: file,
-                        diffStats: stats
+                        diffStats: stats,
+                        diffLive: runIsLive
                     ))
                 }
             }

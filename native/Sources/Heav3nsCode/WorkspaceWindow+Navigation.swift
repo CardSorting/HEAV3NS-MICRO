@@ -306,6 +306,45 @@ extension WorkspaceWindow {
         loadDirectory(parent.isEmpty ? "." : parent)
     }
 
+    func configureSourceControlCallbacks() {
+        navigation.onInitGit = { [weak self] in self?.runGitAction("git.init", params: [:], successNotice: "Initialized Git repository.") }
+        navigation.onOpenSourceControl = { [weak self] in self?.showSourceControl() }
+    }
+
+    @objc func showSourceControl() {
+        guard client.isReady else { showNotice("Connect to LUMI to open Source Control."); return }
+        if let existing = sourceControlWindow {
+            existing.present()
+            return
+        }
+        let win = SourceControlWindow(folder: folder) { [weak self] method, params, completion in
+            guard let self else { return }
+            self.client.request(method, params: params, completion: completion)
+        }
+        win.onClose = { [weak self] in self?.sourceControlWindow = nil }
+        sourceControlWindow = win
+        win.present()
+    }
+
+    func runGitAction(_ method: String, params: [String: Any], successNotice: String? = nil, onSuccess: (() -> Void)? = nil) {
+        guard client.isReady else { return }
+        client.request(method, params: params) { [weak self] result in
+            guard let self, !self.closing else { return }
+            switch result {
+            case .success(let data):
+                if data["ok"] as? Bool == false {
+                    self.showNotice(data["error"] as? String ?? "Git operation failed.")
+                    return
+                }
+                if let successNotice { self.showNotice(successNotice) }
+                onSuccess?()
+                self.loadChanges()
+            case .failure(let error):
+                self.showNotice(error.localizedDescription)
+            }
+        }
+    }
+
     func loadChanges() {
         navigationGeneration += 1; let generation = navigationGeneration; navigation.loading("Reading Git changes…")
         nextNavigationPage = nil; previousNavigationPage = nil; navigationData = []
@@ -314,14 +353,38 @@ extension WorkspaceWindow {
             guard let self, let source, self.client === source, !self.closing, self.navigationGeneration == generation, self.navigation.destination == .changes else { return }
             switch result {
             case .success(let data):
-                self.navigationData = (data["entries"] as? [[String: Any]] ?? []).map { entry in
-                    let status = entry["untracked"] as? Bool == true ? "Untracked" : entry["staged"] as? Bool == true ? (entry["unstaged"] as? Bool == true ? "Staged + working tree" : "Staged") : "Working tree"
-                    return SidebarEntry(id: entry["path"] as? String ?? "", title: entry["name"] as? String ?? "File", detail: "\(entry["status"] as? String ?? "") · \(status)", symbol: "doc.text", value: entry)
+                let rawEntries = data["entries"] as? [[String: Any]] ?? []
+                var grouped = [SidebarEntry]()
+                let stagedEntries = rawEntries.filter { $0["staged"] as? Bool == true }
+                let unstagedEntries = rawEntries.filter { $0["unstaged"] as? Bool == true || $0["untracked"] as? Bool == true || $0["staged"] as? Bool != true }
+                if !stagedEntries.isEmpty {
+                    grouped.append(SidebarEntry(id: "__section_staged", title: "Staged Changes", detail: "", symbol: "checkmark.circle", value: ["isSectionHeader": true, "sectionCount": stagedEntries.count]))
+                    for entry in stagedEntries {
+                        var v = entry; v["section"] = "staged"
+                        let st = entry["status"] as? String ?? "modified"
+                        v["statusBadge"] = st == "added" ? "A" : st == "deleted" ? "D" : st == "renamed" ? "R" : "M"
+                        grouped.append(SidebarEntry(id: entry["path"] as? String ?? "", title: entry["name"] as? String ?? "File", detail: entry["path"] as? String ?? "", symbol: "doc.text", value: v))
+                    }
                 }
-                if let branch = data["branch"] as? String { self.window?.subtitle = "\(branch) · \(self.folder.path)" }
+                if !unstagedEntries.isEmpty {
+                    grouped.append(SidebarEntry(id: "__section_changes", title: "Changes", detail: "", symbol: "pencil", value: ["isSectionHeader": true, "sectionCount": unstagedEntries.count]))
+                    for entry in unstagedEntries {
+                        var v = entry; v["section"] = "changes"
+                        let st = entry["status"] as? String ?? "modified"
+                        v["statusBadge"] = entry["untracked"] as? Bool == true ? "U" : st == "deleted" ? "D" : st == "added" ? "A" : "M"
+                        grouped.append(SidebarEntry(id: entry["path"] as? String ?? "", title: entry["name"] as? String ?? "File", detail: entry["path"] as? String ?? "", symbol: "doc.text", value: v))
+                    }
+                }
+                self.navigationData = grouped
+                let isGitRepo = data["isGitRepo"] as? Bool ?? true
+                let branch = data["branch"] as? String ?? "unversioned"
+                self.navigation.setSourceControlState(isGitRepo: isGitRepo, branch: branch, hasChanges: !rawEntries.isEmpty)
+                self.window?.subtitle = "\(branch) · \(self.folder.path)"
                 self.nextNavigationPage = nil; self.previousNavigationPage = nil; self.renderNavigation()
                 if data["limited"] as? Bool == true { self.showNotice("Showing the first 500 changed paths. Use Git in an external terminal to inspect the complete list.") }
-            case .failure(let error): self.navigation.show([], location: "Changes", message: "Changes require a Git workspace. \(error.localizedDescription)")
+            case .failure(let error):
+                self.navigation.setSourceControlState(isGitRepo: false, branch: "unversioned", hasChanges: false)
+                self.navigation.show([], location: "Source Control", message: "Changes require a Git workspace. \(error.localizedDescription)")
             }
         }
     }
@@ -411,6 +474,7 @@ extension WorkspaceWindow {
         addMenuItem(menu, title: "Chats (⇧⌘C)", symbol: "bubble.left.and.bubble.right") { [weak self] in self?.showChats() }
         addMenuItem(menu, title: "Files (⌘1)", symbol: "folder") { [weak self] in self?.showFiles() }
         addMenuItem(menu, title: "Changes / Diffs (⌘2)", symbol: "arrow.triangle.branch") { [weak self] in self?.showChanges() }
+        addMenuItem(menu, title: "Open Source Control Window… (⇧⌘G)", symbol: "arrow.triangle.pull", enabled: client.isReady) { [weak self] in self?.showSourceControl() }
         addMenuItem(menu, title: "Recorded Runs (⌘3)", symbol: "clock") { [weak self] in self?.showSessions() }
         menu.addItem(.separator())
         addMenuItem(menu, title: "Walkthrough (⌘6)", symbol: "list.bullet.rectangle") { [weak self] in self?.showWalkthrough() }
@@ -485,6 +549,30 @@ extension WorkspaceWindow {
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             }
         case .changes:
+            let isStaged = entry.value["staged"] as? Bool == true
+            let isUnstaged = entry.value["unstaged"] as? Bool == true
+            let isUntracked = entry.value["untracked"] as? Bool == true
+            if isUnstaged || isUntracked {
+                addMenuItem(menu, title: "Stage File", symbol: "plus.circle") { [weak self] in self?.runGitAction("git.stage", params: ["path": entry.id]) }
+            }
+            if isStaged {
+                addMenuItem(menu, title: "Unstage File", symbol: "minus.circle") { [weak self] in self?.runGitAction("git.unstage", params: ["path": entry.id]) }
+            }
+            if isUnstaged && !isUntracked {
+                addMenuItem(menu, title: "Discard Working Tree Changes", symbol: "arrow.uturn.backward.circle") { [weak self] in
+                    guard let self, let window = self.window else { return }
+                    let alert = NSAlert()
+                    alert.messageText = "Discard changes to \(entry.title)?"
+                    alert.informativeText = "This will revert unstaged edits to \(entry.id) back to HEAD."
+                    alert.addButton(withTitle: "Cancel")
+                    alert.addButton(withTitle: "Discard").hasDestructiveAction = true
+                    alert.beginSheetModal(for: window) { response in
+                        guard response == .alertSecondButtonReturn else { return }
+                        self.runGitAction("git.discard", params: ["path": entry.id], successNotice: "Discarded changes to \(entry.title).")
+                    }
+                }
+            }
+            menu.addItem(.separator())
             addMenuItem(menu, title: "View Working Tree Diff", symbol: "arrow.left.arrow.right.square") { [weak self] in self?.inspect(.diff(entry.id, staged: false)) }
             addMenuItem(menu, title: "View Staged Diff", symbol: "tray.and.arrow.down") { [weak self] in self?.inspect(.diff(entry.id, staged: true)) }
             addMenuItem(menu, title: "Open File", symbol: "doc.text") { [weak self] in self?.readFile(entry.id) }

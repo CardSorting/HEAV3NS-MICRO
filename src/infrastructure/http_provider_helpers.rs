@@ -233,6 +233,36 @@ pub(crate) fn emit_stream_progress(
     });
 }
 
+pub(crate) fn emit_stream_diff_progress(
+    on_progress: Option<&ProgressCallback>,
+    file_path: Option<String>,
+    diff_text: String,
+    sequence: u64,
+) {
+    let Some(cb) = on_progress else { return };
+    let label = file_path.clone().unwrap_or_else(|| "Workspace edit".to_string());
+    cb(EngineProgressEvent {
+        activity_id: "llm-stream-diff".to_string(),
+        phase: EngineProgressPhase::Responding,
+        status: EngineProgressStatus::InProgress,
+        message: format!("Streaming diff · {label}"),
+        detail: Some(format!("Live edit in progress for {label}")),
+        timestamp: now_ms(),
+        elapsed_ms: None,
+        sequence,
+        metadata: Some(EngineProgressMetadata {
+            source: Some("provider".to_string()),
+            scope: Some("turn".to_string()),
+            attempt: None,
+            item_type: Some("tool".to_string()),
+            files: file_path.map(|p| vec![p]),
+            preview_kind: Some("diff".to_string()),
+            preview_text: Some(diff_text),
+            ..Default::default()
+        }),
+    });
+}
+
 pub(crate) fn format_stream_bytes(bytes: usize) -> String {
     if bytes < 1024 {
         format!("{bytes} B")
@@ -290,6 +320,10 @@ pub(crate) async fn stream_incremental_sse_response(
                     detail,
                     seq,
                 );
+                if let Some((file_path, diff_text)) = agg.stream_diff_preview() {
+                    seq = seq.saturating_add(1);
+                    emit_stream_diff_progress(on_progress, file_path, diff_text, seq);
+                }
                 last_emit = Some(Instant::now());
             }
         }

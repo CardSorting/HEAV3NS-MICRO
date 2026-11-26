@@ -83,7 +83,7 @@ final class TranscriptMessageTests: XCTestCase {
         var opened = 0
         let cell = TranscriptMessageCell(row, expanded: true, toggle: {}, openCheckpoint: {}, openAction: { opened += 1 })
         for width: CGFloat in [270, 360, 680] {
-            let geometry = TranscriptMessageLayout(row, availableWidth: width)
+            let geometry = TranscriptMessageLayout(row, availableWidth: width, expanded: true)
             cell.frame = NSRect(x: 0, y: 0, width: width, height: geometry.height)
             cell.layoutSubtreeIfNeeded()
             XCTAssertTrue(cell.contentFits, "\(cell.layoutIssue ?? [:])")
@@ -119,7 +119,7 @@ final class TranscriptMessageTests: XCTestCase {
         var openedDiff = 0
         let cell = TranscriptMessageCell(row, expanded: true, toggle: {}, openCheckpoint: {}, openAction: {}, openDiff: { openedDiff += 1 })
         for width: CGFloat in [270, 360, 680] {
-            let geometry = TranscriptMessageLayout(row, availableWidth: width)
+            let geometry = TranscriptMessageLayout(row, availableWidth: width, expanded: true)
             cell.frame = NSRect(x: 0, y: 0, width: width, height: geometry.height)
             cell.layoutSubtreeIfNeeded()
             XCTAssertTrue(cell.contentFits, "\(cell.layoutIssue ?? [:])")
@@ -195,10 +195,111 @@ final class TranscriptMessageTests: XCTestCase {
         )
         let cell = TranscriptMessageCell(row, expanded: false, toggle: {}, openCheckpoint: {})
         for width: CGFloat in [270, 360, 680] {
-            let geometry = TranscriptMessageLayout(row, availableWidth: width)
+            let geometry = TranscriptMessageLayout(row, availableWidth: width, expanded: true)
             cell.frame = NSRect(x: 0, y: 0, width: width, height: geometry.height)
             cell.layoutSubtreeIfNeeded()
             XCTAssertTrue(cell.contentFits, "Streaming reply escaped at width \(width): \(cell.layoutIssue ?? [:])")
         }
+    }
+
+    func testComposerCompressesToSlimHeightAfterClearingDraft() {
+        _ = NSApplication.shared
+        let composer = ComposerView(frame: NSRect(x: 0, y: 0, width: 520, height: 120))
+        var invalidations = 0
+        composer.onTextGeometryInvalidated = { invalidations += 1 }
+        composer.string = "Line 1\nLine 2\nLine 3\nLine 4"
+        XCTAssertEqual(invalidations, 1)
+        composer.string = ""
+        XCTAssertEqual(invalidations, 2)
+        composer.dispose()
+        XCTAssertNil(composer.onTextGeometryInvalidated)
+    }
+
+    func testCompressedDiffHighlightsOnlyChangesAndExpandsToFullLengthOnClick() throws {
+        _ = NSApplication.shared
+        var lines = [
+            "diff --git a/src/app.swift b/src/app.swift",
+            "--- a/src/app.swift",
+            "+++ b/src/app.swift",
+            "@@ -1,20 +1,20 @@ struct App {"
+        ]
+        for i in 1...12 { lines.append(" let unchanged\(i) = \(i)") }
+        for i in 1...12 { lines.append("-\(i)_old()") ; lines.append("+\(i)_new()") }
+        let fullDiff = lines.joined(separator: "\n")
+
+        let compressed = CodeOutline.compressedDiffPreview(fullDiff, maxChangedLines: 8)
+        XCTAssertEqual(compressed.totalChangedLines, 24)
+        XCTAssertEqual(compressed.omittedLines, 16)
+        XCTAssertFalse(compressed.preview.contains("unchanged1"))
+        XCTAssertFalse(compressed.preview.contains("diff --git"))
+        XCTAssertTrue(compressed.preview.contains("-1_old()"))
+        XCTAssertTrue(compressed.preview.contains("+1_new()"))
+
+        let row = TranscriptRow(id: "r1-diff-1", title: "Diff · src/app.swift · (+12 / -12)", text: "", activity: true, diffText: fullDiff, diffFile: "src/app.swift", diffStats: "(+12 / -12)")
+        let collapsedLayout = TranscriptMessageLayout(row, availableWidth: 520, expanded: false)
+        let expandedLayout = TranscriptMessageLayout(row, availableWidth: 520, expanded: true)
+        XCTAssertGreaterThan(expandedLayout.height, collapsedLayout.height)
+
+        var toggled = 0
+        let cell = TranscriptMessageCell(row, expanded: false, toggle: { toggled += 1 }, openCheckpoint: {})
+        cell.frame = NSRect(x: 0, y: 0, width: 520, height: collapsedLayout.height)
+        cell.layoutSubtreeIfNeeded()
+        XCTAssertTrue(cell.contentFits)
+        let buttons = cell.subviews.flatMap(\.subviews).compactMap { $0 as? NSButton }
+        let expandBtn = try XCTUnwrap(buttons.first { $0.title == "Expand Full Diff" })
+        expandBtn.performClick(nil)
+        XCTAssertEqual(toggled, 1)
+
+        let liveRow = TranscriptRow(id: "r2-diff-live", title: "Streaming Diff · src/app.swift · (+2 / -1)", text: "", activity: true, diffText: "-old()\n+new1()\n+new2()", diffFile: "src/app.swift", diffStats: "(+2 / -1)", diffLive: true)
+        let liveLayout = TranscriptMessageLayout(liveRow, availableWidth: 480, expanded: false)
+        let liveCell = TranscriptMessageCell(liveRow, expanded: false, toggle: {}, openCheckpoint: {})
+        liveCell.frame = NSRect(x: 0, y: 0, width: 480, height: liveLayout.height)
+        liveCell.layoutSubtreeIfNeeded()
+        XCTAssertTrue(liveCell.contentFits)
+        liveCell.dispose()
+
+        let activeAttr = CodeOutline.streamingDiffAttributed("-oldVal\n+newVal", hasMore: true, fontSize: 11)
+        XCTAssertTrue(activeAttr.string.hasSuffix("▌"))
+        let caretColor = activeAttr.attribute(.foregroundColor, at: activeAttr.length - 1, effectiveRange: nil) as? NSColor
+        XCTAssertEqual(caretColor, NSColor.systemTeal)
+
+        let settledAttr = CodeOutline.streamingDiffAttributed("-oldVal\n+newVal", hasMore: false, fontSize: 11)
+        XCTAssertFalse(settledAttr.string.hasSuffix("▌"))
+    }
+
+    func testSourceControlWindowSplitViewFillsWindowHeightWithoutEmptyBottomGap() throws {
+        _ = NSApplication.shared
+        let sc = SourceControlWindow(folder: FileManager.default.temporaryDirectory) { _, _, completion in
+            completion(.success(["entries": [], "isGitRepo": true, "branch": "main", "hasRemote": false, "ahead": 0, "behind": 0]))
+        }
+        defer { sc.close() }
+        let contentView = try XCTUnwrap(sc.window?.contentView)
+        contentView.layoutSubtreeIfNeeded()
+        let split = try XCTUnwrap(contentView.subviews.first { $0 is NSSplitView })
+        XCTAssertGreaterThan(split.frame.height, 540, "Split view must fill the window height instead of leaving empty space at the bottom")
+    }
+
+    func testSourceControlRemoteBarTouchlessGitHubStates() throws {
+        _ = NSApplication.shared
+        let status = GitHubRemoteStatus.parse([
+            "ghInstalled": true,
+            "ghAuthenticated": true,
+            "ghUser": "CardSorting",
+            "hasRemote": false,
+            "webUrl": "",
+            "remoteName": "",
+            "repos": [
+                ["nameWithOwner": "CardSorting/dragon", "url": "https://github.com/CardSorting/dragon", "isPrivate": true]
+            ]
+        ])
+        XCTAssertTrue(status.ghAuthenticated)
+        XCTAssertEqual(status.ghUser, "CardSorting")
+        XCTAssertEqual(status.repos.count, 1)
+        XCTAssertEqual(status.repos[0].nameWithOwner, "CardSorting/dragon")
+
+        let bar = SourceControlRemoteBar(frame: NSRect(x: 0, y: 0, width: 700, height: 38))
+        bar.update(status: status)
+        bar.layoutSubtreeIfNeeded()
+        bar.dispose()
     }
 }

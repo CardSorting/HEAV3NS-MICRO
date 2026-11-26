@@ -183,26 +183,23 @@ final class SwarmRadarManager {
             guard let self else { return }
             let latency = max(1, Int((CFAbsoluteTimeGetCurrent() - startTime) * 1000))
 
-            var newColo = "Not reported"
-            var newRegion = "Not reported"
             var activeCount: Int?
             var totalCount: Int?
-
             var isSuccess = false
             let httpStatus = (response as? HTTPURLResponse)?.statusCode
             if let data, error == nil, let httpStatus, (200..<300).contains(httpStatus),
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 isSuccess = json["success"] as? Bool ?? false
-                if let c = json["colo"] as? String, !c.isEmpty { newColo = c }
-                if let r = json["region"] as? String, !r.isEmpty { newRegion = r }
                 if let a = json["activeNodes"] as? Int, a >= 0 { activeCount = a }
                 if let t = json["totalInstalls"] as? Int, t >= 0 { totalCount = t }
             }
+            let newColo = isSuccess ? "ORBITAL-RELAY" : "STANDBY"
+            let newRegion = isSuccess ? "SECTOR-07 // TACTICAL GRID" : "LOCAL HANGAR"
 
-            let seat = totalCount.map { "Cockpit #\(NumberFormatter.localizedString(from: NSNumber(value: $0), number: .decimal))" } ?? "Not reported"
+            let seat = totalCount.map { "Unit #\(NumberFormatter.localizedString(from: NSNumber(value: $0), number: .decimal))" } ?? "Standby"
             let message = isSuccess
-                ? "Synchronized with \(newColo) Edge (\(latency)ms)"
-                : "Edge sync paused (\(error?.localizedDescription ?? "Offline"))"
+                ? "Tactical uplink locked (\(latency)ms)"
+                : "Uplink standby (\(error?.localizedDescription ?? "Offline"))"
 
             let updatedState = self.syncQueue.sync {
                 self._state = SwarmRadarState(

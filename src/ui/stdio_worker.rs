@@ -323,7 +323,13 @@ pub async fn run_stdio_worker(engine: Arc<AgentEngine>, project_runner: Arc<dyn 
                 );
             }
             "workspace.branch" | "files.list" | "files.search" | "files.read"
-            | "files.readBinary" | "changes.list" | "changes.read" => {
+            | "files.readBinary" | "changes.list" | "changes.read"
+            | "git.init" | "git.stage" | "git.unstage" | "git.commit" | "git.discard"
+            | "git.generateCommitMessage" | "git.push" | "git.pull"
+            | "git.fetch" | "git.sync" | "git.log" | "git.show"
+            | "git.branchList" | "git.checkout" | "git.stash" | "git.stashPop"
+            | "git.addRemote" | "git.connectRepo" | "git.publishGitHub"
+            | "git.githubStatus" | "git.githubSignIn" => {
                 let resp = handle_files_rpc(method, &params, &engine);
                 emit_jsonl_line(
                     &stdout_lock,
