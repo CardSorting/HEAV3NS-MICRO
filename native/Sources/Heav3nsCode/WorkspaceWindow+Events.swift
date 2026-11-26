@@ -55,6 +55,14 @@ extension WorkspaceWindow {
                         }
                     }
                 }
+                if self.client.capabilities.contains("agent-profiles-v1") {
+                    source.request("profile.get", params: [:]) { [weak self, weak source] result in
+                        guard let self, self.client === source, !self.closing else { return }
+                        if case .success(let data) = result, let pid = data["id"] as? String, !pid.isEmpty {
+                            self.activeProfileID = pid
+                        }
+                    }
+                }
                 self.probe?.connected(self)
             } else if value != "Connecting to LUMI…" {
                 self.walkthrough.projectTasksUnavailable("Connect to LUMI to view project tasks.")
@@ -594,6 +602,16 @@ extension WorkspaceWindow {
                         diffStats: stats
                     ))
                 }
+            }
+            if runIsLive, run["response"] == nil,
+               let liveStream = parsedActivities.filter({ $0.scope == "turn" && !$0.detail.isEmpty && $0.detail != "Model stream opened" }).max(by: { $0.sequence < $1.sequence }) {
+                next.append(TranscriptRow(
+                    id: "\(id)-streaming-reply",
+                    title: "LUMI · Streaming…",
+                    text: liveStream.detail,
+                    activity: false,
+                    evidence: liveStream.displayTitle
+                ))
             }
             if let response = run["response"] as? String {
                 let route = run["modelSelection"] as? [String: Any]

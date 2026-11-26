@@ -71,6 +71,33 @@ impl IncrementalSseAggregator {
         }
     }
 
+    pub(crate) fn stream_snapshot(&self) -> (Option<String>, Option<String>, usize) {
+        let text_preview = if !self.text_acc.trim().is_empty() {
+            Some(
+                crate::plumbing::text_tokens::safe_utf8_prefix(self.text_acc.trim(), 2400)
+                    .to_string(),
+            )
+        } else if !self.thought_fallback.trim().is_empty() {
+            Some(
+                crate::plumbing::text_tokens::safe_utf8_prefix(
+                    self.thought_fallback.trim(),
+                    1200,
+                )
+                .to_string(),
+            )
+        } else {
+            None
+        };
+        let (tool_name, tool_bytes) = self
+            .tool_map
+            .values()
+            .last()
+            .filter(|slot| !slot.1.trim().is_empty())
+            .map(|slot| (Some(slot.1.clone()), slot.2.len()))
+            .unwrap_or((None, 0));
+        (text_preview, tool_name, tool_bytes)
+    }
+
     pub(crate) fn push_bytes(&mut self, bytes: &[u8]) -> Result<(), ProviderError> {
         self.total_bytes = self.total_bytes.saturating_add(bytes.len());
         if self.total_bytes > self.max_total_bytes {

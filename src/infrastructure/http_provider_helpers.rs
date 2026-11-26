@@ -204,8 +204,14 @@ pub(crate) fn emit_stream_progress(
     sequence: u64,
 ) {
     let Some(cb) = on_progress else { return };
+    let activity_id = match phase {
+        EngineProgressPhase::Thinking => "llm-stream-thinking",
+        EngineProgressPhase::Connecting => "llm-stream-connecting",
+        _ => "llm-stream-responding",
+    };
+    let preview_text = detail.clone();
     cb(EngineProgressEvent {
-        activity_id: format!("llm-stream-{sequence}"),
+        activity_id: activity_id.to_string(),
         phase,
         status: EngineProgressStatus::InProgress,
         message,
@@ -220,6 +226,8 @@ pub(crate) fn emit_stream_progress(
             item_type: Some("llm".to_string()),
             completed_steps: None,
             total_steps: None,
+            preview_kind: preview_text.as_ref().map(|_| "message".to_string()),
+            preview_text,
             ..Default::default()
         }),
     });
@@ -260,13 +268,26 @@ pub(crate) async fn stream_incremental_sse_response(
         bytes_received = bytes_received.saturating_add(chunk.len());
         agg.push_bytes(&chunk)?;
         if let Some(prev) = last_emit {
-            if prev.elapsed() >= Duration::from_millis(500) {
+            let (text_preview, tool_name, tool_bytes) = agg.stream_snapshot();
+            let first_content = seq == 1 && (text_preview.is_some() || tool_name.is_some());
+            if first_content || prev.elapsed() >= Duration::from_millis(120) {
                 seq = seq.saturating_add(1);
+                let (msg, detail) = if let Some(ref tname) = tool_name {
+                    (
+                        format!("Drafting {tname} ({})…", format_stream_bytes(tool_bytes)),
+                        text_preview.or_else(|| Some(format!("Streaming arguments for {tname}…"))),
+                    )
+                } else {
+                    (
+                        format!("Receiving model response ({})…", format_stream_bytes(bytes_received)),
+                        text_preview,
+                    )
+                };
                 emit_stream_progress(
                     on_progress,
                     EngineProgressPhase::Responding,
-                    format!("Receiving model response ({})…", format_stream_bytes(bytes_received)),
-                    None,
+                    msg,
+                    detail,
                     seq,
                 );
                 last_emit = Some(Instant::now());

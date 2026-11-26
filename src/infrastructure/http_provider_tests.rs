@@ -113,6 +113,50 @@ mod tests {
         assert_eq!(format_stream_bytes(512), "512 B");
     }
 
+    #[test]
+    fn test_emit_stream_progress_uses_stable_activity_id_and_message_preview() {
+        use std::sync::{Arc, Mutex};
+        let events: Arc<Mutex<Vec<EngineProgressEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&events);
+        let cb: ProgressCallback = Arc::new(move |ev| {
+            captured.lock().unwrap().push(ev);
+        });
+        emit_stream_progress(
+            Some(&cb),
+            EngineProgressPhase::Responding,
+            "Streaming response (128 B)…".to_string(),
+            Some("Hello streaming world".to_string()),
+            4,
+        );
+        let recorded = events.lock().unwrap();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].activity_id, "llm-stream-responding");
+        let meta = recorded[0].metadata.as_ref().expect("metadata present");
+        assert_eq!(meta.preview_kind.as_deref(), Some("message"));
+        assert_eq!(meta.preview_text.as_deref(), Some("Hello streaming world"));
+        assert_eq!(recorded[0].detail.as_deref(), Some("Hello streaming world"));
+    }
+
+    #[test]
+    fn test_incremental_sse_aggregator_stream_snapshot_tracks_text_and_tool_drafts() {
+        use crate::infrastructure::http_provider_helpers::extract_openai_usage;
+        use crate::infrastructure::sse_and_response_parsers::IncrementalSseAggregator;
+        let mut agg = IncrementalSseAggregator::new("openai", extract_openai_usage, 1024 * 1024);
+        let chunk1 = b"data: {\"choices\":[{\"delta\":{\"content\":\"Hello \"}}]}\n\n";
+        agg.push_bytes(chunk1).unwrap();
+        let (text1, tool1, bytes1) = agg.stream_snapshot();
+        assert_eq!(text1.as_deref(), Some("Hello"));
+        assert_eq!(tool1, None);
+        assert_eq!(bytes1, 0);
+
+        let chunk2 = b"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"src/lib.rs\\\"}\"}}]}}]}\n\n";
+        agg.push_bytes(chunk2).unwrap();
+        let (text2, tool2, bytes2) = agg.stream_snapshot();
+        assert_eq!(text2.as_deref(), Some("Hello"));
+        assert_eq!(tool2.as_deref(), Some("read_file"));
+        assert!(bytes2 > 0);
+    }
+
     #[tokio::test]
     async fn test_complete_with_progress_honors_cancellation_and_timeout() {
         let provider = HttpProvider::new("openai", "http://127.0.0.1:9/v1", Some("sk-test".to_string()), 5_000);

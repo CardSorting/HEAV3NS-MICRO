@@ -183,4 +183,22 @@ final class TranscriptMessageTests: XCTestCase {
         XCTAssertEqual(act.linesRemoved, 2)
         XCTAssertEqual(act.previewTitle, "Live diff (+3 / -2)")
     }
+
+    func testLiveStreamingReplyRowFitsAcrossWidths() {
+        _ = NSApplication.shared
+        let row = TranscriptRow(
+            id: "r1-streaming-reply",
+            title: "LUMI · Streaming…",
+            text: "Inspecting the streaming pipeline and drafting the response incrementally.",
+            activity: false,
+            evidence: "Streaming response (1 KB)…"
+        )
+        let cell = TranscriptMessageCell(row, expanded: false, toggle: {}, openCheckpoint: {})
+        for width: CGFloat in [270, 360, 680] {
+            let geometry = TranscriptMessageLayout(row, availableWidth: width)
+            cell.frame = NSRect(x: 0, y: 0, width: width, height: geometry.height)
+            cell.layoutSubtreeIfNeeded()
+            XCTAssertTrue(cell.contentFits, "Streaming reply escaped at width \(width): \(cell.layoutIssue ?? [:])")
+        }
+    }
 }
