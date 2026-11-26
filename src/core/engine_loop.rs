@@ -664,99 +664,12 @@ impl AgentEngine {
                 }
             }
 
-            let batch_records: Vec<&ToolExecutionRecord> = all_tool_results
-                .iter()
-                .rev()
-                .take(resp.tool_calls.len())
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev()
-                .collect();
-
-            let mut batch_files: Vec<String> = Vec::new();
-            let mut batch_diffs: Vec<String> = Vec::new();
-            let mut batch_added: usize = 0;
-            let mut batch_removed: usize = 0;
-            let mut batch_diff_truncated = false;
-            for r in &batch_records {
-                if let Some(rel) = r.output.get("relativePath").and_then(Value::as_str) {
-                    if !rel.is_empty() && !batch_files.iter().any(|f| f == rel) {
-                        batch_files.push(rel.to_string());
-                    }
-                }
-                if let Some(diff_s) = r.output.get("diff").and_then(Value::as_str) {
-                    if !diff_s.trim().is_empty() {
-                        batch_diffs.push(diff_s.to_string());
-                    }
-                }
-                if let Some(a) = r.output.get("linesAdded").and_then(Value::as_u64) {
-                    batch_added = batch_added.saturating_add(a as usize);
-                }
-                if let Some(rem) = r.output.get("linesRemoved").and_then(Value::as_u64) {
-                    batch_removed = batch_removed.saturating_add(rem as usize);
-                }
-                if r.output.get("diffTruncated").and_then(Value::as_bool) == Some(true) {
-                    batch_diff_truncated = true;
-                }
-            }
-
-            let combined_diff = if batch_diffs.is_empty() {
-                None
-            } else {
-                let joined = batch_diffs.join("\n");
-                if joined.len() > 3_500 {
-                    batch_diff_truncated = true;
-                    Some(format!(
-                        "{}\n...[diff truncated]",
-                        crate::plumbing::text_tokens::safe_utf8_prefix(&joined, 3_500)
-                    ))
-                } else {
-                    Some(joined)
-                }
-            };
-
-            let completed_desc: Vec<String> = batch_records
-                .iter()
-                .map(|r| {
-                    if let (Some(rel), Some(a), Some(rem)) = (
-                        r.output.get("relativePath").and_then(Value::as_str),
-                        r.output.get("linesAdded").and_then(Value::as_u64),
-                        r.output.get("linesRemoved").and_then(Value::as_u64),
-                    ) {
-                        format!("{} {} (+{}/-{}, {}ms)", r.name, rel, a, rem, r.duration_ms)
-                    } else {
-                        format!(
-                            "{} ({}, {}ms)",
-                            r.name,
-                            if r.success { "ok" } else { "err" },
-                            r.duration_ms
-                        )
-                    }
-                })
-                .collect();
-
-            self.emit_progress_internal(
+            self.emit_tool_batch_completed_progress(
                 &input.on_progress,
                 &batch_id,
-                EngineProgressPhase::Tool,
-                EngineProgressStatus::Completed,
-                completed_desc.join("; "),
-                combined_diff.clone(),
+                &all_tool_results,
+                resp.tool_calls.len(),
                 started_ms,
-                Some(EngineProgressMetadata {
-                    source: Some("scheduler".to_string()),
-                    scope: Some("step".to_string()),
-                    attempt: Some(1),
-                    item_type: Some("tool".to_string()),
-                    completed_steps: Some(resp.tool_calls.len()),
-                    total_steps: Some(resp.tool_calls.len()),
-                    files: if batch_files.is_empty() { None } else { Some(batch_files) },
-                    preview_kind: combined_diff.as_ref().map(|_| "diff".to_string()),
-                    preview_text: combined_diff,
-                    preview_limited: if batch_diff_truncated { Some(true) } else { None },
-                    lines_added: if batch_added > 0 || batch_removed > 0 { Some(batch_added) } else { None },
-                    lines_removed: if batch_added > 0 || batch_removed > 0 { Some(batch_removed) } else { None },
-                }),
             );
         }
 

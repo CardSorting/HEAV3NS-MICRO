@@ -25,6 +25,7 @@ final class NavigationSidebar: NSView, NSTableViewDataSource, NSTableViewDelegat
     var onPrevious: (() -> Void)?
     var onRefresh: (() -> Void)?
     var onItemMenu: ((SidebarEntry, NSView) -> Void)?
+    var buildItemMenu: ((SidebarEntry) -> NSMenu?)?
     var onWorkspaceMenu: ((NSView) -> Void)?
     private(set) var destination = WorkspaceDestination.files
     private(set) var entries = [SidebarEntry]()
@@ -75,6 +76,10 @@ final class NavigationSidebar: NSView, NSTableViewDataSource, NSTableViewDelegat
             self.activateSelected()
         }
         items.onParent = { [weak self] in guard let self, self.destination == .files, self.back.isEnabled else { return }; self.onBack?() }
+        items.contextMenuForRow = { [weak self] row in
+            guard let self, self.entries.indices.contains(row) else { return nil }
+            return self.buildItemMenu?(self.entries[row])
+        }
         destinationScroll.documentView = destinations; destinationScroll.drawsBackground = false
         destinationScroll.heightAnchor.constraint(equalToConstant: 94).isActive = true
         root.addArrangedSubview(destinationScroll)
@@ -196,7 +201,8 @@ final class NavigationSidebar: NSView, NSTableViewDataSource, NSTableViewDelegat
     func dispose() {
         filterWork?.cancel()
         onDestination = nil; onOpen = nil; onFilter = nil; onBack = nil
-        onNext = nil; onPrevious = nil; onRefresh = nil; onItemMenu = nil; onWorkspaceMenu = nil
+        onNext = nil; onPrevious = nil; onRefresh = nil; onItemMenu = nil; buildItemMenu = nil; onWorkspaceMenu = nil
+        items.contextMenuForRow = nil
     }
     deinit { filterWork?.cancel() }
 }

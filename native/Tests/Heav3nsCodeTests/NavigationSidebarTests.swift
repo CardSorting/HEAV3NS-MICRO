@@ -94,5 +94,13 @@ final class NavigationSidebarTests: XCTestCase {
         let convRowBtn = try XCTUnwrap(convButtons.first { $0.accessibilityLabel() == "Options for Main Session" })
         convRowBtn.performClick(nil)
         XCTAssertEqual(convItemIds, ["c1"])
+
+        // Verify right-click contextMenuForRow parity on both sidebars
+        nav.buildItemMenu = { entry in NSMenu(title: entry.title) }
+        conv.buildItemMenu = { summary in NSMenu(title: summary.title) }
+        let navMenu = (table as? KeyboardListView)?.contextMenuForRow?(0)
+        XCTAssertEqual(navMenu?.title, "main.rs")
+        let convMenu = (convTable as? KeyboardListView)?.contextMenuForRow?(0)
+        XCTAssertEqual(convMenu?.title, "Main Session")
     }
 }

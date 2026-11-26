@@ -387,6 +387,7 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         conversations.onMore = { [weak self] in self?.loadConversations(next: true) }
         conversations.onRecent = { [weak self] in self?.loadConversations() }
         conversations.onItemMenu = { [weak self] item, anchor in self?.presentConversationMenu(item, from: anchor) }
+        conversations.buildItemMenu = { [weak self] item in self?.buildConversationMenu(item) }
         conversations.onWorkspaceMenu = { [weak self] anchor in self?.presentSidebarWorkspaceMenu(from: anchor) }
         navigation.onDestination = { [weak self] destination in self?.navigate(destination) }
         navigation.onOpen = { [weak self] entry in self?.openEntry(entry) }
@@ -395,6 +396,7 @@ final class WorkspaceWindow: NSWindowController, NSWindowDelegate, NSTableViewDa
         navigation.onPrevious = { [weak self] in self?.previousNavigationPage?() }
         navigation.onRefresh = { [weak self] in self?.refreshNavigation() }
         navigation.onItemMenu = { [weak self] entry, anchor in self?.presentNavigationEntryMenu(entry, from: anchor) }
+        navigation.buildItemMenu = { [weak self] entry in self?.buildNavigationEntryMenu(entry) }
         navigation.onWorkspaceMenu = { [weak self] anchor in self?.presentSidebarWorkspaceMenu(from: anchor) }
         navigation.onFilter = { [weak self] query in
             guard let self else { return }; self.navigationQuery = query

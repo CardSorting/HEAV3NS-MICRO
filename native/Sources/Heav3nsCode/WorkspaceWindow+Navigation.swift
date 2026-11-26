@@ -376,9 +376,18 @@ extension WorkspaceWindow {
     func readDiff(_ path: String) { inspect(.diff(path, staged: diffScope.selectedSegment == 1)) }
 
     private final class SidebarMenuActionTarget: NSObject {
-        let block: () -> Void
+        private var block: (() -> Void)?
         init(_ block: @escaping () -> Void) { self.block = block }
-        @objc func invoke() { block() }
+        @objc func invoke() { block?() }
+        func dispose() { block = nil }
+    }
+
+    private func safeWorkspaceURL(for relativePath: String) -> URL? {
+        guard WalkthroughActivity.safeRelativePath(relativePath) else { return nil }
+        let rootPath = folder.standardizedFileURL.path
+        let candidate = folder.appendingPathComponent(relativePath).standardizedFileURL
+        guard candidate.path.hasPrefix(rootPath + "/") else { return nil }
+        return candidate
     }
 
     private func addMenuItem(_ menu: NSMenu, title: String, symbol: String? = nil, enabled: Bool = true, action: @escaping () -> Void) {
@@ -397,12 +406,12 @@ extension WorkspaceWindow {
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.height + 2), in: anchor)
     }
 
-    func presentSidebarWorkspaceMenu(from anchor: NSView) {
+    func buildSidebarWorkspaceMenu() -> NSMenu {
         let menu = NSMenu(title: "Workspace Options")
-        addMenuItem(menu, title: "Chats", symbol: "bubble.left.and.bubble.right") { [weak self] in self?.showChats() }
-        addMenuItem(menu, title: "Files", symbol: "folder") { [weak self] in self?.showFiles() }
-        addMenuItem(menu, title: "Changes (Diffs)", symbol: "arrow.triangle.branch") { [weak self] in self?.showChanges() }
-        addMenuItem(menu, title: "Recorded Runs", symbol: "clock") { [weak self] in self?.showSessions() }
+        addMenuItem(menu, title: "Chats (⇧⌘C)", symbol: "bubble.left.and.bubble.right") { [weak self] in self?.showChats() }
+        addMenuItem(menu, title: "Files (⌘1)", symbol: "folder") { [weak self] in self?.showFiles() }
+        addMenuItem(menu, title: "Changes / Diffs (⌘2)", symbol: "arrow.triangle.branch") { [weak self] in self?.showChanges() }
+        addMenuItem(menu, title: "Recorded Runs (⌘3)", symbol: "clock") { [weak self] in self?.showSessions() }
         menu.addItem(.separator())
         addMenuItem(menu, title: "Walkthrough (⌘6)", symbol: "list.bullet.rectangle") { [weak self] in self?.showWalkthrough() }
         addMenuItem(menu, title: "Up Next Queue (⌘4)", symbol: "tray.full") { [weak self] in self?.showQueue() }
@@ -411,6 +420,9 @@ extension WorkspaceWindow {
             addMenuItem(menu, title: "Conversation Context", symbol: "doc.text.magnifyingglass", enabled: canShowContext) { [weak self] in self?.inspect(.context(conv)) }
             addMenuItem(menu, title: "Saved State", symbol: "internaldrive", enabled: canShowSavedState) { [weak self] in self?.inspect(.savedState(conv)) }
         }
+        addMenuItem(menu, title: "Conversation Memory…", symbol: "brain", enabled: client.isReady) { [weak self] in self?.showMemory() }
+        addMenuItem(menu, title: "Command Recovery…", symbol: "terminal", enabled: client.isReady) { [weak self] in self?.showCommandRecovery() }
+        addMenuItem(menu, title: "Agent Swarm Settings…", symbol: "person.3", enabled: client.isReady) { [weak self] in self?.showAgentSwarmSettings() }
         addMenuItem(menu, title: "Turn Receipts & Cost Ledger", symbol: "receipt", enabled: client.isReady) { [weak self] in self?.showTurnReceipts() }
         addMenuItem(menu, title: "Outbound Request Preview (⇧⌘I)", symbol: "network", enabled: client.isReady) { [weak self] in self?.showRequestPreview() }
         addMenuItem(menu, title: "Sovereign Swarm Radar… (⌥⌘R)", symbol: "dot.radiowaves.left.and.right") { SwarmRadarWindow.shared.present() }
@@ -423,13 +435,20 @@ extension WorkspaceWindow {
         addMenuItem(menu, title: "Undo Last Turn (⌥⌘Z)", symbol: "arrow.uturn.backward", enabled: client.isReady && !hasWork) { [weak self] in self?.undoLastTurn() }
         addMenuItem(menu, title: "Refresh Current View", symbol: "arrow.clockwise") { [weak self] in self?.refreshNavigation() }
         menu.addItem(.separator())
+        addMenuItem(menu, title: "Open Workspace… (⌘O)", symbol: "folder.badge.plus") { NSApp.sendAction(#selector(ApplicationDelegate.openFolder), to: NSApp.delegate, from: nil) }
+        addMenuItem(menu, title: "New Project… (⇧⌘N)", symbol: "plus.square.on.square") { NSApp.sendAction(#selector(ApplicationDelegate.createProject), to: NSApp.delegate, from: nil) }
         addMenuItem(menu, title: "Project Library… (⌘0)", symbol: "books.vertical") { [weak self] in self?.onProjects?() }
         addMenuItem(menu, title: "Account…", symbol: "person.crop.circle") { [weak self] in self?.onAccount?() }
+        addMenuItem(menu, title: "Maximize / Restore Context", symbol: "arrow.up.left.and.arrow.down.right") { [weak self] in self?.toggleMaximizeContext() }
         addMenuItem(menu, title: "Hide Sidebar (⌘B)", symbol: "sidebar.left") { [weak self] in self?.toggleNavigation() }
-        popUpSidebarMenu(menu, from: anchor)
+        return menu
     }
 
-    func presentNavigationEntryMenu(_ entry: SidebarEntry, from anchor: NSView) {
+    func presentSidebarWorkspaceMenu(from anchor: NSView) {
+        popUpSidebarMenu(buildSidebarWorkspaceMenu(), from: anchor)
+    }
+
+    func buildNavigationEntryMenu(_ entry: SidebarEntry) -> NSMenu {
         let menu = NSMenu(title: entry.title)
         switch navigation.destination {
         case .files:
@@ -447,9 +466,9 @@ extension WorkspaceWindow {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(entry.id, forType: .string)
             }
-            addMenuItem(menu, title: "Reveal in Finder", symbol: "finder") { [weak self] in
-                guard let self else { return }
-                NSWorkspace.shared.activateFileViewerSelecting([self.folder.appendingPathComponent(entry.id)])
+            addMenuItem(menu, title: "Reveal in Finder", symbol: "finder", enabled: safeWorkspaceURL(for: entry.id) != nil) { [weak self] in
+                guard let url = self?.safeWorkspaceURL(for: entry.id) else { return }
+                NSWorkspace.shared.activateFileViewerSelecting([url])
             }
         case .changes:
             addMenuItem(menu, title: "View Working Tree Diff", symbol: "arrow.left.arrow.right.square") { [weak self] in self?.inspect(.diff(entry.id, staged: false)) }
@@ -461,9 +480,9 @@ extension WorkspaceWindow {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(entry.id, forType: .string)
             }
-            addMenuItem(menu, title: "Reveal in Finder", symbol: "finder") { [weak self] in
-                guard let self else { return }
-                NSWorkspace.shared.activateFileViewerSelecting([self.folder.appendingPathComponent(entry.id)])
+            addMenuItem(menu, title: "Reveal in Finder", symbol: "finder", enabled: safeWorkspaceURL(for: entry.id) != nil) { [weak self] in
+                guard let url = self?.safeWorkspaceURL(for: entry.id) else { return }
+                NSWorkspace.shared.activateFileViewerSelecting([url])
             }
         case .sessions:
             addMenuItem(menu, title: "Inspect Run Details", symbol: "doc.text.magnifyingglass") { [weak self] in self?.inspect(.run(entry.id)) }
@@ -477,10 +496,14 @@ extension WorkspaceWindow {
                 NSPasteboard.general.setString(entry.id, forType: .string)
             }
         }
-        popUpSidebarMenu(menu, from: anchor)
+        return menu
     }
 
-    func presentConversationMenu(_ item: ConversationSummary, from anchor: NSView) {
+    func presentNavigationEntryMenu(_ entry: SidebarEntry, from anchor: NSView) {
+        popUpSidebarMenu(buildNavigationEntryMenu(entry), from: anchor)
+    }
+
+    func buildConversationMenu(_ item: ConversationSummary) -> NSMenu {
         let menu = NSMenu(title: item.title)
         addMenuItem(menu, title: "Open Conversation", symbol: "bubble.left", enabled: client.isReady && !hasWork) { [weak self] in self?.selectConversation(item.id) }
         addMenuItem(menu, title: "Copy Conversation ID", symbol: "doc.on.doc") {
@@ -491,7 +514,11 @@ extension WorkspaceWindow {
             menu.addItem(.separator())
             addMenuItem(menu, title: "Delete Conversation…", symbol: "trash", enabled: client.isReady && !hasWork) { [weak self] in self?.confirmDeleteConversation(item.id) }
         }
-        popUpSidebarMenu(menu, from: anchor)
+        return menu
+    }
+
+    func presentConversationMenu(_ item: ConversationSummary, from anchor: NSView) {
+        popUpSidebarMenu(buildConversationMenu(item), from: anchor)
     }
 }
 

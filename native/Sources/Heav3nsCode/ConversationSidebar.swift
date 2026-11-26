@@ -18,8 +18,9 @@ final class ConversationSidebar: NSVisualEffectView, NSTableViewDataSource, NSTa
     var onMore: (() -> Void)?
     var onRecent: (() -> Void)?
     var onItemMenu: ((ConversationSummary, NSView) -> Void)?
+    var buildItemMenu: ((ConversationSummary) -> NSMenu?)?
     var onWorkspaceMenu: ((NSView) -> Void)?
-    private let table = NSTableView()
+    private let table = KeyboardListView()
     private let search = NSSearchField()
     private let message = JourneyStyle.label("Connecting to LUMI…", size: 11, secondary: true)
     private let title = JourneyStyle.label("Workspace", size: 14, weight: .semibold)
@@ -52,6 +53,10 @@ final class ConversationSidebar: NSVisualEffectView, NSTableViewDataSource, NSTa
         table.style = .sourceList; table.backgroundColor = .clear; table.rowHeight = 54
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         table.setAccessibilityLabel("Conversations")
+        table.contextMenuForRow = { [weak self] row in
+            guard let self, self.table.isEnabled, self.visible.indices.contains(row) else { return nil }
+            return self.buildItemMenu?(self.visible[row])
+        }
         let scroll = NSScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
         scroll.setContentHuggingPriority(.init(1), for: .vertical)
         let projects = JourneyButton("Project Library…", symbol: "folder") { [weak self] in self?.onProjects?() }
@@ -145,7 +150,8 @@ final class ConversationSidebar: NSVisualEffectView, NSTableViewDataSource, NSTa
     func dispose() {
         onSelect = nil; onDelete = nil; onNew = nil; onMore = nil
         onRecent = nil; onProjects = nil; onAccount = nil
-        onItemMenu = nil; onWorkspaceMenu = nil
+        onItemMenu = nil; buildItemMenu = nil; onWorkspaceMenu = nil
+        table.contextMenuForRow = nil
         deleteButtons.removeAll()
     }
 }
