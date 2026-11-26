@@ -1,6 +1,6 @@
 [package]
 name = "heav3ns-micro"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 description = "Hyper-efficient, zero-bloat micro agent runtime distilled from LUMI/HEAV3NS"
 license = "Apache-2.0"

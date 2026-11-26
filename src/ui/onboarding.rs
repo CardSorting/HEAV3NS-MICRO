@@ -82,7 +82,7 @@ pub fn print_welcome_banner(cwd: &Path, provider: &str, model: &str, has_key: bo
     println!(
         "{}  {}  {}",
         cyan("║"),
-        bold("HEAV3NS-MICRO v0.1.0 — Sovereign Agentic Coding Runtime"),
+        bold(concat!("HEAV3NS-MICRO v", env!("CARGO_PKG_VERSION"), " — Sovereign Agentic Coding Runtime")),
         cyan("║")
     );
     println!(

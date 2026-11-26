@@ -443,7 +443,7 @@ pub fn parse_args_from(args: Vec<String>) -> CliOptions {
 
 pub fn print_help() {
     println!(
-        "HEAV3NS-MICRO v0.1.0 — Sovereign Agentic Coding Runtime
+        "HEAV3NS-MICRO v1.0.0 — Sovereign Agentic Coding Runtime
 Distilled from LUMI-NEW (zero bloat, 16-MiB Arena slab, self-healing tool parser, 29 native tools)
 
 USAGE:

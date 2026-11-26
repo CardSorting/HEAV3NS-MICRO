@@ -99,7 +99,7 @@ impl ModelPricingRegistry {
         let resp = client
             .get(&url)
             .header("Accept", "application/json")
-            .header("User-Agent", "heav3ns-micro/0.1.0")
+            .header("User-Agent", concat!("heav3ns-micro/", env!("CARGO_PKG_VERSION")))
             .send()
             .await
             .map_err(|e| format!("Failed fetching model catalog from {url}: {e}"))?;
