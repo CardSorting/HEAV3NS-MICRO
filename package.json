@@ -7,6 +7,8 @@
     "bench": "node bin/bench-suite.mjs",
     "docs:check": "node bin/docs-check.mjs",
     "joy-check": "node /Users/bozoegg/Desktop/HEAV3NS-JOY/bin/joy-check.mjs . --theme strict",
+    "release:app": "node bin/release-app.mjs",
+    "release:dmg": "node bin/release-app.mjs --dmg --zip",
     "test": "cargo test",
     "verify": "npm run docs:check && npm run joy-check && cargo test"
   },

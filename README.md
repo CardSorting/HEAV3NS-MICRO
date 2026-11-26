@@ -1,5 +1,5 @@
 <!-- [LAYER: UI] -->
-# HEAV3NS-MICRO (`v0.1.0`) — The Sovereign Intelligence Runtime
+# HEAV3NS-MICRO (`v1.0.0`) — The Sovereign Intelligence Runtime
 
 <p align="center">
   <img src="https://img.shields.io/badge/Rust_Tests-129_Passed-2ea44f?style=for-the-badge" alt="Rust Tests: 129 Passed" />
@@ -54,6 +54,20 @@
   <a href="#hardening--reliability-guarantees-waves-425">5 Security Rings</a> ·
   <a href="#quick-start--verification">Quick Start</a>
 </p>
+
+---
+
+## Install in 10 Seconds
+
+| Channel | Command / Artifact | Best For |
+|---|---|---|
+| **macOS Desktop App (DMG / ZIP)** | `npm run release:dmg` → [`dist/releases/`](bin/release-app.mjs) | Native AppKit IDE (`HEAV3NS-CODE.app` + Sparkle auto-updates) |
+| **One-Line CLI Installer** | `curl -fsSL https://raw.githubusercontent.com/CardSorting/HEAV3NS-MICRO/main/bin/install.sh \| sh` | Zero-config CLI (`--app` also installs `HEAV3NS-CODE.app`) |
+| **Homebrew (CLI & Cask)** | `brew install --cask` [`packaging/homebrew/heav3ns-code.rb`](packaging/homebrew/heav3ns-code.rb) | Managed macOS upgrades & uninstalls |
+| **Cargo (From Source)** | `cargo install --path .` | Rust developers & Linux workstations |
+
+> [!TIP]
+> **Try in 5 seconds with zero API keys:** run `heav3ns-micro demo` (or `heav3ns-micro init` for the 65-provider setup wizard).
 
 ---
 
