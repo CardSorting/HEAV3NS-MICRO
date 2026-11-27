@@ -1,5 +1,6 @@
 // [LAYER: PLUMBING]
 import AppKit
+#if !MAC_APP_STORE
 import Sparkle
 
 @MainActor
@@ -64,3 +65,15 @@ final class NativeUpdater: NSObject, SPUUpdaterDelegate, NSMenuItemValidation {
     }
     func dispose() { gate.dispose() }
 }
+#else
+@MainActor
+final class NativeUpdater: NSObject {
+    init(readiness: @escaping UpdateRestartGate.Readiness, waiting: @escaping () -> Void) {
+        super.init()
+    }
+
+    func addMenuItems(to menu: NSMenu) {}
+    func start() {}
+    func dispose() {}
+}
+#endif

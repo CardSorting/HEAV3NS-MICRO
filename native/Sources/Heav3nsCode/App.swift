@@ -1,6 +1,8 @@
 // [LAYER: UI]
 import AppKit
+#if !MAC_APP_STORE
 import Sparkle
+#endif
 
 @MainActor
 final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
